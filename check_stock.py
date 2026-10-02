@@ -92,6 +92,10 @@ def send(embeds):
 
 
 def main():
+    if os.environ.get("GITHUB_ACTIONS") and not WEBHOOK:
+        # Don't record changes nobody was told about
+        print("DISCORD_WEBHOOK_URL secret isn't set yet; skipping this check.", file=sys.stderr)
+        return 1
     try:
         current = {str(p["id"]): summarise(p) for p in fetch_products()}
     except Exception as exc:  # leave state untouched so nothing is missed next run
