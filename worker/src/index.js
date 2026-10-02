@@ -22,8 +22,35 @@ const LABELS = {
   option: ["➕ New option available", 0x38bdf8],
 };
 
+// /instock filters: friendly name -> the shop's collections. Anything that
+// isn't one of these is treated as words to search product names for.
+const FILTERS = [
+  { name: "🎥 Mr Tofu Live Stream", value: "live", handles: ["mr-tofu-live-stream"], aliases: ["live", "stream", "livestream", "live stream", "tofu", "breaks", "break"] },
+  { name: "Pokémon (all)", value: "pokemon", handles: ["pokemon-tcg", "pokemon-tcg-japanese", "pokemon-tcg-single-cards"], aliases: ["pokemon", "pkmn", "poke", "pokemon tcg"] },
+  { name: "Pokémon Japanese", value: "pokemon japanese", handles: ["pokemon-tcg-japanese"], aliases: ["pokemon japanese", "japanese", "jp", "pokemon jp"] },
+  { name: "One Piece", value: "one piece", handles: ["one-piece-tcg", "one-piece-tcg-single-cards"], aliases: ["one piece", "onepiece", "op", "one piece tcg"] },
+  { name: "Magic: The Gathering", value: "magic", handles: ["magic-the-gathering"], aliases: ["magic", "mtg", "magic the gathering"] },
+  { name: "Final Fantasy", value: "final fantasy", handles: ["final-fantasy-tcg", "final-fantasy-singles"], aliases: ["final fantasy", "ff", "fftcg"] },
+  { name: "Riftbound (League of Legends)", value: "riftbound", handles: ["riftbound-league-of-legends-tcg"], aliases: ["riftbound", "lol", "league", "league of legends"] },
+  { name: "Dragon Ball Super", value: "dragon ball", handles: ["dragon-ball-super-fusion-world"], aliases: ["dragon ball", "dragonball", "dbs", "fusion world"] },
+  { name: "Gundam", value: "gundam", handles: ["gundam-card-game"], aliases: ["gundam"] },
+  { name: "Weiss Schwarz", value: "weiss schwarz", handles: ["weiss-schwarz"], aliases: ["weiss schwarz", "weiss", "ws"] },
+  { name: "Accessories", value: "accessories", handles: ["accessories"], aliases: ["accessories", "sleeves", "toploaders", "binders"] },
+  { name: "Store events & tournaments", value: "events", handles: ["store-events-tournaments"], aliases: ["events", "event", "tournaments", "tournament", "prerelease", "pre-release"] },
+];
+
+// Lowercase and strip accents so "pokemon" matches "Pokémon"
+const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+function resolveFilter(text) {
+  const t = norm(text).replace(/\s+/g, " ");
+  if (!t) return null;
+  const f = FILTERS.find((x) => norm(x.value) === t || x.aliases.some((a) => norm(a) === t));
+  return f ? { label: f.name, handles: f.handles } : { label: `“${text.trim()}”`, words: t.split(" ") };
+}
+
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 1;
+const COMMANDS_VERSION = 2;
 const COMMANDS = [
   {
     name: "password",
@@ -31,7 +58,17 @@ const COMMANDS = [
     options: [{ type: 3, name: "password", description: "The shop password", required: true }],
   },
   { name: "scan", description: "Check Mr Tofu's shop right now" },
-  { name: "instock", description: "List what's buyable in Mr Tofu's shop right now" },
+  {
+    name: "instock",
+    description: "List what's buyable in Mr Tofu's shop right now",
+    options: [{
+      type: 3,
+      name: "filter",
+      description: "e.g. live, pokemon, one piece, magic, or any words like delta reign",
+      required: false,
+      autocomplete: true,
+    }],
+  },
   { name: "status", description: "What the stock watcher can see right now" },
 ];
 
@@ -279,6 +316,22 @@ async function fetchProducts(cookie, opts = {}) {
   return Object.assign(all, { viaPassword, hash, pageCount: page, etag: tag.etag });
 }
 
+// Products in one or more of the shop's collections (deduplicated). Missing
+// collections (renamed/removed) are skipped rather than failing the command.
+async function fetchCollections(handles, cookie) {
+  const seen = new Map();
+  for (const h of handles) {
+    const headers = { "User-Agent": BROWSER_UA, Accept: "application/json" };
+    if (cookie) headers.Cookie = cookie;
+    const res = await fetch(`${SHOP}/collections/${h}/products.json?limit=250&_=${Date.now()}`, { headers, cf: { cacheTtl: 0 } });
+    if (res.status === 401) throw Object.assign(new Error("Shop is password-locked"), { locked: true });
+    if (res.status === 404) continue;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    for (const p of (await res.json()).products || []) seen.set(p.id, p);
+  }
+  return [...seen.values()];
+}
+
 // Submit the storefront password form like a browser would; returns the
 // session cookie if it lets us see the products, otherwise null.
 async function loginWithPassword(password) {
@@ -340,6 +393,18 @@ async function handleInteraction(request, env, ctx) {
   if (!i) return new Response("bad signature", { status: 401 });
   if (i.type === 1) return reply({ type: 1 }); // Discord's endpoint check
 
+  if (i.type === 4) {
+    // Autocomplete for /instock filter: suggest collections matching what's typed,
+    // plus whatever was typed as a free-text search
+    const typed = ((i.data.options || []).find((o) => o.focused) || {}).value || "";
+    const t = norm(typed);
+    const choices = FILTERS
+      .filter((f) => !t || norm(f.name).includes(t) || f.aliases.some((a) => norm(a).startsWith(t)))
+      .map((f) => ({ name: f.name, value: f.value }));
+    if (t && !choices.some((c) => norm(c.value) === t)) choices.push({ name: `Search names for “${typed.trim()}”`.slice(0, 100), value: typed.trim().slice(0, 100) });
+    return reply({ type: 8, data: { choices: choices.slice(0, 25) } });
+  }
+
   const user = (i.member && i.member.user) || i.user || {};
   const owner = (env.DISCORD_OWNER_ID || "").trim();
   if (!owner || user.id !== owner) {
@@ -388,17 +453,22 @@ async function handleInteraction(request, env, ctx) {
       followUp(async () => {
         // The saved login works whether or not the shop is locked, so use it when we have it
         const cookie = await env.STATE.get("cookie");
+        const filter = resolveFilter(((i.data.options || []).find((o) => o.name === "filter") || {}).value);
         let products;
         try {
-          products = await fetchProducts(cookie || null);
+          products = filter && filter.handles
+            ? await fetchCollections(filter.handles, cookie || null)
+            : await fetchProducts(cookie || null);
         } catch (err) {
           if (!(err && err.locked)) return { content: `Couldn't check the shop: ${err}` };
           return { content: cookie
             ? "🔑 The saved shop password no longer works. Send the new one with /password."
             : "🔒 The shop is password-locked. Use /password if you know it." };
         }
-        const items = products.map(summarise).filter((it) => it.available);
-        if (!items.length) return { content: "Nothing is buyable right now." };
+        let items = products.map(summarise).filter((it) => it.available);
+        if (filter && filter.words) items = items.filter((it) => filter.words.every((w) => norm(it.title).includes(w)));
+        const scope = filter ? ` · ${filter.label}` : "";
+        if (!items.length) return { content: `Nothing is buyable right now${filter ? ` for ${filter.label}` : ""}.` };
         const lines = [];
         for (const it of items) {
           const vid = Object.entries(it.variants).find(([, v]) => v.available)[0];
@@ -410,7 +480,7 @@ async function handleInteraction(request, env, ctx) {
         }
         return {
           embeds: [{
-            title: `🛒 In stock now (${items.length})`,
+            title: `🛒 In stock now${scope} (${items.length})`,
             description: lines.join("\n\n"),
             color: 0x22c55e,
             footer: { text: lines.length < items.length ? `Showing ${lines.length} of ${items.length}` : "Mr Tofu Stock Watch" },
