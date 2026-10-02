@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import time
-import urllib.error
+import subprocess
 import urllib.request
 
 SHOP = "https://mrtofu.store"
@@ -27,21 +27,26 @@ class ShopBusy(Exception):
 
 
 def get_json(url, attempts=4):
-    # Shopify rate-limits shared cloud IPs (like GitHub's), so back off and retry
+    # Fetch with curl: the shop answers 429 to Python's own HTTP client from
+    # cloud servers but serves curl normally. Still back off if it gets busy.
     for attempt in range(attempts):
-        req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as exc:
-            if exc.code not in (429, 430, 503) or attempt == attempts - 1:
-                if exc.code in (429, 430, 503):
-                    raise ShopBusy(f"HTTP {exc.code}") from exc
-                raise
-            wait = exc.headers.get("Retry-After")
-            wait = float(wait) if wait and wait.replace(".", "", 1).isdigit() else 15 * 2 ** attempt
-            print(f"Shop said {exc.code}; waiting {wait:.0f}s before retrying", file=sys.stderr)
-            time.sleep(min(wait, 60))
+        res = subprocess.run(
+            ["curl", "-sS", "-L", "--max-time", "30", "-A", BROWSER_UA,
+             "-H", "Accept: application/json", "-w", "\n%{http_code}", url],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"curl failed: {res.stderr.strip()}")
+        body, _, code = res.stdout.rpartition("\n")
+        if code == "200":
+            return json.loads(body)
+        if code not in ("429", "430", "503"):
+            raise RuntimeError(f"HTTP {code}")
+        if attempt == attempts - 1:
+            raise ShopBusy(f"HTTP {code}")
+        wait = 15 * 2 ** attempt
+        print(f"Shop said {code}; waiting {wait}s before retrying", file=sys.stderr)
+        time.sleep(wait)
 
 
 def fetch_products():
