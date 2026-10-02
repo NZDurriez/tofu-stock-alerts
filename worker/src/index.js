@@ -223,7 +223,7 @@ async function registerCommands(env) {
   if (meta.commandsVersion === COMMANDS_VERSION) return;
   const res = await fetch(`${DISCORD_API}/applications/${env.DISCORD_APP_ID}/commands`, {
     method: "PUT",
-    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN.trim()}`, "Content-Type": "application/json" },
     body: JSON.stringify(COMMANDS),
   });
   if (res.ok) {
