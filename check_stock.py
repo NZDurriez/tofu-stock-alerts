@@ -19,12 +19,14 @@ import time
 import urllib.request
 
 SHOP = "https://mrtofu.store"
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+STATE_FILE = os.environ.get("STATE_FILE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 PING = os.environ.get("DISCORD_PING", "").strip()  # e.g. <@123456789012345678>
 KEYWORDS = [k.strip().lower() for k in os.environ.get("WATCH_KEYWORDS", "").split(",") if k.strip()]
 WATCH_MINUTES = float(os.environ.get("WATCH_MINUTES") or 0)
-WATCH_INTERVAL = max(30.0, float(os.environ.get("WATCH_INTERVAL") or 60))
+WATCH_INTERVAL = max(15.0, float(os.environ.get("WATCH_INTERVAL") or 60))
+FOREVER = WATCH_MINUTES < 0  # always-on server mode
+OUTAGE_WARN_AFTER = 15 * 60  # seconds without a good check before warning in Discord
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/130 Safari/537.36")
 
@@ -178,6 +180,21 @@ def send(embeds, loud=False):
         time.sleep(1)  # stay well inside Discord's rate limit
 
 
+def notify(text):
+    """Plain status message (startup / outage / recovery). Never fatal."""
+    if not WEBHOOK:
+        print(text)
+        return
+    try:
+        req = urllib.request.Request(
+            WEBHOOK, data=json.dumps({"username": "Mr Tofu Stock Watch", "content": text}).encode(),
+            headers={"Content-Type": "application/json", "User-Agent": "DiscordBot (tofu-stock-alerts, 1.0)"},
+        )
+        urllib.request.urlopen(req, timeout=30).read()
+    except Exception as exc:
+        print(f"Couldn't post status message: {exc}", file=sys.stderr)
+
+
 def diff(previous, current):
     """Return (kind, item, note) for everything worth telling the user about."""
     out = []
@@ -233,27 +250,38 @@ def main():
         e["author"]["name"] = "✅ Stock watch is connected (test message)"
         send([e])
 
-    deadline = time.time() + WATCH_MINUTES * 60
+    deadline = float("inf") if FOREVER else time.time() + WATCH_MINUTES * 60
     if WATCH_MINUTES:
-        print(f"Watch mode: checking every {WATCH_INTERVAL:.0f}s for {WATCH_MINUTES:.0f} minutes"
-              + (f", keywords: {', '.join(KEYWORDS)}" if KEYWORDS else ""))
-    checks = 0
+        how_long = "nonstop" if FOREVER else f"for {WATCH_MINUTES:.0f} minutes"
+        print(f"Watch mode: checking every {WATCH_INTERVAL:.0f}s {how_long}"
+              + (f", keywords: {', '.join(KEYWORDS)}" if KEYWORDS else ""), flush=True)
+    if os.environ.get("SEND_STARTUP") == "true":
+        notify(f"🟢 Stock watch started: checking Mr Tofu's shop every {WATCH_INTERVAL:.0f} seconds.")
+    checks, last_ok, warned = 0, time.time(), False
     while True:
         try:
             current, found = check(state, first_run)
             state, first_run = current, False
             save(state)  # after every check, so a crash never re-sends old alerts
             checks += 1
+            last_ok = time.time()
+            if warned:
+                notify("✅ Stock watch is back: checks are working again.")
+                warned = False
             stamp = time.strftime("%H:%M:%S")
             print(f"[{stamp}] {len(current)} products, {sum(i['available'] for i in current.values())} in stock, "
-                  f"{len(found)} alert(s)")
+                  f"{len(found)} alert(s)", flush=True)
         except ShopBusy as exc:
             # Not a real failure; state is untouched so the next check still catches changes
-            print(f"Shop is rate-limiting right now ({exc}); will try again.", file=sys.stderr)
+            print(f"Shop is rate-limiting right now ({exc}); will try again.", file=sys.stderr, flush=True)
         except Exception as exc:
-            print(f"Check failed: {exc}", file=sys.stderr)
+            print(f"Check failed: {exc}", file=sys.stderr, flush=True)
             if not WATCH_MINUTES:
                 return 1
+        if FOREVER and not warned and time.time() - last_ok > OUTAGE_WARN_AFTER:
+            notify("⚠️ Stock watch hasn't been able to check the shop for 15 minutes. "
+                   "It keeps retrying and will post here when it recovers.")
+            warned = True
         if time.time() + WATCH_INTERVAL > deadline:
             break
         time.sleep(WATCH_INTERVAL)

@@ -10,7 +10,7 @@ on:
         type: number
         default: 0
       watch_interval:
-        description: "Seconds between checks in watch mode (min 30)"
+        description: "Seconds between checks in watch mode (min 15)"
         type: number
         default: 60
       test:
@@ -27,6 +27,10 @@ concurrency:
 
 jobs:
   check:
+    # Once the always-on server is running (repo variable SERVER_ACTIVE=true),
+    # scheduled runs stand down so you don't get duplicate alerts. Manual runs
+    # (e.g. watch mode as a backup) still work.
+    if: github.event_name != 'schedule' || vars.SERVER_ACTIVE != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 355 # GitHub's limit is 360; watch mode stays under it
     steps:

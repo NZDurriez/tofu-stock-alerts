@@ -1,0 +1,21 @@
+[Unit]
+Description=Mr Tofu shop stock watcher (Discord alerts)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tofuwatch
+EnvironmentFile=/etc/tofu-stock-alerts.env
+ExecStart=/usr/bin/python3 -u /opt/tofu-stock-alerts/check_stock.py
+Restart=always
+RestartSec=30
+# Light sandboxing: it only needs network access and its own state folder
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/tofu-stock-alerts
+
+[Install]
+WantedBy=multi-user.target
