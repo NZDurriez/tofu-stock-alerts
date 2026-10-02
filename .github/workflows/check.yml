@@ -1,0 +1,33 @@
+name: Check Mr Tofu stock
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes (GitHub may run it a few minutes late)
+  workflow_dispatch: # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stock-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the shop
+        run: python check_stock.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_PING: ${{ vars.DISCORD_PING }}
+
+      - name: Save what we saw
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "Update stock snapshot" && git push)
