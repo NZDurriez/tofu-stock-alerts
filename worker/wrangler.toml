@@ -9,6 +9,7 @@ crons = ["* * * * *"]
 
 [vars]
 DISCORD_PING = "<@147963835339243521>"
+DISCORD_OWNER_ID = "147963835339243521"
 WATCH_KEYWORDS = "delta reign, booster bundle, elite trainer box, etb, booster box, booster display, display, booster case, booster pack, booster packs, sleeved booster, enhanced booster, premium booster, half booster box, blister, collection box, premium collection, ultra premium collection, special collection, poster collection, binder collection, surprise box, gift box, tin, mini tin, build & battle, build and battle, battle deck, starter deck, starter set, double pack, bundle, pre-order, preorder, pre order, pre-release, prerelease, collection, figure collection, commander deck, opus, op, eb, prb, vault"
 
 # Snapshot of the shop between checks. id is filled in after `wrangler kv namespace create STATE`.

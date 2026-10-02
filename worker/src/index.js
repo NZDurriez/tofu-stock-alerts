@@ -2,11 +2,18 @@
 // Runs every minute (cron trigger), compares the shop's product list with the
 // last snapshot in KV, and posts Discord alerts for new listings, restocks and
 // newly-buyable options. Same behaviour as check_stock.py on GitHub Actions.
+//
+// Also answers Discord slash commands at /interactions (owner only):
+//   /password <pw>  log in behind the shop's password page and keep watching there
+//   /scan           check right now        /instock  list what's buyable
+//   /status         what the watcher sees right now
 
 const SHOP = "https://mrtofu.store";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
 const OUTAGE_WARN_MS = 15 * 60 * 1000;
+const DISCORD_API = "https://discord.com/api/v10";
+const EPHEMERAL = 64;
 
 const LABELS = {
   new: ["🆕 New in the shop", 0xf5a524],
@@ -15,52 +22,100 @@ const LABELS = {
   option: ["➕ New option available", 0x38bdf8],
 };
 
+// Bump when the command list changes; the cron re-registers them once.
+const COMMANDS_VERSION = 1;
+const COMMANDS = [
+  {
+    name: "password",
+    description: "Log in behind Mr Tofu's shop password so I can keep watching",
+    options: [{ type: 3, name: "password", description: "The shop password", required: true }],
+  },
+  { name: "scan", description: "Check Mr Tofu's shop right now" },
+  { name: "instock", description: "List what's buyable in Mr Tofu's shop right now" },
+  { name: "status", description: "What the stock watcher can see right now" },
+];
+
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runCheck(env));
+    ctx.waitUntil(Promise.all([runCheck(env), registerCommands(env)]));
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === "/interactions" && request.method === "POST") return handleInteraction(request, env, ctx);
     // Tiny status page; nothing secret in it
-    const meta = JSON.parse((await env.STATE.get("meta")) || "{}");
-    return new Response(
-      [
-        "Mr Tofu stock watch is running.",
-        `Last change seen: ${meta.lastChange || "none yet"}`,
-        meta.locked ? `🔒 Shop password-locked since: ${meta.locked} (watching for it to reopen)`
-          : meta.failingSince ? `Having trouble since: ${meta.failingSince}` : "Checks: OK",
-      ].join("\n"),
-      { headers: { "content-type": "text/plain; charset=utf-8" } },
-    );
+    const meta = await getMeta(env);
+    return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 };
 
+async function getMeta(env) {
+  return JSON.parse((await env.STATE.get("meta")) || "{}");
+}
+
+function statusLines(meta) {
+  return [
+    "Mr Tofu stock watch is running.",
+    `Last change seen: ${meta.lastChange || "none yet"}`,
+    meta.locked
+      ? `🔒 Shop password-locked since: ${meta.locked}` +
+        (meta.behindLock ? " (watching behind the lock with your password)" : " (watching for it to reopen)")
+      : meta.failingSince
+        ? `Having trouble since: ${meta.failingSince}`
+        : "Checks: OK",
+  ];
+}
+
+// Returns a short summary for /scan; alerts go to the webhook as usual.
 async function runCheck(env) {
-  const meta = JSON.parse((await env.STATE.get("meta")) || "{}");
+  const meta = await getMeta(env);
   const ping = (env.DISCORD_PING || "").trim();
+  const cookie = await env.STATE.get("cookie");
   let products;
   try {
     products = await fetchProducts();
   } catch (err) {
-    if (err && err.locked) {
-      // Shop switched to its password page (usually while a drop is being set up).
-      // Not a failure: announce it once, then wait for it to reopen.
-      if (!meta.locked) {
-        meta.locked = new Date().toISOString();
-        delete meta.failingSince;
-        delete meta.warned;
-        await env.STATE.put("meta", JSON.stringify(meta));
-        await notify(env, `${ping} 🔒 **Mr Tofu's shop just went password-locked.** That often means a drop is being set up. I'll ping you the second it reopens.`.trim());
-      }
-      return;
+    if (!(err && err.locked)) {
+      await recordFailure(env, meta, err);
+      return `Couldn't check the shop: ${err}`;
     }
-    await recordFailure(env, meta, err);
-    return;
+    // Shop switched to its password page (usually while a drop is being set up)
+    if (!meta.locked) {
+      meta.locked = new Date().toISOString();
+      delete meta.failingSince;
+      delete meta.warned;
+      await env.STATE.put("meta", JSON.stringify(meta));
+      let msg = `${ping} 🔒 **Mr Tofu's shop just went password-locked.** That often means a drop is being set up. I'll ping you the second it reopens.`;
+      if (!cookie) msg += "\nKnow the password? Use `/password` and I'll keep watching behind the lock.";
+      await notify(env, msg.trim());
+    }
+    if (!cookie) return "🔒 The shop is password-locked. Use /password if you know it.";
+    try {
+      products = await fetchProducts(cookie);
+    } catch (e2) {
+      if (e2 && e2.locked) {
+        // Saved password stopped working (it was changed)
+        await env.STATE.delete("cookie");
+        delete meta.behindLock;
+        await env.STATE.put("meta", JSON.stringify(meta));
+        await notify(env, `${ping} 🔑 The shop password I had stopped working (it was probably changed). Send the new one with \`/password\` if you know it.`.trim());
+        return "🔑 The saved password no longer works.";
+      }
+      await recordFailure(env, meta, e2);
+      return `Couldn't check the shop: ${e2}`;
+    }
+    if (!meta.behindLock) {
+      meta.behindLock = new Date().toISOString();
+      await env.STATE.put("meta", JSON.stringify(meta));
+      await notify(env, "👀 I'm in behind the password: watching the locked shop. Anything Tofu adds will show up here (you'll need the password in your browser to buy until it opens).");
+    }
   }
+
   let metaChanged = false;
-  if (meta.locked) {
+  if (meta.locked && !products.viaPassword) {
     await notify(env, `${ping} 🔓 **MR TOFU'S SHOP IS OPEN AGAIN!** ${SHOP}\nAnything new will follow below with ATC / ⚡ buttons.`.trim());
     delete meta.locked;
+    delete meta.behindLock;
     metaChanged = true;
   }
   if (meta.failingSince) {
@@ -77,10 +132,15 @@ async function runCheck(env) {
   const firstRun = rawPrev === null;
   const previous = firstRun ? {} : JSON.parse(rawPrev);
 
-  const found = firstRun ? [] : diff(previous, current, keywords(env));
+  const kw = keywords(env);
+  const found = firstRun ? [] : diff(previous, current, kw);
   if (found.length) {
-    const kw = keywords(env);
-    await send(env, found.map(([kind, item, note]) => embed(kind, item, note, kw)), found.some(([, i]) => watched(i, kw)));
+    const lockNote = products.viaPassword ? "🔒 Shop is still password-locked: enter the password on the site to buy." : null;
+    await send(
+      env,
+      found.map(([kind, item, note]) => embed(kind, item, [note, lockNote].filter(Boolean).join("\n") || null, kw)),
+      found.some(([, i]) => watched(i, kw)),
+    );
   }
 
   // Only write when something changed: KV's free plan allows 1,000 writes/day
@@ -90,6 +150,11 @@ async function runCheck(env) {
     meta.lastChange = new Date().toISOString();
     await env.STATE.put("meta", JSON.stringify(meta));
   }
+  const inStock = Object.values(current).filter((i) => i.available).length;
+  return (
+    `Checked ${Object.keys(current).length} products (${inStock} in stock)${products.viaPassword ? " behind the password" : ""}: ` +
+    (found.length ? `${found.length} alert${found.length > 1 ? "s" : ""} sent to the channel.` : "nothing new.")
+  );
 }
 
 async function recordFailure(env, meta, err) {
@@ -106,18 +171,23 @@ async function recordFailure(env, meta, err) {
   }
 }
 
-async function fetchProducts() {
+async function fetchProducts(cookie) {
   const all = [];
   for (let page = 1; ; page++) {
+    const headers = { "User-Agent": BROWSER_UA, Accept: "application/json", "Cache-Control": "no-cache" };
+    if (cookie) headers.Cookie = cookie;
     const res = await fetch(`${SHOP}/products.json?limit=250&page=${page}&_=${Date.now()}`, {
-      headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Cache-Control": "no-cache" },
+      headers,
       cf: { cacheTtl: 0, cacheEverything: false },
     });
     if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
     if (res.status === 401) {
       // products.json says 401 when the storefront is behind its password page
+      if (cookie) throw Object.assign(new Error("Shop password no longer accepted"), { locked: true });
       const home = await fetch(`${SHOP}/`, { headers: { "User-Agent": BROWSER_UA }, redirect: "manual" });
-      if ((home.headers.get("location") || "").includes("/password")) throw Object.assign(new Error("Shop is password-locked"), { locked: true });
+      if ((home.headers.get("location") || "").includes("/password")) {
+        throw Object.assign(new Error("Shop is password-locked"), { locked: true });
+      }
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const batch = (await res.json()).products || [];
@@ -125,8 +195,160 @@ async function fetchProducts() {
     if (batch.length < 250) break;
   }
   if (!all.length) throw new Error("Shop returned no products");
+  all.viaPassword = !!cookie;
   return all;
 }
+
+// Submit the storefront password form like a browser would; returns the
+// session cookie if it lets us see the products, otherwise null.
+async function loginWithPassword(password) {
+  const res = await fetch(`${SHOP}/password`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "User-Agent": BROWSER_UA, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ form_type: "storefront_password", utf8: "✓", password }).toString(),
+  });
+  const raw = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [res.headers.get("set-cookie") || ""];
+  const cookie = raw.filter(Boolean).map((c) => c.split(";")[0]).join("; ");
+  if (!cookie) return null;
+  const test = await fetch(`${SHOP}/products.json?limit=1&_=${Date.now()}`, { headers: { "User-Agent": BROWSER_UA, Cookie: cookie } });
+  return test.ok ? cookie : null;
+}
+
+// ---------- Discord slash commands ----------
+
+async function registerCommands(env) {
+  if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_APP_ID) return;
+  const meta = await getMeta(env);
+  if (meta.commandsVersion === COMMANDS_VERSION) return;
+  const res = await fetch(`${DISCORD_API}/applications/${env.DISCORD_APP_ID}/commands`, {
+    method: "PUT",
+    headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(COMMANDS),
+  });
+  if (res.ok) {
+    const fresh = await getMeta(env); // re-read so we don't clobber runCheck's changes
+    fresh.commandsVersion = COMMANDS_VERSION;
+    await env.STATE.put("meta", JSON.stringify(fresh));
+  } else {
+    console.log("Command registration failed:", res.status, await res.text());
+  }
+}
+
+function hexToBytes(hex) {
+  return new Uint8Array((hex.match(/../g) || []).map((b) => parseInt(b, 16)));
+}
+
+async function verifyDiscord(request, env) {
+  const sig = request.headers.get("X-Signature-Ed25519");
+  const ts = request.headers.get("X-Signature-Timestamp");
+  const body = await request.text();
+  if (!sig || !ts || !env.DISCORD_PUBLIC_KEY) return null;
+  try {
+    const key = await crypto.subtle.importKey("raw", hexToBytes(env.DISCORD_PUBLIC_KEY), { name: "Ed25519" }, false, ["verify"]);
+    const ok = await crypto.subtle.verify({ name: "Ed25519" }, key, hexToBytes(sig), new TextEncoder().encode(ts + body));
+    return ok ? JSON.parse(body) : null;
+  } catch {
+    return null;
+  }
+}
+
+const reply = (data) => Response.json(data);
+
+async function handleInteraction(request, env, ctx) {
+  const i = await verifyDiscord(request, env);
+  if (!i) return new Response("bad signature", { status: 401 });
+  if (i.type === 1) return reply({ type: 1 }); // Discord's endpoint check
+
+  const user = (i.member && i.member.user) || i.user || {};
+  const owner = (env.DISCORD_OWNER_ID || "").trim();
+  if (!owner || user.id !== owner) {
+    return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
+  }
+
+  const name = i.data && i.data.name;
+  // Defer (shows "thinking…" privately), then edit the reply when the work is done
+  const followUp = async (work) => {
+    let data;
+    try {
+      data = await work();
+    } catch (err) {
+      data = { content: `Something went wrong: ${err}` };
+    }
+    await fetch(`${DISCORD_API}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed_mentions: { parse: [] }, ...data }),
+    });
+  };
+  const deferred = () => reply({ type: 5, data: { flags: EPHEMERAL } });
+
+  if (name === "password") {
+    // The password itself is never stored or echoed: only the shop's session cookie is kept
+    const pw = ((i.data.options || []).find((o) => o.name === "password") || {}).value || "";
+    ctx.waitUntil(
+      followUp(async () => {
+        const cookie = await loginWithPassword(pw);
+        if (!cookie) return { content: "❌ That password didn't get me in. Double-check it and try `/password` again." };
+        await env.STATE.put("cookie", cookie);
+        const summary = await runCheck(env);
+        return { content: `✅ Password works. I'm now watching behind the lock.\n${summary}` };
+      }),
+    );
+    return deferred();
+  }
+
+  if (name === "scan") {
+    ctx.waitUntil(followUp(async () => ({ content: "🔎 " + (await runCheck(env)) })));
+    return deferred();
+  }
+
+  if (name === "instock") {
+    ctx.waitUntil(
+      followUp(async () => {
+        const cookie = await env.STATE.get("cookie");
+        let products;
+        try {
+          products = await fetchProducts();
+        } catch (err) {
+          if (!(err && err.locked)) return { content: `Couldn't check the shop: ${err}` };
+          if (!cookie) return { content: "🔒 The shop is password-locked. Use /password if you know it." };
+          products = await fetchProducts(cookie);
+        }
+        const items = products.map(summarise).filter((it) => it.available);
+        if (!items.length) return { content: "Nothing is buyable right now." };
+        const lines = [];
+        for (const it of items) {
+          const vid = Object.entries(it.variants).find(([, v]) => v.available)[0];
+          const line =
+            `**[${it.title}](${SHOP}/products/${it.handle})**${it.price !== null ? ` · $${it.price.toFixed(2)}` : ""}\n` +
+            `[ATC 1](${SHOP}/cart/add?id=${vid}&quantity=1) · [ATC 2](${SHOP}/cart/add?id=${vid}&quantity=2) · [⚡ 1](${SHOP}/cart/${vid}:1)`;
+          if ([...lines, line].join("\n\n").length > 3900) break;
+          lines.push(line);
+        }
+        return {
+          embeds: [{
+            title: `🛒 In stock now (${items.length})`,
+            description: lines.join("\n\n"),
+            color: 0x22c55e,
+            footer: { text: lines.length < items.length ? `Showing ${lines.length} of ${items.length}` : "Mr Tofu Stock Watch" },
+          }],
+        };
+      }),
+    );
+    return deferred();
+  }
+
+  if (name === "status") {
+    const meta = await getMeta(env);
+    const hasPw = !!(await env.STATE.get("cookie"));
+    return reply({ type: 4, data: { flags: EPHEMERAL, content: statusLines(meta).join("\n") + `\nSaved shop password: ${hasPw ? "yes" : "no"}` } });
+  }
+
+  return reply({ type: 4, data: { flags: EPHEMERAL, content: "I don't know that command." } });
+}
+
+// ---------- Shop data and alerts ----------
 
 function summarise(p) {
   const variants = p.variants || [];
