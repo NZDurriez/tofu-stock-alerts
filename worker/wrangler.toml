@@ -10,6 +10,9 @@ crons = ["* * * * *"]
 [vars]
 DISCORD_PING = "<@147963835339243521>"
 DISCORD_OWNER_ID = "147963835339243521"
+# Discord app for slash commands (both values are public; the bot token is a secret)
+DISCORD_APP_ID = "1555519244911779902"
+DISCORD_PUBLIC_KEY = "c60065f028da46c0f5f3ee0743828ff8c91b7db8343c003028448ef84af2f166"
 WATCH_KEYWORDS = "delta reign, booster bundle, elite trainer box, etb, booster box, booster display, display, booster case, booster pack, booster packs, sleeved booster, enhanced booster, premium booster, half booster box, blister, collection box, premium collection, ultra premium collection, special collection, poster collection, binder collection, surprise box, gift box, tin, mini tin, build & battle, build and battle, battle deck, starter deck, starter set, double pack, bundle, pre-order, preorder, pre order, pre-release, prerelease, collection, figure collection, commander deck, opus, op, eb, prb, vault"
 
 # Snapshot of the shop between checks. id is filled in after `wrangler kv namespace create STATE`.
