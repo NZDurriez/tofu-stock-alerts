@@ -12,6 +12,7 @@ WATCH_MINUTES > 0 keeps checking every WATCH_INTERVAL seconds for that long
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -84,8 +85,25 @@ def summarise(p):
 
 
 def watched(item):
+    # Whole-word match so "tin" doesn't fire on "Martin"
     t = item["title"].lower()
-    return any(k in t for k in KEYWORDS)
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", t) for k in KEYWORDS)
+
+
+def cart_links(item, max_options=3):
+    """'ATC 1 · ATC 2 …' links that add that many to the cart on the shop."""
+    vids = [(vid, v) for vid, v in item["variants"].items() if v["available"]]
+    live = bool(vids)
+    if not live:  # not on sale yet: still give links, they'll work once it goes live
+        vids = list(item["variants"].items())
+    lines = []
+    for vid, v in vids[:max_options]:
+        links = " · ".join(f"[ATC {n}]({SHOP}/cart/add?id={vid}&quantity={n})" for n in range(1, 6))
+        name = v["title"] if v["title"] and v["title"] != "Default Title" else ""
+        lines.append((f"**{name}:** " if name and len(vids) > 1 else "") + links)
+    if not lines:
+        return None
+    return "\n".join(lines) + ("" if live else "\n*Not on sale yet: these work once it goes live.*")
 
 
 LABELS = {
@@ -107,6 +125,9 @@ def embed(kind, item, note=None):
     opts = [v["title"] for v in item["variants"].values() if v["available"] and v["title"] != "Default Title"]
     if opts:
         fields.append({"name": "Available options", "value": ", ".join(opts)[:1024], "inline": False})
+    atc = cart_links(item)
+    if atc:
+        fields.append({"name": "🛒 Add to cart", "value": atc[:1024], "inline": False})
     e = {
         "author": {"name": label},
         "title": item["title"][:256],
