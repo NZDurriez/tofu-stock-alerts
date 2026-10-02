@@ -27,7 +27,8 @@ export default {
       [
         "Mr Tofu stock watch is running.",
         `Last change seen: ${meta.lastChange || "none yet"}`,
-        meta.failingSince ? `Having trouble since: ${meta.failingSince}` : "Checks: OK",
+        meta.locked ? `🔒 Shop password-locked since: ${meta.locked} (watching for it to reopen)`
+          : meta.failingSince ? `Having trouble since: ${meta.failingSince}` : "Checks: OK",
       ].join("\n"),
       { headers: { "content-type": "text/plain; charset=utf-8" } },
     );
@@ -36,19 +37,39 @@ export default {
 
 async function runCheck(env) {
   const meta = JSON.parse((await env.STATE.get("meta")) || "{}");
+  const ping = (env.DISCORD_PING || "").trim();
   let products;
   try {
     products = await fetchProducts();
   } catch (err) {
+    if (err && err.locked) {
+      // Shop switched to its password page (usually while a drop is being set up).
+      // Not a failure: announce it once, then wait for it to reopen.
+      if (!meta.locked) {
+        meta.locked = new Date().toISOString();
+        delete meta.failingSince;
+        delete meta.warned;
+        await env.STATE.put("meta", JSON.stringify(meta));
+        await notify(env, `${ping} 🔒 **Mr Tofu's shop just went password-locked.** That often means a drop is being set up. I'll ping you the second it reopens.`.trim());
+      }
+      return;
+    }
     await recordFailure(env, meta, err);
     return;
+  }
+  let metaChanged = false;
+  if (meta.locked) {
+    await notify(env, `${ping} 🔓 **MR TOFU'S SHOP IS OPEN AGAIN!** ${SHOP}\nAnything new will follow below with ATC / ⚡ buttons.`.trim());
+    delete meta.locked;
+    metaChanged = true;
   }
   if (meta.failingSince) {
     if (meta.warned) await notify(env, "✅ Stock watch is back: checks are working again.");
     delete meta.failingSince;
     delete meta.warned;
-    await env.STATE.put("meta", JSON.stringify(meta));
+    metaChanged = true;
   }
+  if (metaChanged) await env.STATE.put("meta", JSON.stringify(meta));
 
   const current = {};
   for (const p of products) current[p.id] = summarise(p);
@@ -93,6 +114,11 @@ async function fetchProducts() {
       cf: { cacheTtl: 0, cacheEverything: false },
     });
     if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
+    if (res.status === 401) {
+      // products.json says 401 when the storefront is behind its password page
+      const home = await fetch(`${SHOP}/`, { headers: { "User-Agent": BROWSER_UA }, redirect: "manual" });
+      if ((home.headers.get("location") || "").includes("/password")) throw Object.assign(new Error("Shop is password-locked"), { locked: true });
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const batch = (await res.json()).products || [];
     all.push(...batch);
