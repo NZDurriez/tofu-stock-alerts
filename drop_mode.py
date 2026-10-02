@@ -5,7 +5,6 @@ browser with a loud alert. You still press Pay yourself.
 Start it with the "Tofu Drop Mode" shortcut on the desktop (or
 `python drop_mode.py`). Close the window or press Ctrl+C to stop.
 """
-import getpass
 import json
 import os
 import re
@@ -160,7 +159,7 @@ def main():
     print("=" * 60)
     password = os.environ.get("DROP_PASSWORD")
     if password is None:
-        password = getpass.getpass("Shop password (press Enter if the shop isn't locked; nothing shows as you type): ")
+        password = input("Shop password (press Enter if the shop isn't locked): ")
     password = password.strip()
     default_qty = as_qty(ask("DROP_QTY", "Default quantity [1]: "), 1)
     interval = ask("DROP_INTERVAL", "Seconds between checks [3]: ").strip()
