@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 SHOP = "https://mrtofu.store"
@@ -21,19 +22,35 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/130 Safari/537.36")
 
 
-def get_json(url):
-    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+class ShopBusy(Exception):
+    """The shop kept rate-limiting us; try again next run."""
+
+
+def get_json(url, attempts=4):
+    # Shopify rate-limits shared cloud IPs (like GitHub's), so back off and retry
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 430, 503) or attempt == attempts - 1:
+                if exc.code in (429, 430, 503):
+                    raise ShopBusy(f"HTTP {exc.code}") from exc
+                raise
+            wait = exc.headers.get("Retry-After")
+            wait = float(wait) if wait and wait.replace(".", "", 1).isdigit() else 15 * 2 ** attempt
+            print(f"Shop said {exc.code}; waiting {wait:.0f}s before retrying", file=sys.stderr)
+            time.sleep(min(wait, 60))
 
 
 def fetch_products():
     products, page = [], 1
     while True:
         batch = get_json(f"{SHOP}/products.json?limit=250&page={page}")["products"]
-        if not batch:
-            return products
         products += batch
+        if len(batch) < 250:  # last page; saves a request
+            return products
         page += 1
 
 
@@ -98,6 +115,11 @@ def main():
         return 1
     try:
         current = {str(p["id"]): summarise(p) for p in fetch_products()}
+    except ShopBusy as exc:
+        # Not a real failure; exit cleanly so GitHub doesn't email about it.
+        # State is untouched, so the next run still catches any changes.
+        print(f"Shop is rate-limiting right now ({exc}); will try again next run.", file=sys.stderr)
+        return 0
     except Exception as exc:  # leave state untouched so nothing is missed next run
         print(f"Could not read the shop: {exc}", file=sys.stderr)
         return 1
