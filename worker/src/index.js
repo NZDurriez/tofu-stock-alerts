@@ -236,12 +236,9 @@ async function fetchPage(page, cookie, etag, out) {
   });
   if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
   if (res.status === 401) {
-    // products.json says 401 when the storefront is behind its password page
-    if (cookie) throw Object.assign(new Error("Shop password no longer accepted"), { locked: true });
-    const home = await fetch(`${SHOP}/`, { headers: { "User-Agent": BROWSER_UA }, redirect: "manual" });
-    if ((home.headers.get("location") || "").includes("/password")) {
-      throw Object.assign(new Error("Shop is password-locked"), { locked: true });
-    }
+    // Shopify only answers products.json with 401 when the storefront is behind
+    // its password page (checking the homepage redirect as well proved flaky)
+    throw Object.assign(new Error(cookie ? "Shop password no longer accepted" : "Shop is password-locked"), { locked: true });
   }
   if (res.status === 304) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -389,14 +386,16 @@ async function handleInteraction(request, env, ctx) {
   if (name === "instock") {
     ctx.waitUntil(
       followUp(async () => {
+        // The saved login works whether or not the shop is locked, so use it when we have it
         const cookie = await env.STATE.get("cookie");
         let products;
         try {
-          products = await fetchProducts();
+          products = await fetchProducts(cookie || null);
         } catch (err) {
           if (!(err && err.locked)) return { content: `Couldn't check the shop: ${err}` };
-          if (!cookie) return { content: "🔒 The shop is password-locked. Use /password if you know it." };
-          products = await fetchProducts(cookie);
+          return { content: cookie
+            ? "🔑 The saved shop password no longer works. Send the new one with /password."
+            : "🔒 The shop is password-locked. Use /password if you know it." };
         }
         const items = products.map(summarise).filter((it) => it.available);
         if (!items.length) return { content: "Nothing is buyable right now." };
