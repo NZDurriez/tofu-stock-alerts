@@ -42,8 +42,10 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_PING: ${{ vars.DISCORD_PING }}
           WATCH_KEYWORDS: ${{ vars.WATCH_KEYWORDS }}
-          WATCH_MINUTES: ${{ inputs.watch_minutes && (inputs.watch_minutes > 340 && 340 || inputs.watch_minutes) || 0 }}
-          WATCH_INTERVAL: ${{ inputs.watch_interval || 60 }}
+          # Scheduled runs check every 45s for 4 minutes, so back-to-back runs give
+          # roughly one check a minute. Manual runs use the watch-mode inputs.
+          WATCH_MINUTES: ${{ github.event_name == 'schedule' && '4' || (inputs.watch_minutes && (inputs.watch_minutes > 340 && 340 || inputs.watch_minutes) || 0) }}
+          WATCH_INTERVAL: ${{ github.event_name == 'schedule' && '45' || inputs.watch_interval || 60 }}
           SEND_TEST: ${{ inputs.test }}
 
       - name: Save what we saw
