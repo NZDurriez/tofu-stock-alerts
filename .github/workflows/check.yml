@@ -2,9 +2,17 @@ name: Check Mr Tofu stock
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # every 10 minutes (GitHub may run it a few minutes late)
-  workflow_dispatch: # lets you run it by hand from the Actions tab
+    - cron: "*/5 * * * *" # every 5 minutes, GitHub's fastest (it may run a few minutes late)
+  workflow_dispatch: # run by hand from the Actions tab
     inputs:
+      watch_minutes:
+        description: "Watch mode: keep checking for this many minutes (0 = single check, max 340)"
+        type: number
+        default: 0
+      watch_interval:
+        description: "Seconds between checks in watch mode (min 30)"
+        type: number
+        default: 60
       test:
         description: "Also send a test message to Discord"
         type: boolean
@@ -20,7 +28,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 355 # GitHub's limit is 360; watch mode stays under it
     steps:
       - uses: actions/checkout@v4
 
@@ -29,11 +37,18 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_PING: ${{ vars.DISCORD_PING }}
+          WATCH_KEYWORDS: ${{ vars.WATCH_KEYWORDS }}
+          WATCH_MINUTES: ${{ inputs.watch_minutes && (inputs.watch_minutes > 340 && 340 || inputs.watch_minutes) || 0 }}
+          WATCH_INTERVAL: ${{ inputs.watch_interval || 60 }}
           SEND_TEST: ${{ inputs.test }}
 
       - name: Save what we saw
+        if: always() # keep the snapshot even if a check failed, so alerts aren't repeated
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json
-          git diff --cached --quiet || (git commit -m "Update stock snapshot" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "Update stock snapshot"
+          git pull --rebase -X theirs -q || true
+          git push

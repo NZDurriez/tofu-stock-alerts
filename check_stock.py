@@ -1,29 +1,35 @@
 """Watch mrtofu.store and post to a Discord webhook when stock changes.
 
 Alerts on:
-  - new products appearing in the shop
+  - new products appearing in the shop (even if not on sale yet)
   - products coming back in stock (sold out -> available)
+  - a new buyable option on an existing product (e.g. a "Pre-order" variant)
+Products matching WATCH_KEYWORDS get a louder 🚨 alert.
 
-State lives in state.json so each run only reports what changed since the last.
-Without DISCORD_WEBHOOK_URL set, alerts are printed instead of sent (dry run).
+State lives in state.json so each check only reports what changed since the last.
+WATCH_MINUTES > 0 keeps checking every WATCH_INTERVAL seconds for that long
+(for release nights). Without DISCORD_WEBHOOK_URL, alerts are printed (dry run).
 """
 import json
 import os
+import subprocess
 import sys
 import time
-import subprocess
 import urllib.request
 
 SHOP = "https://mrtofu.store"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 PING = os.environ.get("DISCORD_PING", "").strip()  # e.g. <@123456789012345678>
+KEYWORDS = [k.strip().lower() for k in os.environ.get("WATCH_KEYWORDS", "").split(",") if k.strip()]
+WATCH_MINUTES = float(os.environ.get("WATCH_MINUTES") or 0)
+WATCH_INTERVAL = max(30.0, float(os.environ.get("WATCH_INTERVAL") or 60))
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/130 Safari/537.36")
 
 
 class ShopBusy(Exception):
-    """The shop kept rate-limiting us; try again next run."""
+    """The shop kept rate-limiting us; try again next check."""
 
 
 def get_json(url, attempts=4):
@@ -32,7 +38,8 @@ def get_json(url, attempts=4):
     for attempt in range(attempts):
         res = subprocess.run(
             ["curl", "-sS", "-L", "--max-time", "30", "-A", BROWSER_UA,
-             "-H", "Accept: application/json", "-w", "\n%{http_code}", url],
+             "-H", "Accept: application/json", "-H", "Cache-Control: no-cache",
+             "-w", "\n%{http_code}", url],
             capture_output=True, text=True, encoding="utf-8",
         )
         if res.returncode != 0:
@@ -52,7 +59,8 @@ def get_json(url, attempts=4):
 def fetch_products():
     products, page = [], 1
     while True:
-        batch = get_json(f"{SHOP}/products.json?limit=250&page={page}")["products"]
+        # Cache-buster so we never get a stale copy of the product list
+        batch = get_json(f"{SHOP}/products.json?limit=250&page={page}&_={int(time.time())}")["products"]
         products += batch
         if len(batch) < 250:  # last page; saves a request
             return products
@@ -70,16 +78,35 @@ def summarise(p):
         "available": bool(in_stock),
         "price": prices[0] if prices else None,
         "image": images[0]["src"] if images else None,
+        "variants": {str(v["id"]): {"title": v.get("title") or "", "available": bool(v.get("available"))}
+                     for v in variants},
     }
 
 
-def embed(kind, item):
-    colour = {"new": 0xF5A524, "restock": 0x22C55E}[kind]
-    label = {"new": "🆕 New in the shop", "restock": "🔁 Back in stock"}[kind]
+def watched(item):
+    t = item["title"].lower()
+    return any(k in t for k in KEYWORDS)
+
+
+LABELS = {
+    "new": ("🆕 New in the shop", 0xF5A524),
+    "new-soon": ("🆕 New listing (not on sale yet)", 0xA78BFA),
+    "restock": ("🔁 Back in stock", 0x22C55E),
+    "option": ("➕ New option available", 0x38BDF8),
+}
+
+
+def embed(kind, item, note=None):
+    label, colour = LABELS[kind]
+    if watched(item):
+        label, colour = "🚨 " + label, 0xEF4444
     fields = []
     if item["price"] is not None:
         fields.append({"name": "Price", "value": f"${item['price']:.2f}", "inline": True})
-    fields.append({"name": "Stock", "value": "In stock ✅" if item["available"] else "Sold out ❌", "inline": True})
+    fields.append({"name": "Stock", "value": "In stock ✅" if item["available"] else "Not available yet ❌", "inline": True})
+    opts = [v["title"] for v in item["variants"].values() if v["available"] and v["title"] != "Default Title"]
+    if opts:
+        fields.append({"name": "Available options", "value": ", ".join(opts)[:1024], "inline": False})
     e = {
         "author": {"name": label},
         "title": item["title"][:256],
@@ -87,18 +114,22 @@ def embed(kind, item):
         "color": colour,
         "fields": fields,
     }
+    if note:
+        e["description"] = note
     if item["image"]:
         e["thumbnail"] = {"url": item["image"]}
     return e
 
 
-def send(embeds):
+def send(embeds, loud=False):
     # Discord allows 10 embeds per message
     for i in range(0, len(embeds), 10):
         chunk = embeds[i:i + 10]
+        head = "🚨 **Watched item update!** " if loud else ""
         payload = {
             "username": "Mr Tofu Stock Watch",
-            "content": (PING + " " if PING else "") + f"{len(chunk)} update{'s' if len(chunk) != 1 else ''} at Mr Tofu's shop",
+            "content": (PING + " " if PING else "") + head
+                       + f"{len(chunk)} update{'s' if len(chunk) != 1 else ''} at Mr Tofu's shop",
             "embeds": chunk,
             "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
         }
@@ -113,51 +144,87 @@ def send(embeds):
         time.sleep(1)  # stay well inside Discord's rate limit
 
 
+def diff(previous, current):
+    """Return (kind, item, note) for everything worth telling the user about."""
+    out = []
+    for pid, item in current.items():
+        old = previous.get(pid)
+        if old is None:
+            out.append(("new" if item["available"] else "new-soon", item, None))
+            continue
+        if item["available"] and not old.get("available"):
+            out.append(("restock", item, None))
+            continue
+        old_vars = old.get("variants")
+        if old_vars is None:  # snapshot from before option tracking; nothing to compare
+            continue
+        fresh = [v["title"] for vid, v in item["variants"].items()
+                 if v["available"] and not old_vars.get(vid, {}).get("available")]
+        if fresh:
+            named = [t for t in fresh if t and t != "Default Title"]
+            out.append(("option", item, "Now buyable" + (": **" + ", ".join(named)[:300] + "**" if named else "")))
+    # Watched items first so they're at the top of the message
+    out.sort(key=lambda a: not watched(a[1]))
+    return out
+
+
+def check(previous, first_run):
+    current = {str(p["id"]): summarise(p) for p in fetch_products()}
+    if not current:
+        raise RuntimeError("Shop returned no products")
+    found = [] if first_run else diff(previous, current)
+    if found:
+        send([embed(k, i, n) for k, i, n in found], loud=any(watched(i) for _, i, _ in found))
+    return current, found
+
+
+def save(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=1, ensure_ascii=False, sort_keys=True)
+
+
 def main():
     if os.environ.get("GITHUB_ACTIONS") and not WEBHOOK:
         # Don't record changes nobody was told about
         print("DISCORD_WEBHOOK_URL secret isn't set yet; skipping this check.", file=sys.stderr)
         return 1
-    try:
-        current = {str(p["id"]): summarise(p) for p in fetch_products()}
-    except ShopBusy as exc:
-        # Not a real failure; exit cleanly so GitHub doesn't email about it.
-        # State is untouched, so the next run still catches any changes.
-        print(f"Shop is rate-limiting right now ({exc}); will try again next run.", file=sys.stderr)
-        return 0
-    except Exception as exc:  # leave state untouched so nothing is missed next run
-        print(f"Could not read the shop: {exc}", file=sys.stderr)
-        return 1
-    if not current:
-        print("Shop returned no products; skipping so a blip doesn't wipe the state.", file=sys.stderr)
-        return 1
-
-    if os.environ.get("SEND_TEST") == "true":
-        sample = next((i for i in current.values() if i["available"]), next(iter(current.values())))
-        e = embed("new", sample)
-        e["author"]["name"] = "✅ Stock watch is connected (test message)"
-        e["description"] = "This is how alerts will look. Example product below."
-        send([e])
 
     first_run = not os.path.exists(STATE_FILE)
-    previous = {} if first_run else json.load(open(STATE_FILE, encoding="utf-8"))
+    state = {} if first_run else json.load(open(STATE_FILE, encoding="utf-8"))
 
-    alerts = []
-    if not first_run:
-        for pid, item in current.items():
-            old = previous.get(pid)
-            if old is None:
-                alerts.append(embed("new", item))
-            elif item["available"] and not old.get("available"):
-                alerts.append(embed("restock", item))
+    if os.environ.get("SEND_TEST") == "true":
+        current = {str(p["id"]): summarise(p) for p in fetch_products()}
+        sample = next((i for i in current.values() if i["available"]), next(iter(current.values())))
+        e = embed("new", sample, "This is how alerts will look. Example product below.")
+        e["author"]["name"] = "✅ Stock watch is connected (test message)"
+        send([e])
 
-    if alerts:
-        send(alerts)
-    print(f"{len(current)} products, {sum(i['available'] for i in current.values())} in stock, "
-          f"{len(alerts)} alert(s){' (first run: baseline saved, no alerts)' if first_run else ''}")
-
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=1, ensure_ascii=False, sort_keys=True)
+    deadline = time.time() + WATCH_MINUTES * 60
+    if WATCH_MINUTES:
+        print(f"Watch mode: checking every {WATCH_INTERVAL:.0f}s for {WATCH_MINUTES:.0f} minutes"
+              + (f", keywords: {', '.join(KEYWORDS)}" if KEYWORDS else ""))
+    checks = 0
+    while True:
+        try:
+            current, found = check(state, first_run)
+            state, first_run = current, False
+            save(state)  # after every check, so a crash never re-sends old alerts
+            checks += 1
+            stamp = time.strftime("%H:%M:%S")
+            print(f"[{stamp}] {len(current)} products, {sum(i['available'] for i in current.values())} in stock, "
+                  f"{len(found)} alert(s)")
+        except ShopBusy as exc:
+            # Not a real failure; state is untouched so the next check still catches changes
+            print(f"Shop is rate-limiting right now ({exc}); will try again.", file=sys.stderr)
+        except Exception as exc:
+            print(f"Check failed: {exc}", file=sys.stderr)
+            if not WATCH_MINUTES:
+                return 1
+        if time.time() + WATCH_INTERVAL > deadline:
+            break
+        time.sleep(WATCH_INTERVAL)
+    if WATCH_MINUTES:
+        print(f"Watch mode finished after {checks} checks.")
     return 0
 
 
