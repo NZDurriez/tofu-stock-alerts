@@ -1,0 +1,14 @@
+name: Probe shop endpoints (temporary)
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+          for u in "products.json?limit=250" "collections/all/products.json?limit=250" "collections/all.atom" "sitemap_products_1.xml" "collections/all" "products/friday-madness-pokemon-bounty-bundle.js" "search?q=*&type=product&view=json"; do
+            echo "$u -> $(curl -s -o /dev/null -w '%{http_code} %{size_download}' -A "$UA" "https://mrtofu.store/$u")"
+            sleep 2
+          done
+          echo "plain UA products.json -> $(curl -s -o /dev/null -w '%{http_code}' "https://mrtofu.store/products.json?limit=250")"
+          echo "myshopify domain -> $(curl -s -o /dev/null -w '%{http_code}' -A "$UA" "https://mr-tofu-card-store.myshopify.com/products.json?limit=1")"
