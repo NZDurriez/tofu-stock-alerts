@@ -35,9 +35,39 @@ const COMMANDS = [
   { name: "status", description: "What the stock watcher can see right now" },
 ];
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// KV reads can be up to a minute stale at the edge, so within one run keep
+// our own writes in memory and read those first. Stops repeat alerts between
+// the several checks a run makes.
+function withMemory(kv) {
+  const mem = new Map();
+  return {
+    get: async (k) => (mem.has(k) ? mem.get(k) : kv.get(k)),
+    put: async (k, v) => { mem.set(k, v); await kv.put(k, v); },
+    delete: async (k) => { mem.set(k, null); await kv.delete(k); },
+  };
+}
+
 export default {
+  // Cron fires once a minute; spread CHECKS_PER_MINUTE checks across it.
+  // Unchanged checks are cheap (fingerprint only), so this fits the free plan.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.all([runCheck(env), registerCommands(env)]));
+    const run = { ...env, STATE: withMemory(env.STATE) };
+    ctx.waitUntil((async () => {
+      await registerCommands(run);
+      const n = Math.max(1, Math.min(6, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
+      const start = Date.now();
+      for (let k = 0; k < n; k++) {
+        const wait = start + (k * 60000) / n - Date.now();
+        if (wait > 0) await sleep(wait);
+        try {
+          await runCheck(run);
+        } catch (err) {
+          console.log("Check crashed:", String(err));
+        }
+      }
+    })());
   },
 
   async fetch(request, env, ctx) {
@@ -67,13 +97,21 @@ function statusLines(meta) {
 }
 
 // Returns a short summary for /scan; alerts go to the webhook as usual.
-async function runCheck(env) {
+// opts.force skips the "nothing changed" shortcut (used by /scan).
+async function runCheck(env, opts = {}) {
   const meta = await getMeta(env);
   const ping = (env.DISCORD_PING || "").trim();
   const cookie = await env.STATE.get("cookie");
+  const storedHash = await env.STATE.get("hash");
+  const etags = JSON.parse((await env.STATE.get("etags")) || "{}"); // { pub, pw }
+  const fetchOpts = (mode) => ({
+    pages: meta.pageCount || 1,
+    skipHash: opts.force ? null : storedHash,
+    etag: opts.force ? null : etags[mode],
+  });
   let products;
   try {
-    products = await fetchProducts();
+    products = await fetchProducts(null, fetchOpts("pub"));
   } catch (err) {
     if (!(err && err.locked)) {
       await recordFailure(env, meta, err);
@@ -91,7 +129,7 @@ async function runCheck(env) {
     }
     if (!cookie) return "🔒 The shop is password-locked. Use /password if you know it.";
     try {
-      products = await fetchProducts(cookie);
+      products = await fetchProducts(cookie, fetchOpts("pw"));
     } catch (e2) {
       if (e2 && e2.locked) {
         // Saved password stopped working (it was changed)
@@ -126,6 +164,20 @@ async function runCheck(env) {
   }
   if (metaChanged) await env.STATE.put("meta", JSON.stringify(meta));
 
+  const via = products.viaPassword ? " behind the password" : "";
+  const mode = products.viaPassword ? "pw" : "pub";
+  // Saved only after alerts and the snapshot succeed, so a failed send is retried
+  const saveEtag = async () => {
+    if (products.etag && products.etag !== etags[mode]) {
+      etags[mode] = products.etag;
+      await env.STATE.put("etags", JSON.stringify(etags));
+    }
+  };
+  if (products.unchanged) {
+    await saveEtag();
+    return `Checked${via}: nothing has changed.`;
+  }
+
   const current = {};
   for (const p of products) current[p.id] = summarise(p);
   const rawPrev = await env.STATE.get("state");
@@ -136,11 +188,7 @@ async function runCheck(env) {
   const found = firstRun ? [] : diff(previous, current, kw);
   if (found.length) {
     const lockNote = products.viaPassword ? "🔒 Shop is still password-locked: enter the password on the site to buy." : null;
-    await send(
-      env,
-      found.map(([kind, item, note]) => embed(kind, item, [note, lockNote].filter(Boolean).join("\n") || null, kw)),
-      found.some(([, i]) => watched(i, kw)),
-    );
+    await send(env, alertMessages(found, kw, lockNote), found.some(([, i]) => watched(i, kw)));
   }
 
   // Only write when something changed: KV's free plan allows 1,000 writes/day
@@ -148,11 +196,16 @@ async function runCheck(env) {
   if (snap !== rawPrev) {
     await env.STATE.put("state", snap);
     meta.lastChange = new Date().toISOString();
+  }
+  if (snap !== rawPrev || products.pageCount !== (meta.pageCount || 1)) {
+    meta.pageCount = products.pageCount;
     await env.STATE.put("meta", JSON.stringify(meta));
   }
+  if (products.hash !== storedHash) await env.STATE.put("hash", products.hash);
+  await saveEtag();
   const inStock = Object.values(current).filter((i) => i.available).length;
   return (
-    `Checked ${Object.keys(current).length} products (${inStock} in stock)${products.viaPassword ? " behind the password" : ""}: ` +
+    `Checked ${Object.keys(current).length} products (${inStock} in stock)${via}: ` +
     (found.length ? `${found.length} alert${found.length > 1 ? "s" : ""} sent to the channel.` : "nothing new.")
   );
 }
@@ -171,32 +224,62 @@ async function recordFailure(env, meta, err) {
   }
 }
 
-async function fetchProducts(cookie) {
-  const all = [];
-  for (let page = 1; ; page++) {
-    const headers = { "User-Agent": BROWSER_UA, Accept: "application/json", "Cache-Control": "no-cache" };
-    if (cookie) headers.Cookie = cookie;
-    const res = await fetch(`${SHOP}/products.json?limit=250&page=${page}&_=${Date.now()}`, {
-      headers,
-      cf: { cacheTtl: 0, cacheEverything: false },
-    });
-    if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
-    if (res.status === 401) {
-      // products.json says 401 when the storefront is behind its password page
-      if (cookie) throw Object.assign(new Error("Shop password no longer accepted"), { locked: true });
-      const home = await fetch(`${SHOP}/`, { headers: { "User-Agent": BROWSER_UA }, redirect: "manual" });
-      if ((home.headers.get("location") || "").includes("/password")) {
-        throw Object.assign(new Error("Shop is password-locked"), { locked: true });
-      }
+// With an etag, Shopify answers 304 (no body) when nothing changed; then this
+// returns null. Otherwise returns the page body.
+async function fetchPage(page, cookie, etag, out) {
+  const headers = { "User-Agent": BROWSER_UA, Accept: "application/json", "Cache-Control": "no-cache" };
+  if (cookie) headers.Cookie = cookie;
+  if (etag) headers["If-None-Match"] = etag;
+  const res = await fetch(`${SHOP}/products.json?limit=250&page=${page}&_=${Date.now()}`, {
+    headers,
+    cf: { cacheTtl: 0, cacheEverything: false },
+  });
+  if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
+  if (res.status === 401) {
+    // products.json says 401 when the storefront is behind its password page
+    if (cookie) throw Object.assign(new Error("Shop password no longer accepted"), { locked: true });
+    const home = await fetch(`${SHOP}/`, { headers: { "User-Agent": BROWSER_UA }, redirect: "manual" });
+    if ((home.headers.get("location") || "").includes("/password")) {
+      throw Object.assign(new Error("Shop is password-locked"), { locked: true });
     }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const batch = (await res.json()).products || [];
-    all.push(...batch);
-    if (batch.length < 250) break;
+  }
+  if (res.status === 304) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (out) out.etag = res.headers.get("etag");
+  return res.arrayBuffer();
+}
+
+const parsePage = (buf) => JSON.parse(new TextDecoder().decode(buf)).products || [];
+
+// Fetches the product list. Returns { unchanged: true } without downloading
+// or decoding anything when the shop's data hasn't changed: first via the
+// page's etag (Shopify replies 304 with no body), then via opts.skipHash.
+async function fetchProducts(cookie, opts = {}) {
+  const pages = Math.max(1, opts.pages || 1);
+  const viaPassword = !!cookie;
+  const tag = {};
+  const bufs = [];
+  // Conditional request only for the usual single-page catalogue
+  const first = await fetchPage(1, cookie, pages === 1 ? opts.etag : null, tag);
+  if (first === null) return { unchanged: true, viaPassword, etag: opts.etag };
+  bufs.push(first);
+  for (let p = 2; p <= pages; p++) bufs.push(await fetchPage(p, cookie));
+  const joined = new Uint8Array(bufs.reduce((n, b) => n + b.byteLength, 0));
+  let at = 0;
+  for (const b of bufs) { joined.set(new Uint8Array(b), at); at += b.byteLength; }
+  const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", joined))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  if (opts.skipHash && hash === opts.skipHash) return { unchanged: true, hash, viaPassword, etag: tag.etag };
+
+  const all = [];
+  let last = [];
+  for (const b of bufs) { last = parsePage(b); all.push(...last); }
+  let page = pages;
+  while (last.length === 250) { // catalogue grew past what we fetched
+    last = parsePage(await fetchPage(++page, cookie));
+    all.push(...last);
   }
   if (!all.length) throw new Error("Shop returned no products");
-  all.viaPassword = !!cookie;
-  return all;
+  return Object.assign(all, { viaPassword, hash, pageCount: page, etag: tag.etag });
 }
 
 // Submit the storefront password form like a browser would; returns the
@@ -291,7 +374,7 @@ async function handleInteraction(request, env, ctx) {
         const cookie = await loginWithPassword(pw);
         if (!cookie) return { content: "❌ That password didn't get me in. Double-check it and try `/password` again." };
         await env.STATE.put("cookie", cookie);
-        const summary = await runCheck(env);
+        const summary = await runCheck(env, { force: true });
         return { content: `✅ Password works. I'm now watching behind the lock.\n${summary}` };
       }),
     );
@@ -299,7 +382,7 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (name === "scan") {
-    ctx.waitUntil(followUp(async () => ({ content: "🔎 " + (await runCheck(env)) })));
+    ctx.waitUntil(followUp(async () => ({ content: "🔎 " + (await runCheck(env, { force: true })) })));
     return deferred();
   }
 
@@ -461,17 +544,81 @@ async function postWebhook(env, payload) {
   if (!res.ok) throw new Error(`Discord said HTTP ${res.status}`);
 }
 
-async function send(env, embeds, loud) {
+// ---------- Grid layout for several alerts at once ----------
+
+const KIND_ICON = { new: "🆕", "new-soon": "🔜", restock: "🔁", option: "➕" };
+const KIND_TEXT = { new: "New", "new-soon": "Not on sale yet", restock: "Back in stock", option: "New option" };
+
+// One compact tile (an inline embed field) per item: Discord lays these out
+// up to 3 across on desktop.
+function gridField(kind, item, note, kw) {
+  const vars = Object.entries(item.variants);
+  const live = vars.filter(([, v]) => v.available);
+  const [vid] = (live[0] || vars[0] || []);
+  const title = item.title.length > 90 ? item.title.slice(0, 89) + "…" : item.title;
+  const lines = [
+    `${KIND_ICON[kind]} ${KIND_TEXT[kind]} · ${item.price !== null ? `**$${item.price.toFixed(2)}**` : "price TBC"}`,
+  ];
+  if (kind === "option" && note) lines.push(note.slice(0, 120));
+  if (vid) {
+    const nums = (fmt) => [1, 2, 3, 4, 5].map((n) => `[${n}](${fmt(n)})`).join(" ");
+    lines.push(`🛒 ${nums((n) => `${SHOP}/cart/add?id=${vid}&quantity=${n}`)}`);
+    lines.push(`⚡ ${nums((n) => `${SHOP}/cart/${vid}:${n}`)}`);
+  }
+  const more = (live.length || vars.length) - 1;
+  lines.push(`[View](${SHOP}/products/${item.handle})` + (more > 0 ? ` · +${more} more option${more > 1 ? "s" : ""}` : ""));
+  return { name: (watched(item, kw) ? "🚨 " : "") + title, value: lines.join("\n"), inline: true };
+}
+
+// Returns [{ embeds, count }] messages: a full card for a single alert, or
+// grid cards (tiles + a 2×2 picture gallery) when several land together.
+function alertMessages(found, kw, lockNote) {
+  if (found.length === 1) {
+    const [kind, item, note] = found[0];
+    return [{ embeds: [embed(kind, item, [note, lockNote].filter(Boolean).join("\n") || null, kw)], count: 1 }];
+  }
+  const messages = [];
+  let fields = [], images = [], size = 0, loud = false;
+  const flush = () => {
+    if (!fields.length) return;
+    const main = {
+      title: `Mr Tofu's shop · ${fields.length} update${fields.length > 1 ? "s" : ""}`,
+      url: SHOP, // shared url makes Discord group the images below into one gallery
+      color: loud ? 0xef4444 : 0xf5a524,
+      fields,
+      footer: { text: "🛒 = add that many to cart · ⚡ = straight to checkout" },
+    };
+    if (lockNote) main.description = lockNote;
+    if (images[0]) main.image = { url: images[0] };
+    const gallery = images.slice(1, 4).map((u) => ({ url: SHOP, image: { url: u } }));
+    messages.push({ embeds: [main, ...gallery], count: fields.length });
+    fields = []; images = []; size = 0; loud = false;
+  };
+  for (const [kind, item, note] of found) {
+    const f = gridField(kind, item, note, kw);
+    const len = f.name.length + f.value.length;
+    if (fields.length >= 24 || size + len > 5200) flush(); // Discord: 25 fields / 6000 chars per message
+    fields.push(f);
+    size += len;
+    loud = loud || watched(item, kw);
+    if (item.image && images.length < 4) images.push(item.image);
+  }
+  flush();
+  return messages;
+}
+
+async function send(env, messages, loud) {
   const ping = (env.DISCORD_PING || "").trim();
-  for (let i = 0; i < embeds.length; i += 10) {
-    const chunk = embeds.slice(i, i + 10);
-    await postWebhook(env, {
-      username: "Mr Tofu Stock Watch",
-      content: (ping ? ping + " " : "") + (loud ? "🚨 **Watched item update!** " : "") +
-        `${chunk.length} update${chunk.length !== 1 ? "s" : ""} at Mr Tofu's shop`,
-      embeds: chunk,
-      allowed_mentions: { parse: ["users", "roles", "everyone"] },
-    });
+  for (const { embeds, count } of messages) {
+    for (let i = 0; i < embeds.length; i += 10) {
+      await postWebhook(env, {
+        username: "Mr Tofu Stock Watch",
+        content: (ping ? ping + " " : "") + (loud ? "🚨 **Watched item update!** " : "") +
+          `${count} update${count !== 1 ? "s" : ""} at Mr Tofu's shop`,
+        embeds: embeds.slice(i, i + 10),
+        allowed_mentions: { parse: ["users", "roles", "everyone"] },
+      });
+    }
   }
 }
 
