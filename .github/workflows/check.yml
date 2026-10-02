@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/10 * * * *" # every 10 minutes (GitHub may run it a few minutes late)
   workflow_dispatch: # lets you run it by hand from the Actions tab
+    inputs:
+      test:
+        description: "Also send a test message to Discord"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -24,6 +29,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_PING: ${{ vars.DISCORD_PING }}
+          SEND_TEST: ${{ inputs.test }}
 
       - name: Save what we saw
         run: |

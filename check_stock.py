@@ -132,6 +132,13 @@ def main():
         print("Shop returned no products; skipping so a blip doesn't wipe the state.", file=sys.stderr)
         return 1
 
+    if os.environ.get("SEND_TEST") == "true":
+        sample = next((i for i in current.values() if i["available"]), next(iter(current.values())))
+        e = embed("new", sample)
+        e["author"]["name"] = "✅ Stock watch is connected (test message)"
+        e["description"] = "This is how alerts will look. Example product below."
+        send([e])
+
     first_run = not os.path.exists(STATE_FILE)
     previous = {} if first_run else json.load(open(STATE_FILE, encoding="utf-8"))
 
