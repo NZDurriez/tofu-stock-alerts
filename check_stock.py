@@ -90,20 +90,30 @@ def watched(item):
     return any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", t) for k in KEYWORDS)
 
 
-def cart_links(item, max_options=3):
-    """'ATC 1 · ATC 2 …' links that add that many to the cart on the shop."""
+def buy_links(item, kind):
+    """Quantity links for each option, kept under Discord's 1024-char field limit.
+
+    kind="cart":     'ATC n'  adds n to the cart and opens the cart page
+    kind="checkout": '⚡ n'   cart permalink: jumps straight to checkout with n
+                     (still needs the buyer to confirm payment)
+    """
     vids = [(vid, v) for vid, v in item["variants"].items() if v["available"]]
     live = bool(vids)
     if not live:  # not on sale yet: still give links, they'll work once it goes live
         vids = list(item["variants"].items())
+    note = "" if live else "\n*Not on sale yet: these work once it goes live.*"
     lines = []
-    for vid, v in vids[:max_options]:
-        links = " · ".join(f"[ATC {n}]({SHOP}/cart/add?id={vid}&quantity={n})" for n in range(1, 6))
+    for vid, v in vids:
+        if kind == "cart":
+            links = " · ".join(f"[ATC {n}]({SHOP}/cart/add?id={vid}&quantity={n})" for n in range(1, 6))
+        else:
+            links = " · ".join(f"[⚡ {n}]({SHOP}/cart/{vid}:{n})" for n in range(1, 6))
         name = v["title"] if v["title"] and v["title"] != "Default Title" else ""
-        lines.append((f"**{name}:** " if name and len(vids) > 1 else "") + links)
-    if not lines:
-        return None
-    return "\n".join(lines) + ("" if live else "\n*Not on sale yet: these work once it goes live.*")
+        line = (f"**{name}:** " if name and len(vids) > 1 else "") + links
+        if len("\n".join(lines + [line])) + len(note) > 1024:
+            break
+        lines.append(line)
+    return "\n".join(lines) + note if lines else None
 
 
 LABELS = {
@@ -125,9 +135,12 @@ def embed(kind, item, note=None):
     opts = [v["title"] for v in item["variants"].values() if v["available"] and v["title"] != "Default Title"]
     if opts:
         fields.append({"name": "Available options", "value": ", ".join(opts)[:1024], "inline": False})
-    atc = cart_links(item)
+    atc = buy_links(item, "cart")
     if atc:
-        fields.append({"name": "🛒 Add to cart", "value": atc[:1024], "inline": False})
+        fields.append({"name": "🛒 Add to cart", "value": atc, "inline": False})
+    fast = buy_links(item, "checkout")
+    if fast:
+        fields.append({"name": "⚡ Lightning checkout (straight to payment)", "value": fast, "inline": False})
     e = {
         "author": {"name": label},
         "title": item["title"][:256],
