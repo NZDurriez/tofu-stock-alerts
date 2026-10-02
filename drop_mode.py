@@ -86,14 +86,36 @@ def summarise(p):
     return {
         "title": p["title"],
         "handle": p["handle"],
+        "published": p.get("published_at") or "",
         "variants": {str(v["id"]): (v.get("title") or "", bool(v.get("available")), v.get("price")) for v in p.get("variants") or []},
     }
+
+
+UPCOMING_DAYS = 7
+
+
+def buyable(it):
+    return any(v[1] for v in it["variants"].values())
+
+
+def upcoming(it):
+    """Not buyable yet but a new release rather than old sold-out stock.
+    Shopify reports both as plain "unavailable", and Tofu leaves "Pre-Order"
+    in the names of old sold-out listings, so go by when it was listed."""
+    if buyable(it):
+        return False
+    try:
+        from datetime import datetime, timezone
+        published = datetime.fromisoformat(it["published"])
+        return (datetime.now(timezone.utc) - published).days <= UPCOMING_DAYS
+    except ValueError:
+        return False
 
 
 def status(it):
     vs = list(it["variants"].values())
     price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
-    return ("✅ buyable" if any(v[1] for v in vs) else "⏳ not on sale yet") + (f" · ${price}" if price else "")
+    return ("✅ buyable" if buyable(it) else "🆕 upcoming") + (f" · ${price}" if price else "")
 
 
 def ask(env_name, prompt):
@@ -114,13 +136,15 @@ def choose_targets(current, default_qty):
     that aren't listed yet, matched by title when they appear."""
     by_id, by_words = {}, []
     if current:
-        flt = ask("DROP_FILTER", "\nNarrow the list? Type words like 'delta reign' (Enter = show upcoming items): ").strip().lower()
+        flt = ask("DROP_FILTER", "\nNarrow the list? Type words like 'delta reign' (Enter = show upcoming releases): ").strip().lower()
         if flt:
             words = flt.split()
-            items = [(pid, it) for pid, it in current.items() if all(w in it["title"].lower() for w in words)]
-        else:  # default: things not on sale yet, which is what drops are made of
-            items = [(pid, it) for pid, it in current.items() if not any(v[1] for v in it["variants"].values())]
-        items.sort(key=lambda x: x[1]["title"])
+            items = [(pid, it) for pid, it in current.items()
+                     if all(w in it["title"].lower() for w in words) and (buyable(it) or upcoming(it))]
+        else:  # default: upcoming releases, which is what drops are made of
+            items = [(pid, it) for pid, it in current.items() if upcoming(it)]
+        # Old sold-out stock is never listed; upcoming first, then buyable
+        items.sort(key=lambda x: (buyable(x[1]), x[1]["title"]))
         items = items[:40]
         print()
         if items:
