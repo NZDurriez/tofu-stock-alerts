@@ -191,7 +191,7 @@ class Watcher:
             self.thread = threading.Thread(target=self.loop, daemon=True)
             self.thread.start()
         summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}" for p, q in self.picks.items()]
-        summary += [f"anything matching [{t}] x{q}" for _, q, t in self.words]
+        summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
         if open_now:
             self.checkout(self.ready_items())
@@ -292,10 +292,12 @@ def keywords(text):
 
 
 def keyword_match(keys, title):
-    """Every word must appear somewhere in the product name, in any order
-    (same as the search box, so what you see is what's watched)."""
+    """Every word must start a word in the product name, in any order (the
+    search box works the same, so what you see is what's watched). 'box'
+    finds 'Boxes' but 'ex' doesn't find 'Next'; 'preorder' finds 'Pre-order'."""
     t = norm(title)
-    return all(k in t for k in keys)
+    squashed = re.sub(r"[^\w\s]", "", t)
+    return all(re.search(r"(?<!\w)" + re.escape(k), t) or re.search(r"(?<!\w)" + re.escape(k), squashed) for k in keys)
 
 
 W = Watcher()

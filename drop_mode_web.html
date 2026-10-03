@@ -108,8 +108,22 @@ input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);b
 input[type=search]:focus{border-color:var(--accent)}
 .watchbtn{flex:none;background:var(--accent);color:var(--accent-ink);padding:8px 14px}
 .watchbtn:disabled{background:var(--ok-soft);color:var(--ok);opacity:1;cursor:default}
-.item.anything{background:var(--accent-soft)}
-.item.anything .thumb.none{background:var(--surface);color:var(--accent)}
+.kwbox{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--field)}
+.kwbox input[type=text]{width:100%;font-size:16px;background:var(--surface)}
+.suggest{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
+.suggest button{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:3px 11px;font:500 13px Inter,sans-serif}
+.suggest button:hover{border-color:var(--accent);color:var(--accent)}
+.kwprev{margin-top:12px;font-size:13.5px;color:var(--muted)}
+.kwprev:empty{display:none}
+.kwprev .pv-h{color:var(--text);font-weight:600;margin:6px 0 4px}
+.kwprev .hit{display:flex;align-items:center;gap:10px;color:var(--text);padding:3px 0}
+.kwprev .hit .thumb{width:40px;height:40px}
+.kwprev .gone{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:2px 0}
+.kwprev .warnline{margin-top:8px}
+.divider{border-top:1px solid var(--line);margin:22px 0 16px}
+.bridge{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 14px;font-size:13.5px;color:var(--muted);background:var(--accent-soft)}
+.bridge button{padding:6px 12px}
+.kwtag{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:7px;padding:1px 8px;margin:2px 4px 2px 0;font-weight:600}
 .resnote{padding:10px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line)}
 .wl{display:grid;gap:10px}
 .wl-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--field)}
@@ -198,8 +212,20 @@ input[type=search]:focus{border-color:var(--accent)}
       </section>
 
       <section class="card">
-        <h2><span class="step">2</span>Add products to your watchlist</h2>
-        <p class="lead">Search the shop and press <b style="color:var(--text);font-weight:600">+ Watch</b>. Not listed yet? Watch <b style="color:var(--text);font-weight:600">"Anything matching"</b> your search to catch it the moment Tofu adds it.</p>
+        <h2><span class="step">2</span>Add to your watchlist</h2>
+
+        <h3 class="sub" style="margin-top:10px">Watch for keywords</h3>
+        <p class="lead" style="margin-top:2px">Catches products the moment Tofu adds or restocks them, even ones that aren't listed yet. Separate keywords with commas: a product needs <b style="color:var(--text);font-weight:600">all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</p>
+        <div class="kwbox">
+          <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
+          <div class="suggest" id="suggest"></div>
+          <div class="acts" id="kwActs"></div>
+          <div class="kwprev" id="kwPrev"></div>
+        </div>
+
+        <div class="divider"></div>
+        <h3 class="sub">Or pick an exact product</h3>
+        <p class="lead" style="margin-top:2px">Search everything in the shop, sold out included, and press <b style="color:var(--text);font-weight:600">+ Watch</b>.</p>
         <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
         <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
       </section>
@@ -335,7 +361,7 @@ function renderLoginState() {
   const ub = $("unlockBtn");
   if (ub) ub.onclick = () => unlockBrowser(true);
   const lo = $("logoutBtn");
-  if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); search(); refreshInfo(); };
+  if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); search(); refreshInfo(); kwPreview(); };
 }
 
 $("loginBtn").onclick = async () => {
@@ -345,7 +371,7 @@ $("loginBtn").onclick = async () => {
   lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
   if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false); // locked shop + right password
   seenState = r.shopState;
-  await poll(); search(); refreshInfo();
+  await poll(); search(); refreshInfo(); kwPreview();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
@@ -370,26 +396,75 @@ function thumb(it, icon = "📦") {
     ? `<img class="thumb" src="${esc(it.image)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb none',textContent:'📦'}))">`
     : `<span class="thumb none">${icon}</span>`;
 }
-const wordsKey = (s) => s.toLowerCase().split(/[\s,]+/).filter(Boolean).join(" ");
+// Same words in any order = the same keyword watch
+const wordsKey = (s) => s.toLowerCase().split(/[\s,]+/).filter(Boolean).sort().join(" ");
 const onList = (kind, key) => watchlist.some((w) => w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
 
+// ---- keywords ----
+const SUGGEST = ["Elite Trainer Box", "Booster Bundle", "Booster Box", "Booster Pack", "Pre-order"];
+let kwQty = 1;
+const cleanKw = (s) => s.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").replace(/\s*,\s*/g, ", ").replace(/(, )+/g, ", ");
+function renderKwActs() {
+  const text = cleanKw($("kwInput").value), already = text && onList("words", wordsKey(text));
+  $("kwActs").innerHTML = `<span class="lbl">Buy</span>${qtyButtons(kwQty)}
+    <button class="watchbtn" id="kwAdd" ${!text || already ? "disabled" : ""}>${already ? "✓ On your watchlist" : "+ Watch keywords"}</button>`;
+  wireQty($("kwActs"), (n) => { kwQty = n; });
+  $("kwAdd").onclick = addKeywords;
+}
+$("suggest").innerHTML = '<span>Add:</span>' + SUGGEST.map((k) => `<button type="button" data-k="${esc(k)}">+ ${esc(k)}</button>`).join("");
+$("suggest").querySelectorAll("button").forEach((b) => b.onclick = () => {
+  const cur = cleanKw($("kwInput").value);
+  $("kwInput").value = cur ? `${cur}, ${b.dataset.k}` : b.dataset.k;
+  $("kwInput").focus();
+  kwChanged(0);
+});
+// Show what the keywords match right now. Typing never adds anything: only the button (or Enter) does.
+async function kwPreview() {
+  const text = cleanKw($("kwInput").value), el = $("kwPrev");
+  if (!text) { el.innerHTML = ""; return; }
+  if (!lastProducts) { el.textContent = "Load the shop to see what these keywords match right now."; return; }
+  const m = await api("/api/match?k=" + encodeURIComponent(text));
+  if (text !== cleanKw($("kwInput").value)) return; // still typing
+  let html = "";
+  if (m.total) {
+    html += `<div class="pv-h">In stock now (${m.total})</div>`
+      + m.items.map((it) => `<div class="hit">${thumb(it)}<span>${esc(it.title)}${it.price ? ` · $${esc(it.price)}` : ""}</span></div>`).join("")
+      + (m.total > m.items.length ? `<div class="hit">…and ${m.total - m.items.length} more</div>` : "");
+    const all = m.total === 1 ? "it" : `all ${m.total}`;
+    html += `<div class="warnline">${running ? `You're watching, so adding this opens checkout for ${all} straight away.` : `Checkout opens for ${all} as soon as you start watching.`}${m.total > 1 ? " Add more keywords to narrow it down." : ""}</div>`;
+  }
+  if (m.unavailableTotal) {
+    html += `<div class="pv-h">Matches you can't buy right now (${m.unavailableTotal})</div>`
+      + m.unavailable.map((u) => `<div class="gone">${badgeHtml[u.state]}<span>${esc(u.title)}</span></div>`).join("")
+      + (m.unavailableTotal > m.unavailable.length ? `<div class="gone">…and ${m.unavailableTotal - m.unavailable.length} more</div>` : "")
+      + '<div style="margin-top:4px">Checkout opens if they come back in stock.</div>';
+  }
+  if (!m.total && !m.unavailableTotal) html = "Nothing in the shop matches yet. Checkout opens the moment Tofu adds something that does.";
+  el.innerHTML = html;
+}
+let kwTimer;
+function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
+function addKeywords() {
+  const text = cleanKw($("kwInput").value);
+  if (!text || onList("words", wordsKey(text))) return;
+  watchlist.push({ kind: "words", text, qty: kwQty });
+  $("kwInput").value = ""; kwQty = 1;
+  kwChanged(0);
+  watchlistChanged();
+}
+$("kwInput").oninput = () => kwChanged();
+$("kwInput").onkeydown = (e) => { if (e.key === "Enter") addKeywords(); };
+
+// ---- exact products ----
 async function search() {
   const q = $("search").value.trim(), el = $("results");
   if (!lastProducts) { el.innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const [r, m] = await Promise.all([
-    api("/api/products?filter=" + encodeURIComponent(q)),
-    q ? api("/api/match?k=" + encodeURIComponent(q)) : null,
-  ]);
+  const r = await api("/api/products?filter=" + encodeURIComponent(q));
   if (q !== $("search").value.trim()) return; // a newer search is on its way
   let html = "";
   if (q) {
-    const already = onList("words", wordsKey(q));
-    html += `<div class="item anything" data-kind="words">
-      <span class="thumb none">🔎</span>
-      <div class="t"><b>Anything matching "${esc(q)}"</b>
-        <div class="meta">Catches it when Tofu adds it, even if it's not listed yet${m && m.total ? ` · ${m.total} in stock now` : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
-    </div>`;
+    html += `<div class="bridge"><span>Not listed yet, or want anything with these words?</span>
+      <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
     html += '<div class="resnote" style="border-top:0">In stock now. Type to search everything, including sold out.</div>';
   }
@@ -410,12 +485,18 @@ async function search() {
     let qty = 1;
     wireQty(row, (n) => { qty = n; });
     row.querySelector(".watchbtn").onclick = () => {
-      if (row.dataset.kind === "words") watchlist.push({ kind: "words", text: q, qty });
-      else { const it = byId[row.dataset.id]; watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty }); }
+      const it = byId[row.dataset.id];
+      watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty });
       watchlistChanged();
-      search();
     };
   });
+  const use = $("useKw");
+  if (use) use.onclick = () => {
+    $("kwInput").value = q;
+    $("kwInput").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("kwInput").focus();
+    kwChanged(0);
+  };
 }
 let searchTimer;
 $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 250); };
@@ -432,22 +513,27 @@ function statusHtml(w) {
   }
   const m = info.words[w.text];
   if (!m) return "";
-  if (!m.total) return '<span class="badge b-soon">Not in stock</span> Opens the moment a match is added or restocked';
+  if (!m.total) {
+    if (!m.unavailableTotal) return '<span class="badge b-soon">Nothing listed yet</span> Opens the moment Tofu adds a match';
+    const gone = m.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ")
+      + (m.unavailableTotal > m.unavailable.length ? "…" : "");
+    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or Tofu adds a new match</span>`;
+  }
   const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
   return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
-    + (m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more words to the search, or watch the exact product instead.</span>` : "");
+    + (m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "");
 }
 function renderWatchlist() {
   $("wlCount").textContent = watchlist.length ? `${watchlist.length} item${watchlist.length === 1 ? "" : "s"}` : "";
   if (!watchlist.length) {
-    $("watchlist").innerHTML = '<div class="wl-empty">Nothing on your watchlist yet. Search in step 2 and press <b>+ Watch</b>.</div>';
+    $("watchlist").innerHTML = '<div class="wl-empty">Nothing on your watchlist yet. Add keywords or a product in step 2.</div>';
     return;
   }
   $("watchlist").innerHTML = watchlist.map((w, i) => `
     <div class="wl-row" data-i="${i}">
       ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : '<span class="thumb none">🔎</span>'}
       <div class="t">
-        <div class="name">${w.kind === "product" ? esc(w.title) : `Anything matching "${esc(w.text)}"`}</div>
+        <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
         <div class="st">${statusHtml(w)}</div>
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty)}</div>
       </div>
@@ -456,7 +542,7 @@ function renderWatchlist() {
   $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
     const i = +row.dataset.i;
     wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
-    row.querySelector(".rm").onclick = () => { watchlist.splice(i, 1); watchlistChanged(); search(); };
+    row.querySelector(".rm").onclick = () => { watchlist.splice(i, 1); watchlistChanged(); };
   });
 }
 // Ask the program how each entry stands (in stock, sold out, what a search matches)
@@ -482,7 +568,7 @@ function watchlistBody() {
 // Saved in this browser, and handed to the program straight away if it's watching
 function watchlistChanged(redraw = true) {
   try { localStorage.setItem("dropWatchlist", JSON.stringify(watchlist)); } catch {}
-  if (redraw) refreshInfo();
+  if (redraw) { refreshInfo(); search(); renderKwActs(); }
   if (running) api("/api/start", watchlistBody());
 }
 $("startBtn").onclick = async () => {
@@ -552,7 +638,7 @@ $("lockGo").onclick = async () => {
     $("lockErr").textContent = "That password didn't work. Check it and try again.";
   }
   seenState = r.shopState;
-  await poll(); search(); refreshInfo();
+  await poll(); search(); refreshInfo(); kwPreview();
 };
 $("lockPw").onkeydown = (e) => { if (e.key === "Enter") $("lockGo").click(); };
 $("lockLater").onclick = () => $("lockAlert").classList.remove("show");
@@ -589,7 +675,7 @@ async function poll() {
     $("startBtn").textContent = r.running ? "✓ Watching" : "Start watching";
     $("startBtn").disabled = !r.products || r.running;
     $("stopBtn").disabled = !r.running;
-    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); } // the program already had the shop loaded
+    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); } // the program already had the shop loaded
     renderLoginState();
   } catch {
     setChip("sRun", "Drop mode program isn't running", "warn");
@@ -597,7 +683,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-renderWatchlist(); poll(); setInterval(poll, 1000);
+renderWatchlist(); renderKwActs(); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>
