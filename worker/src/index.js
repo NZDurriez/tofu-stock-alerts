@@ -152,7 +152,7 @@ async function runCheck(env, opts = {}) {
   } catch (err) {
     if (!(err && err.locked)) {
       await recordFailure(env, meta, err);
-      return `Couldn't check the shop: ${err}`;
+      return err && err.busy ? "⏳ The shop is busy right now (it asked me to slow down); the next check will retry." : `Couldn't check the shop: ${err}`;
     }
     // Shop switched to its password page (usually while a drop is being set up)
     if (!meta.locked) {
@@ -177,7 +177,7 @@ async function runCheck(env, opts = {}) {
         return "🔑 The saved password no longer works.";
       }
       await recordFailure(env, meta, e2);
-      return `Couldn't check the shop: ${e2}`;
+      return e2 && e2.busy ? "⏳ The shop is busy right now (it asked me to slow down); the next check will retry." : `Couldn't check the shop: ${e2}`;
     }
     if (!meta.behindLock) {
       meta.behindLock = new Date().toISOString();
@@ -261,13 +261,24 @@ async function recordFailure(env, meta, err) {
   }
 }
 
+// Shopify rate-limits by IP, and Cloudflare's outgoing IPs are shared with
+// lots of other sites, so a "slow down" reply is often someone else's traffic.
+// Retrying after a short random pause usually goes out on a different IP.
+async function shopFetch(url, init, tries = 3) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(url, init);
+    if (![429, 430, 503].includes(res.status) || attempt >= tries) return res;
+    await sleep(1000 + Math.random() * 3000);
+  }
+}
+
 // With an etag, Shopify answers 304 (no body) when nothing changed; then this
 // returns null. Otherwise returns the page body.
 async function fetchPage(page, cookie, etag, out) {
   const headers = { "User-Agent": BROWSER_UA, Accept: "application/json", "Cache-Control": "no-cache" };
   if (cookie) headers.Cookie = cookie;
   if (etag) headers["If-None-Match"] = etag;
-  const res = await fetch(`${SHOP}/products.json?limit=250&page=${page}&_=${Date.now()}`, {
+  const res = await shopFetch(`${SHOP}/products.json?limit=250&page=${page}&_=${Date.now()}`, {
     headers,
     cf: { cacheTtl: 0, cacheEverything: false },
   });
@@ -323,7 +334,8 @@ async function fetchCollections(handles, cookie) {
   for (const h of handles) {
     const headers = { "User-Agent": BROWSER_UA, Accept: "application/json" };
     if (cookie) headers.Cookie = cookie;
-    const res = await fetch(`${SHOP}/collections/${h}/products.json?limit=250&_=${Date.now()}`, { headers, cf: { cacheTtl: 0 } });
+    const res = await shopFetch(`${SHOP}/collections/${h}/products.json?limit=250&_=${Date.now()}`, { headers, cf: { cacheTtl: 0 } }, 4);
+    if ([429, 430, 503].includes(res.status)) throw Object.assign(new Error(`HTTP ${res.status}`), { busy: true });
     if (res.status === 401) throw Object.assign(new Error("Shop is password-locked"), { locked: true });
     if (res.status === 404) continue;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -460,6 +472,7 @@ async function handleInteraction(request, env, ctx) {
             ? await fetchCollections(filter.handles, cookie || null)
             : await fetchProducts(cookie || null);
         } catch (err) {
+          if (err && err.busy) return { content: "⏳ Mr Tofu's shop is busy right now (it asked me to slow down). Try `/instock` again in a moment." };
           if (!(err && err.locked)) return { content: `Couldn't check the shop: ${err}` };
           return { content: cookie
             ? "🔑 The saved shop password no longer works. Send the new one with /password."
