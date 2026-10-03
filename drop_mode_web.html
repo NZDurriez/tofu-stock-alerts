@@ -107,7 +107,8 @@ input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);b
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='m13 13 4 4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:14px center}
 input[type=search]:focus{border-color:var(--accent)}
 .watchbtn{flex:none;background:var(--accent);color:var(--accent-ink);padding:8px 14px}
-.watchbtn:disabled{background:var(--ok-soft);color:var(--ok);opacity:1;cursor:default}
+.watchbtn:disabled{opacity:.4;cursor:default}
+.watchbtn.done{background:var(--ok-soft);color:var(--ok);opacity:1}
 .kwbox{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--field)}
 .kwbox input[type=text]{width:100%;font-size:16px;background:var(--surface)}
 .suggest{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
@@ -141,6 +142,12 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
 .count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
 .warnline{color:var(--bad);width:100%}
+.sound select{flex:1;min-width:180px}
+.vol{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:14px;color:var(--muted)}
+.vol input{flex:1;accent-color:var(--accent)}
+.vol span{min-width:42px;text-align:right;color:var(--text)}
+.filebtn{display:inline-flex;align-items:center;cursor:pointer}
+#customRow{margin-top:12px}
 @keyframes ping{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 @keyframes glow{50%{background:var(--ok-soft)}}
 .chip-s.live{color:var(--text);animation:glow 2s ease-in-out infinite}
@@ -248,6 +255,20 @@ input[type=search]:focus{border-color:var(--accent)}
         <div class="tip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</div>
       </section>
 
+      <section class="card sound">
+        <h2>🔔 Alert sound</h2>
+        <p class="lead">Plays on this PC when checkout opens or the shop locks, even when this page is in the background.</p>
+        <div class="row">
+          <select id="sound" aria-label="Alert sound"></select>
+          <button class="secondary" id="soundTest">▶ Play</button>
+        </div>
+        <div class="row" id="customRow" hidden>
+          <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:9px 14px;font-weight:600;font-size:14px">Choose a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
+          <span class="hint" id="customName" style="margin:0"></span>
+        </div>
+        <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
+      </section>
+
       <section class="card">
         <h2>Activity</h2>
         <p class="lead" style="margin-bottom:12px">Everything drop mode sees, newest at the bottom.</p>
@@ -283,7 +304,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",
 let watchlist = [];
 try { watchlist = JSON.parse(localStorage.getItem("dropWatchlist") || "[]"); } catch {}
 let info = { picks: {}, words: {} }; // how each entry stands in the shop right now
-let lastId = 0, audio = null, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
+let lastId = 0, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
 let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
 const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
 
@@ -407,7 +428,7 @@ const cleanKw = (s) => s.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").re
 function renderKwActs() {
   const text = cleanKw($("kwInput").value), already = text && onList("words", wordsKey(text));
   $("kwActs").innerHTML = `<span class="lbl">Buy</span>${qtyButtons(kwQty)}
-    <button class="watchbtn" id="kwAdd" ${!text || already ? "disabled" : ""}>${already ? "✓ On your watchlist" : "+ Watch keywords"}</button>`;
+    <button class="watchbtn${already ? " done" : ""}" id="kwAdd" ${!text || already ? "disabled" : ""}>${already ? "✓ On your watchlist" : "+ Watch keywords"}</button>`;
   wireQty($("kwActs"), (n) => { kwQty = n; });
   $("kwAdd").onclick = addKeywords;
 }
@@ -474,7 +495,7 @@ async function search() {
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
   if (!r.items.length) html += `<div class="empty">No products ${q ? "match that right now" : "in stock right now"}.</div>`;
@@ -572,7 +593,6 @@ function watchlistChanged(redraw = true) {
   if (running) api("/api/start", watchlistBody());
 }
 $("startBtn").onclick = async () => {
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   await api("/api/start", watchlistBody());
   poll();
@@ -580,18 +600,65 @@ $("startBtn").onclick = async () => {
 $("interval").onchange = () => { if (running) api("/api/start", watchlistBody()); };
 $("stopBtn").onclick = () => api("/api/stop", {});
 
-function beep() {
-  if (!audio) return;
-  [0, .18, .36, .7, .88, 1.06].forEach((t, i) => {
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = [1400, 1900, 2400][i % 3];
-    g.gain.setValueAtTime(.25, audio.currentTime + t); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + t + .16);
-    o.connect(g).connect(audio.destination); o.start(audio.currentTime + t); o.stop(audio.currentTime + t + .17);
-  });
+// ---------- alert sound ----------
+// Drop mode plays it on this PC the moment something happens, so it works
+// even while this page is in the background. This just picks it.
+let soundInfo = null;
+async function loadSound() {
+  const r = soundInfo = await api("/api/sound");
+  $("sound").innerHTML = r.sounds.map((s) =>
+    `<option value="${s.id}">${esc(s.name)}${s.id === "custom" && r.customName ? `: ${esc(r.customName)}` : ""}</option>`).join("");
+  $("sound").value = r.sound;
+  $("volume").value = r.volume; $("volVal").textContent = r.volume + "%";
+  $("customRow").hidden = r.sound !== "custom";
+  $("customName").textContent = r.customName ? "Or choose a different one." : "";
+}
+$("sound").onchange = async () => {
+  const sound = $("sound").value;
+  $("customRow").hidden = sound !== "custom";
+  if (sound === "custom" && !soundInfo.hasCustom) { $("customName").textContent = "Pick an MP3 or WAV file (the first 15 seconds are used)."; return; }
+  await api("/api/sound", { sound, play: true }); // play it so you hear what you picked
+  loadSound();
+};
+$("volume").oninput = () => { $("volVal").textContent = $("volume").value + "%"; };
+$("volume").onchange = async () => { await api("/api/sound", { volume: +$("volume").value, play: true }); loadSound(); };
+$("soundTest").onclick = () => api("/api/sound/test", {});
+$("soundFile").onchange = async () => {
+  const file = $("soundFile").files[0];
+  $("soundFile").value = "";
+  if (!file) return;
+  $("customName").textContent = "Loading…";
+  try {
+    const r = await api("/api/sound/custom", { name: file.name, wav: await toWav(await file.arrayBuffer()) });
+    if (r.error) throw new Error(r.error);
+  } catch {
+    $("customName").textContent = "Couldn't use that file. Try an MP3 or WAV.";
+    return;
+  }
+  loadSound();
+};
+// Your file -> the first 15 seconds as a small mono WAV the program can play
+async function toWav(bytes) {
+  const rate = 22050, buf = await new OfflineAudioContext(1, 1, rate).decodeAudioData(bytes);
+  const n = Math.min(buf.length, rate * 15), chans = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) chans.push(buf.getChannelData(c));
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const text = (at, s) => { for (let i = 0; i < s.length; i++) out.setUint8(at + i, s.charCodeAt(i)); };
+  text(0, "RIFF"); out.setUint32(4, 36 + n * 2, true); text(8, "WAVE"); text(12, "fmt ");
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, rate, true);
+  out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true); text(36, "data"); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (const ch of chans) s += ch[i];
+    out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s / chans.length)) * 32767, true);
+  }
+  const bytesOut = new Uint8Array(out.buffer);
+  let bin = "";
+  for (let i = 0; i < bytesOut.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytesOut.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 function openCheckout(ev) {
-  beep();
   const what = ev.text.replace(/^⚡ Opening checkout: /, "");
   $("alertGo").href = ev.url;
   if (ev.openedByProgram) { // already opened in your default browser
@@ -611,7 +678,6 @@ function openCheckout(ev) {
 }
 // ---------- the shop got locked while watching ----------
 function showLockAlert() {
-  beep();
   $("lockErr").textContent = "";
   $("lockPw").value = $("pw").value;
   $("lockAlert").classList.add("show");
@@ -683,7 +749,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-renderWatchlist(); renderKwActs(); poll(); setInterval(poll, 1000);
+renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>

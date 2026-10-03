@@ -27,6 +27,10 @@ KEYWORDS = [k.strip() for k in (
 DRY_OPEN = os.environ.get("DROP_DRY_OPEN") == "1"  # tests: print instead of opening the browser
 
 COOKIES = os.path.join(tempfile.gettempdir(), "tofu_drop_cookies.txt")
+# The alert sound picked in the browser version (made by sounds.py)
+SOUND_DIR = os.environ.get("DROP_SOUND_DIR") or os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "TofuDropMode")
+ALERT_WAV = os.path.join(SOUND_DIR, "alert.wav")
 
 
 def watched(title):
@@ -88,8 +92,15 @@ def fetch(etag=None):
 
 
 def alarm(times=3):
+    """Play the alert sound picked in the browser version, or beeps if none was."""
+    if os.environ.get("DROP_MUTE") == "1":  # tests: say it instead of playing it
+        print("[alert sound]", flush=True)
+        return
     try:
         import winsound
+        if os.path.exists(ALERT_WAV):
+            winsound.PlaySound(ALERT_WAV, winsound.SND_FILENAME | winsound.SND_NODEFAULT)
+            return
         for _ in range(times):
             for f in (1400, 1900, 2400):
                 winsound.Beep(f, 120)

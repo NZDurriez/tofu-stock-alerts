@@ -3,10 +3,13 @@
 Runs a small web app on this PC only (http://127.0.0.1:8765) that does the
 same job as drop_mode.py: log in behind the shop password, pick products and
 quantities, then watch every few seconds and open ⚡ checkout the moment a pick
-can be bought. You still press Pay yourself.
+can be bought. You still press Pay yourself. The alert sound (picked in the
+page) plays from this program, so it works even when the page is in the
+background.
 
 Start it with the "Tofu Drop Mode (Browser)" shortcut on the desktop.
 """
+import base64
 import json
 import os
 import re
@@ -16,6 +19,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import drop_mode as dm  # shop access, labels and matching come from drop mode
+import sounds
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("DROP_WEB_PORT", "8765"))
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_web.html")
@@ -130,7 +134,7 @@ class Watcher:
         self.log("checkout", f"⚡ Opening checkout: {names}", url, openedByProgram=by_program)
         if by_program:
             webbrowser.open(url)
-        threading.Thread(target=dm.alarm, daemon=True).start()
+        play_alert()
 
     def target_qty(self, pid, it, wanted=None, words=None):
         wanted = self.picks if wanted is None else wanted
@@ -251,6 +255,7 @@ class Watcher:
                         if self.shop_state not in ("locked", "bad"):  # once per lock, not after each wrong try
                             # Ask the page to sound the alarm and pop up a password box
                             self.log("lock", "🔒 Mr Tofu just locked the shop. Enter the password to keep watching.", None, alert="lock")
+                            play_alert()
                         self.logged_in = False
                         if self.shop_state != "bad":  # keep showing "wrong password" until a new try
                             self.shop_state = "locked"
@@ -263,6 +268,17 @@ class Watcher:
             except Exception as exc:
                 self.log("warn", f"Check failed: {exc}")
             time.sleep(wait)
+
+
+def play_alert():
+    """Sound the alert on this PC (without holding up the watching)."""
+    threading.Thread(target=dm.alarm, daemon=True).start()
+
+
+def sound_info():
+    s = sounds.load()
+    return {**s, "hasCustom": os.path.exists(sounds.CUSTOM_WAV),
+            "sounds": [{"id": k, "name": v} for k, v in sounds.NAMES.items()]}
 
 
 def card(pid, it):
@@ -348,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/match":
             from urllib.parse import unquote_plus
             self.send_json(W.matches(unquote_plus(params.get("k", ""))) or {"items": [], "total": 0})
+        elif path == "/api/sound":
+            self.send_json(sound_info())
         elif path == "/api/events":
             W.last_poll = time.time()
             since = int(params.get("since", "0") or 0)
@@ -378,11 +396,36 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/stop":
             W.stop()
             self.send_json({"ok": True})
+        elif self.path == "/api/sound":  # pick a built-in sound and/or the volume
+            s = sounds.load()
+            if data.get("sound") in sounds.NAMES and (data["sound"] != "custom" or os.path.exists(sounds.CUSTOM_WAV)):
+                s["sound"] = data["sound"]
+            if "volume" in data:
+                s["volume"] = max(5, min(100, int(data["volume"])))
+            sounds.save(s)
+            if data.get("play"):
+                play_alert()
+            self.send_json(sound_info())
+        elif self.path == "/api/sound/custom":  # a sound file of your own (the page sends it as WAV)
+            try:
+                sounds.save_custom(base64.b64decode(data.get("wav", "")), data.get("name", ""))
+            except Exception as exc:
+                self.send_json({"error": str(exc)}, 400)
+                return
+            play_alert()
+            self.send_json(sound_info())
+        elif self.path == "/api/sound/test":
+            play_alert()
+            self.send_json({"ok": True})
         else:
             self.send_json({"error": "not found"}, 404)
 
 
 def main():
+    try:
+        sounds.ensure()  # first run: make the default alert sound
+    except Exception as exc:
+        print(f"(Couldn't make the alert sound, so it'll beep instead: {exc})")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     url = f"http://{HOST}:{PORT}/"
     print(f"Mr Tofu Drop Mode is running at {url}  (close this window to stop)")
