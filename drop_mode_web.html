@@ -448,7 +448,10 @@ let lastId = 0, running = false, lastProducts = 0, shopState = null, loggedIn = 
 let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
 const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
 
+// On your phone, every request carries the secret key from the QR code
+const KEY_HEADERS = window.DROP_KEY ? { "X-Drop-Key": window.DROP_KEY } : {};
 async function api(path, body, headers = {}) {
+  headers = { ...KEY_HEADERS, ...headers };
   const res = await fetch(path, body
     ? { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
     : { headers });
@@ -623,7 +626,7 @@ async function readyPhoneSound() {
   try {
     phoneAudio = phoneAudio || new (window.AudioContext || window.webkitAudioContext)();
     await phoneAudio.resume();
-    phoneSound = await phoneAudio.decodeAudioData(await (await fetch("/alert.wav")).arrayBuffer());
+    phoneSound = await phoneAudio.decodeAudioData(await (await fetch("/alert.wav", { headers: KEY_HEADERS })).arrayBuffer());
   } catch {}
 }
 if (REMOTE) document.addEventListener("pointerdown", readyPhoneSound, { once: true });

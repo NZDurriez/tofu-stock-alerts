@@ -623,29 +623,25 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def gate(self, params):
-        """On the phone link, only the secret key from the QR code gets in. The
-        first visit (with ?key=) saves it in a cookie and tidies the address."""
+        """On the phone link, only the secret key from the QR code gets in. It
+        comes in the link (?key=), then the page sends it with every request
+        (X-Drop-Key), so it works even where phones hold cookies back (e.g. a
+        link opened from the camera app). A cookie is kept as a spare for
+        opening drop mode without the key in the address."""
         if not self.remote:
             return True
-        given = params.get("key", "")
+        given = params.get("key") or self.headers.get("X-Drop-Key", "")
         if not given:  # read only our own cookie (other sites' cookies for this address can be odd)
             m = re.search(r"(?:^|;)\s*dropkey=([A-Za-z0-9_-]+)", self.headers.get("Cookie", ""))
             given = m.group(1) if m else ""
         if PHONE.enabled and given and hmac.compare_digest(given, PHONE.key):
-            if not params.get("key"):
-                return True
-            W.log("ok", "📱 Your phone scanned the link.")
-            self.send_response(303)
-            self.send_header("Set-Cookie", f"dropkey={PHONE.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict")
-            self.send_header("Location", "/")
-            self.end_headers()
-            return False
+            return True
         if not self.path.startswith("/favicon") and time.time() - PHONE.last_reject > 60:
             PHONE.last_reject = time.time()
-            W.log("warn", "📱 Something opened the phone link without the right key (an old link?). Scan the QR code again.")
+            W.log("warn", "📱 Your phone (or something) opened the phone link without the right key. Scan the QR code again.")
         body = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Tofu Drop Mode</title>"
-                "<p style='font:16px system-ui,sans-serif;padding:24px;line-height:1.5'>To use drop mode from your phone, "
-                "open <b>📱 Phone</b> in drop mode on your PC and scan the QR code.</p>").encode()
+                "<p style='font:16px system-ui,sans-serif;padding:24px;line-height:1.5'>This phone link is missing its key or is out of date. "
+                "Open <b>📱 Phone</b> in drop mode on your PC and scan the QR code again.</p>").encode()
         self.send_response(403)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -685,11 +681,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             with open(PAGE, "rb") as f:
                 body = f.read()
-            if self.remote:  # tell the page it's open on a phone
-                body = body.replace(b"<head>", b"<head><script>window.DROP_REMOTE = true;</script>", 1)
+            if self.remote:  # tell the page it's on a phone, and give it the key to send with its requests
+                body = body.replace(b"<head>", f'<head><script>window.DROP_REMOTE = true; window.DROP_KEY = "{PHONE.key}";</script>'.encode(), 1)
                 W.log("ok", "📱 Your phone opened drop mode.")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            if self.remote:
+                self.send_header("Set-Cookie", f"dropkey={PHONE.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax")
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/products":
