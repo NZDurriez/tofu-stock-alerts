@@ -66,6 +66,12 @@ h1 span{color:var(--accent)}
   .col.collapsed .spacer{display:none}
   .col.collapsed .col-title{writing-mode:vertical-rl}
 }
+.cats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.cat{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:4px 12px;font:500 13px Inter,sans-serif}
+.cat:hover{border-color:var(--accent)}
+.cat .n{color:var(--faint);font-size:12px;margin-left:4px}
+.cat.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.cat.on .n{color:var(--accent-ink);opacity:.7}
 .subtoggle{display:flex;align-items:center;gap:8px;width:100%;padding:2px 0;background:none;border:0;border-radius:0;color:var(--text);font:600 15px Inter,sans-serif;text-align:left}
 .subtoggle:hover{color:var(--accent)}
 .subtoggle .chev{display:inline-block;color:var(--c-setup);transition:transform .15s}
@@ -326,6 +332,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
         <div id="exactBody" hidden>
           <p class="lead" style="margin:6px 0 12px">Search everything in the shop, sold out included, and press <b style="color:var(--text);font-weight:600">+ Watch</b>.</p>
+          <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
           <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
         </div>
@@ -448,8 +455,22 @@ $("exactToggle").onclick = () => {
   const open = $("exactBody").hidden;
   $("exactBody").hidden = !open;
   $("exactToggle").setAttribute("aria-expanded", String(open));
-  if (open) $("search").focus();
+  if (open) { loadCats(); search(); $("search").focus(); }
 };
+
+// Tofu's menu headers as filters for the search (same categories as his site)
+let cat = "", catNames = {}, catTimer;
+async function loadCats() {
+  if (!lastProducts) { $("cats").innerHTML = ""; return; }
+  const r = await api("/api/categories");
+  catNames = Object.fromEntries(r.categories.map((c) => [c.id, c.name]));
+  const chip = (id, name, n) => `<button type="button" class="cat${cat === id ? " on" : ""}" data-cat="${id}">${esc(name)}${n === null ? "" : `<span class="n">${n}</span>`}</button>`;
+  $("cats").innerHTML = chip("", "All", null)
+    + r.categories.map((c) => chip(c.id, c.name, r.loading ? "…" : c.count)).join("");
+  $("cats").querySelectorAll(".cat").forEach((b) => b.onclick = () => { cat = b.dataset.cat; loadCats(); search(); });
+  clearTimeout(catTimer);
+  if (r.loading) catTimer = setTimeout(loadCats, 1500); // still reading the categories from the shop
+}
 
 // ---------- live stream ----------
 // Tofu's Twitch stream and chat, always on the left.
@@ -662,14 +683,16 @@ $("kwInput").onkeydown = (e) => { if (e.key === "Enter") addKeywords(); };
 async function search() {
   const q = $("search").value.trim(), el = $("results");
   if (!lastProducts) { el.innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const r = await api("/api/products?filter=" + encodeURIComponent(q));
+  const r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat));
   if (q !== $("search").value.trim()) return; // a newer search is on its way
   let html = "";
   if (q) {
     html += `<div class="bridge"><span>Not listed yet, or want anything with these words?</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
-    html += '<div class="resnote" style="border-top:0">In stock now. Type to search everything, including sold out.</div>';
+    html += cat
+      ? `<div class="resnote" style="border-top:0">Everything in ${esc(catNames[cat] || "this category")}, in stock first.</div>`
+      : '<div class="resnote" style="border-top:0">In stock now. Type to search everything, including sold out.</div>';
   }
   html += r.items.map((it) => {
     const already = onList("product", it.id);
@@ -680,7 +703,7 @@ async function search() {
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
-  if (!r.items.length) html += `<div class="empty">No products ${q ? "match that right now" : "in stock right now"}.</div>`;
+  if (!r.items.length) html += `<div class="empty">No products ${q ? "match that right now" : cat ? "in this category right now" : "in stock right now"}.</div>`;
   if (r.total > r.items.length) html += `<div class="resnote">Showing ${r.items.length} of ${r.total}. Type more to narrow it down.</div>`;
   el.innerHTML = html;
   const byId = Object.fromEntries(r.items.map((it) => [it.id, it]));

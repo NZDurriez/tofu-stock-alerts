@@ -25,6 +25,17 @@ import sounds
 HOST, PORT = "127.0.0.1", int(os.environ.get("DROP_WEB_PORT", "8765"))
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_web.html")
 
+# Mr Tofu's menu, left to right: (id, name, the shop collections it covers)
+CATEGORIES = [
+    ("live", "Mr Tofu Live Stream", ["mr-tofu-live-stream"]),
+    ("pokemon", "Pokémon", ["pokemon-tcg", "pokemon-tcg-japanese", "pokemon-tcg-single-cards"]),
+    ("onepiece", "One Piece", ["one-piece-tcg", "one-piece-tcg-single-cards"]),
+    ("riftbound", "Riftbound", ["riftbound-league-of-legends-tcg"]),
+    ("magic", "Magic: The Gathering", ["magic-the-gathering"]),
+    ("gundam", "Gundam Card Game", ["gundam-card-game"]),
+    ("events", "Store Events & Tournaments", ["store-events-tournaments"]),
+]
+
 
 class Watcher:
     """Everything the page sees, shared between the web requests and the watch thread."""
@@ -49,6 +60,8 @@ class Watcher:
         self.restart = False    # start a fresh batch of checks (new speed or new login)
         self.slow_downs = 0     # "slow down" replies in a row
         self.trouble = None     # what's going wrong with the checks, if anything
+        self.categories = {}    # category id -> product ids in it (Tofu's menu)
+        self.cats_at = 0.0      # when they were last loaded (0 = loading / never)
 
     def log(self, kind, text, url=None, **extra):
         with self.lock:
@@ -85,6 +98,7 @@ class Watcher:
         }[self.shop_state])
         if ok:
             self.log("info", f"Shop has {info} products.")
+            self.load_categories_soon()
             if self.running:  # logged in mid-watch (e.g. after a lock): catch anything that went live meanwhile
                 self.checkout(self.went_live(before, self.products, quiet=True))
         elif self.shop_state not in ("locked", "bad"):
@@ -100,6 +114,8 @@ class Watcher:
         self.etag = None
         ok, info = self.refresh()
         self.shop_state = "open" if ok else "locked"
+        if ok:
+            self.load_categories_soon()
         self.log("info", "Logged out and forgot the password."
                  + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
         if self.running:
@@ -110,16 +126,51 @@ class Watcher:
         self.restart = True
         self.checker.stop()
 
-    def listing(self, flt, limit=40):
+    def load_categories_soon(self):
+        threading.Thread(target=self.load_categories, daemon=True).start()
+
+    def load_categories(self):
+        """Which products are in each of Tofu's menu headers (a few requests,
+        done in the background after the shop loads)."""
+        self.cats_at = 0.0
+        found = {}
+        for cid, _, handles in CATEGORIES:
+            ids = set()
+            for handle in handles:
+                for page in range(1, 5):
+                    try:
+                        code, _, body = dm.curl([f"{dm.SHOP}/collections/{handle}/products.json?limit=250&page={page}",
+                                                 "-H", "Accept: application/json", "--compressed"])
+                        batch = json.loads(body).get("products", []) if code == 200 else []
+                    except Exception:
+                        batch = []
+                    ids.update(str(p["id"]) for p in batch)
+                    if len(batch) < 250:
+                        break
+            found[cid] = ids
+        self.categories, self.cats_at = found, time.time()
+
+    def category_list(self):
+        if self.products and time.time() - self.cats_at > 600 and self.cats_at:  # refresh every 10 minutes
+            self.load_categories_soon()
+        return {"loading": not self.cats_at and bool(self.products),
+                "categories": [{"id": cid, "name": name,
+                                "count": len(self.categories.get(cid, set()) & self.products.keys())}
+                               for cid, name, _ in CATEGORIES]}
+
+    def listing(self, flt, cat="", limit=40):
         """Search results. With no search: what's in stock right now. With a
-        search: everything matching (sold out too, so you can watch for a
-        restock), in stock first."""
+        search, or a category picked: everything matching (sold out too, so you
+        can watch for a restock), in stock first."""
         keys = keywords(flt)
+        in_cat = self.categories.get(cat) if cat else None
         out = []
         for pid, it in self.products.items():
+            if in_cat is not None and pid not in in_cat:
+                continue
             if keys and not keyword_match(keys, it["title"]):
                 continue
-            if not keys and not dm.buyable(it):
+            if not keys and not cat and not dm.buyable(it):
                 continue
             out.append(card(pid, it))
         order = {"buyable": 0, "soon": 1, "soldout": 2}
@@ -405,7 +456,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/products":
             from urllib.parse import unquote_plus
-            self.send_json(W.listing(unquote_plus(params.get("filter", ""))))
+            self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", "")))
+        elif path == "/api/categories":
+            self.send_json(W.category_list())
         elif path == "/api/password":
             # Lets the page unlock mrtofu.store in your browser with the saved password.
             # The custom header can't be sent by other websites without a CORS
