@@ -327,9 +327,9 @@ def play_alert():
 
 
 def sound_info():
-    s = sounds.load()
-    return {**s, "hasCustom": os.path.exists(sounds.CUSTOM_WAV),
-            "sounds": [{"id": k, "name": v} for k, v in sounds.NAMES.items()]}
+    return {**sounds.load(),
+            "sounds": [{"id": k, "name": v} for k, v in sounds.NAMES.items()],
+            "files": [{"id": k, "name": v} for k, v in sounds.library().items()]}
 
 
 def card(pid, it):
@@ -452,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
         elif self.path == "/api/sound":  # pick a built-in sound and/or the volume
             s = sounds.load()
-            if data.get("sound") in sounds.NAMES and (data["sound"] != "custom" or os.path.exists(sounds.CUSTOM_WAV)):
+            if sounds.valid(data.get("sound")):
                 s["sound"] = data["sound"]
             if "volume" in data:
                 s["volume"] = max(5, min(100, int(data["volume"])))
@@ -467,6 +467,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, 400)
                 return
             play_alert()
+            self.send_json(sound_info())
+        elif self.path == "/api/sound/delete":  # remove one of your sound files
+            sounds.delete_file(data.get("id", ""))
             self.send_json(sound_info())
         elif self.path == "/api/sound/test":
             play_alert()

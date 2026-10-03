@@ -3,13 +3,15 @@
 The browser page picks a sound and a volume; this turns it into a WAV file
 that drop mode plays on this PC the moment checkout opens or the shop locks
 (see drop_mode.alarm), so it works even while the page is in the background.
-The built-in sounds are made here from plain tones; "My own sound file" is a
-file you choose in the page, which the page converts to WAV and sends over.
+The built-in sounds are made here from plain tones. "Your sounds" are files
+you add in the page (it converts them to WAV and sends them over); they're
+kept in a "sounds" folder in drop_mode.SOUND_DIR, not in the code.
 """
 import io
 import json
 import math
 import os
+import re
 import wave
 from array import array
 
@@ -17,22 +19,38 @@ import drop_mode as dm
 
 RATE = 22050  # plenty for alert sounds, and keeps the files small
 SETTINGS = os.path.join(dm.SOUND_DIR, "sound.json")
-CUSTOM_WAV = os.path.join(dm.SOUND_DIR, "custom.wav")
-DEFAULT = {"sound": "chime", "volume": 80, "customName": ""}
+LIBRARY = os.path.join(dm.SOUND_DIR, "sounds")         # your sound files, as WAV
+OLD_CUSTOM_WAV = os.path.join(dm.SOUND_DIR, "custom.wav")  # the single file slot before the library
+DEFAULT = {"sound": "chime", "volume": 80}
 MAX_CUSTOM_SECONDS = 15
 
-# id -> name shown in the page, in menu order
+# Built-in sounds: id -> name shown in the page, in menu order
 NAMES = {
     "chime": "Chime",
     "doorbell": "Doorbell (ding-dong)",
     "coin": "Arcade coin",
     "alarm": "Alarm clock",
     "siren": "Siren",
-    "fryer": "Fry timer (McDonald's kitchen)",
     "beeps": "Original beeps",
-    "custom": "My own sound file",
     "none": "No sound",
 }
+
+
+def library():
+    """Your sound files: id ("file:<name>") -> name."""
+    try:
+        names = sorted(f[:-4] for f in os.listdir(LIBRARY) if f.lower().endswith(".wav"))
+    except OSError:
+        names = []
+    return {f"file:{n}": n for n in names}
+
+
+def file_path(sound):
+    return os.path.join(LIBRARY, sound[len("file:"):] + ".wav")
+
+
+def valid(sound):
+    return sound in NAMES or (str(sound).startswith("file:") and os.path.exists(file_path(sound)))
 
 # Partials as (frequency ratio, level, how long it rings compared to the note)
 BELL = ((1, 1.0, 1.0), (2, 0.4, 0.55), (3, 0.18, 0.35), (4.2, 0.08, 0.2))
@@ -89,14 +107,6 @@ def built_in(name):
     elif name == "siren":  # rising and falling wail
         buf = [0.0] * int(2.7 * RATE)
         add_note(buf, 0, lambda t: 850 + 350 * math.sin(2 * math.pi * 1.1 * t - math.pi / 2), 2.6, 0, WARM)
-    elif name == "fryer":  # fast-food kitchen: two fryer timers beeping over each other, then the grill
-        buf = [0.0] * int(3.0 * RATE)
-        for k in range(21):  # fryer 1: fast, piercing
-            add_note(buf, 0.125 * k, 2950.0, 0.07, 0, PURE, square=True)
-        for k in range(10):  # fryer 2: a little lower and slower, out of step
-            add_note(buf, 0.45 + 0.2 * k, 2600.0, 0.09, 0, ((1, 0.6, 1.0),), square=True)
-        for k in range(3):  # the grill's longer beeps
-            add_note(buf, 1.05 + 0.5 * k, 1950.0, 0.25, 0, ((1, 0.45, 1.0),), square=True)
     elif name == "beeps":  # what drop mode used to play
         buf = [0.0] * int(1.3 * RATE)
         for t, f in zip((0, .18, .36, .7, .88, 1.06), (1400, 1900, 2400) * 2):
@@ -106,9 +116,9 @@ def built_in(name):
     return buf
 
 
-def read_custom():
-    """(samples, rate) of the sound file you chose."""
-    with wave.open(CUSTOM_WAV, "rb") as w:
+def read_wav(path):
+    """(samples, rate) of one of your sound files."""
+    with wave.open(path, "rb") as w:
         rate = w.getframerate()
         pcm = array("h", w.readframes(w.getnframes()))
     return [s / 32768 for s in pcm], rate
@@ -135,7 +145,17 @@ def load():
             settings.update(json.load(f))
     except (OSError, ValueError):
         pass
-    if settings["sound"] not in NAMES or (settings["sound"] == "custom" and not os.path.exists(CUSTOM_WAV)):
+    if os.path.exists(OLD_CUSTOM_WAV):  # move the old single sound file into the library
+        name = safe_name(settings.get("customName") or "My sound")
+        os.makedirs(LIBRARY, exist_ok=True)
+        os.replace(OLD_CUSTOM_WAV, os.path.join(LIBRARY, name + ".wav"))
+        if settings["sound"] == "custom":
+            settings["sound"] = f"file:{name}"
+        settings.pop("customName", None)
+        with open(SETTINGS, "w", encoding="utf-8") as f:  # remember where it went
+            json.dump(settings, f)
+    settings.pop("customName", None)
+    if not valid(settings["sound"]):
         settings["sound"] = DEFAULT["sound"]
     settings["volume"] = max(5, min(100, int(settings.get("volume") or DEFAULT["volume"])))
     return settings
@@ -152,8 +172,8 @@ def render(settings=None):
     """(Re)make the WAV drop mode plays, from the current settings."""
     settings = settings or load()
     os.makedirs(dm.SOUND_DIR, exist_ok=True)
-    if settings["sound"] == "custom":
-        samples, rate = read_custom()
+    if settings["sound"].startswith("file:"):
+        samples, rate = read_wav(file_path(settings["sound"]))
     else:
         samples, rate = built_in(settings["sound"]), RATE
     write_wav(dm.ALERT_WAV, samples, rate, settings["volume"] if settings["sound"] != "none" else 0)
@@ -165,17 +185,34 @@ def ensure():
         render()
 
 
+def safe_name(name):
+    """A file name for the library from what you called the file: 'McDonalds Beep.mp3' -> 'McDonalds Beep'."""
+    name = os.path.splitext(os.path.basename(name or ""))[0]
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name).strip(" .")[:60]
+    return name or "My sound"
+
+
 def save_custom(wav_bytes, name):
-    """Keep a sound file the page converted to WAV, and switch to it."""
+    """Add a sound file (already converted to WAV by the page) to the library, and switch to it."""
     with wave.open(io.BytesIO(wav_bytes), "rb") as w:
         if w.getnchannels() != 1 or w.getsampwidth() != 2:
             raise ValueError("expected 16-bit mono WAV")
-        if w.getnframes() > w.getframerate() * MAX_CUSTOM_SECONDS:
+        if w.getnframes() > w.getframerate() * MAX_CUSTOM_SECONDS + w.getframerate():
             raise ValueError("too long")
-    os.makedirs(dm.SOUND_DIR, exist_ok=True)
-    with open(CUSTOM_WAV, "wb") as f:
+    name = safe_name(name)
+    os.makedirs(LIBRARY, exist_ok=True)
+    with open(os.path.join(LIBRARY, name + ".wav"), "wb") as f:
         f.write(wav_bytes)
     settings = load()
-    settings.update(sound="custom", customName=os.path.basename(name or "sound")[:80])
+    settings["sound"] = f"file:{name}"
+    save(settings)
+    return settings
+
+
+def delete_file(sound):
+    """Take one of your sound files out of the library (back to Chime if it was in use)."""
+    if str(sound).startswith("file:") and os.path.exists(file_path(sound)):
+        os.remove(file_path(sound))
+    settings = load()  # falls back to the default if the one in use is gone
     save(settings)
     return settings

@@ -15,6 +15,7 @@
   --ok:#6cc08d; --ok-soft:rgba(108,192,141,.14);
   --bad:#e08585; --bad-soft:rgba(224,133,133,.14);
   --info:#86b9df; --info-soft:rgba(134,185,223,.14);
+  --c-stream:#a970ff; --c-setup:#e0a84f; --c-watch:#5fb4e6; --tab-ink:#17181c; /* column colours */
   --shadow:none;
 }
 :root[data-theme="light"]{
@@ -24,6 +25,7 @@
   --ok:#2f8a55; --ok-soft:rgba(47,138,85,.10);
   --bad:#c0463f; --bad-soft:rgba(192,70,63,.09);
   --info:#2f6f9f; --info-soft:rgba(47,111,159,.09);
+  --c-stream:#7c4ddb; --c-setup:#c08423; --c-watch:#2f80bd; --tab-ink:#ffffff;
   --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
 }
 *{box-sizing:border-box}
@@ -43,30 +45,43 @@ h1 span{color:var(--accent)}
 .theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 12px;font:500 13px Inter;cursor:pointer}
 .theme:hover{color:var(--text)}
 
-/* Three columns (live stream | set up | watching), each can be collapsed to a
-   thin bar. The stream column runs the full height and stays put while the
-   others scroll. Narrow windows stack them instead. */
-.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
-.cols>header{grid-column:2 / span 2;grid-row:1;min-height:36px}
+/* Three columns (live stream | set up | watching), each with its own colour.
+   The coloured ◀ ▶ tabs on the dividers slide a column shut (a tab in its
+   colour stays to bring it back); ⤢ makes one column fill the window.
+   Narrow windows stack the columns instead. */
+.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) 26px minmax(0,1fr) 26px minmax(0,.95fr));grid-template-rows:auto 1fr;row-gap:16px;align-items:start}
+.cols>header{grid-column:3 / span 3;grid-row:1;min-height:36px}
 .col{min-width:0}
-.col-stream{grid-column:1;grid-row:1 / span 2;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
-.col-setup{grid-column:2;grid-row:2}
-.col-watch{grid-column:3;grid-row:2}
+.col-stream{--c:var(--c-stream);grid-column:1;grid-row:1 / span 2;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
+.col-setup{--c:var(--c-setup);grid-column:3;grid-row:2}
+.col-watch{--c:var(--c-watch);grid-column:5;grid-row:2}
+.coldiv{align-self:stretch;position:relative}
+.d1{grid-column:2;grid-row:1 / span 2}
+.d2{grid-column:4;grid-row:2}
+.coldiv .pill{position:sticky;top:calc(50vh - 40px);display:flex;flex-direction:column;align-items:center;gap:6px}
+.edge{width:20px;height:38px;padding:0;border:0;border-radius:7px;background:var(--c);color:var(--tab-ink);font:700 11px/1 Inter,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3);opacity:.85;transition:opacity .15s,transform .15s}
+.edge:hover{opacity:1;transform:scale(1.12)}
 .col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:30px}
-.col-title{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.col-title{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.col-title::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--c)}
 .col-head .spacer{flex:1}
-.col-btn{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:0 9px;font:600 16px/26px Inter,sans-serif}
-.col-btn:hover{color:var(--text);background:var(--surface2)}
+.fullbtn,.foldbtn{width:32px;height:28px;padding:0;border:0;border-radius:8px;background:var(--c);color:var(--tab-ink);font:700 15px/28px Inter,sans-serif;opacity:.9}
+.fullbtn:hover,.foldbtn:hover{opacity:1}
+.foldbtn{display:none}
 .col-link{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px}
 .col-link:hover{color:var(--text);background:var(--surface2)}
-.rail{display:none}
-.col.collapsed>:not(.rail){display:none}
+.tab{display:none}
+.col.collapsed>:not(.tab){display:none}
 .col.collapsed{position:sticky;top:16px}
-.col.collapsed .rail{display:flex;flex-direction:column;align-items:center;gap:12px;width:46px;height:min(70vh,640px);padding:12px 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;color:var(--muted)}
-.col-stream.collapsed .rail{height:100%}
-.rail:hover{color:var(--text);border-color:var(--accent)}
-.rail b{font-size:18px;line-height:1}
-.rail .vt{writing-mode:vertical-rl;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.col.collapsed .tab{display:flex;flex-direction:column;align-items:center;gap:12px;width:30px;height:min(70vh,640px);padding:12px 0;border:0;border-radius:10px;background:var(--c);color:var(--tab-ink);box-shadow:0 2px 10px rgba(0,0,0,.3)}
+.col-stream.collapsed .tab{height:100%}
+.tab:hover{filter:brightness(1.1)}
+.tab b{font-size:13px;line-height:1}
+.tab .vt{writing-mode:vertical-rl;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.cols.full>.col:not(.focused),.cols.full>.coldiv{display:none}
+.cols.full>header{grid-column:1}
+.cols.full>.col.focused{grid-column:1;grid-row:2}
+.cols.full>.col-stream.focused{position:static;height:calc(100vh - 100px)}
 .stream-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
 .player{position:relative;aspect-ratio:16/9;max-height:calc(100vh - 340px);flex:none;background:#000;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .chat{position:relative;flex:1;min-height:240px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -77,13 +92,15 @@ h1 span{color:var(--accent)}
   .chat{flex:none;width:340px}
 }
 @media (max-width:1099px){
-  .cols{grid-template-columns:1fr}
-  .cols>header,.col-stream,.col-setup,.col-watch{grid-column:1;grid-row:auto}
-  .col-stream,.col.collapsed{position:static;height:auto}
+  .cols,.cols.full{grid-template-columns:1fr}
+  .cols>header,.col-stream,.col-setup,.col-watch,.cols.full>.col.focused{grid-column:1;grid-row:auto}
+  .coldiv{display:none}
+  .col-stream,.col.collapsed,.cols.full>.col-stream.focused{position:static;height:auto}
   .player{max-height:none}
   .chat{flex:none;height:420px}
   .col.collapsed>.col-head{display:flex}
-  .col.collapsed .rail{display:none}
+  .col.collapsed .tab{display:none}
+  .foldbtn{display:inline-block}
 }
 .stack{display:grid;gap:20px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
@@ -204,7 +221,8 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .vol input{flex:1;accent-color:var(--accent)}
 .vol span{min-width:42px;text-align:right;color:var(--text)}
 .filebtn{display:inline-flex;align-items:center;cursor:pointer}
-#customRow{margin-top:12px}
+.snd-lib{margin-top:12px}
+#soundMsg:empty{display:none}
 @keyframes ping{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 @keyframes glow{50%{background:var(--ok-soft)}}
 .chip-s.live{color:var(--text);animation:glow 2s ease-in-out infinite}
@@ -265,10 +283,11 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             <select id="sound" aria-label="Alert sound"></select>
             <button class="secondary" id="soundTest" title="Play it">▶</button>
           </div>
-          <div class="row" id="customRow" hidden>
-            <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">Choose a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
-            <span class="hint" id="customName" style="margin:0"></span>
+          <div class="row snd-lib">
+            <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">＋ Add a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
+            <button class="linkish" id="soundDel" hidden>Remove this sound</button>
           </div>
+          <p class="hint" id="soundMsg" style="margin:6px 0 0"></p>
           <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
         </div>
       </div>
@@ -278,7 +297,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 
   <aside class="col col-stream" data-col="stream">
     <div class="col-head">
-      <span class="col-title">📺 Live stream</span><span class="spacer"></span>
+      <span class="col-title">Live stream</span><span class="spacer"></span>
       <div class="popwrap">
         <button class="col-link" data-pop="chatHelp" aria-expanded="false">Can't chat here?</button>
         <div class="pop left" id="chatHelp" hidden>
@@ -293,17 +312,23 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         </div>
       </div>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
-      <button class="col-btn" data-col="stream" title="Collapse">−</button>
+      <button class="fullbtn" data-full="stream" title="Fill the window">⤢</button>
+      <button class="foldbtn" data-col="stream" title="Fold">▾</button>
     </div>
     <div class="stream-body">
       <div class="player" id="player"></div>
       <div class="chat" id="chat"></div>
     </div>
-    <button class="rail" data-col="stream" title="Show the live stream"><b>+</b><span class="vt">Live stream</span></button>
+    <button class="tab" data-col="stream" title="Open the live stream"><b>▶</b><span class="vt">Live stream</span></button>
   </aside>
 
+  <div class="coldiv d1"><div class="pill">
+    <button class="edge" data-col="stream" style="--c:var(--c-stream)" title="Slide the live stream shut">◀</button>
+    <button class="edge" data-col="setup" style="--c:var(--c-setup)" title="Slide set up shut">▶</button>
+  </div></div>
+
   <section class="col col-setup" data-col="setup">
-    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="col-btn" data-col="setup" title="Collapse">−</button></div>
+    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="fullbtn" data-full="setup" title="Fill the window">⤢</button><button class="foldbtn" data-col="setup" title="Fold">▾</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">1</span>Load the shop</h2>
@@ -338,11 +363,16 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
       </section>
     </div>
-    <button class="rail" data-col="setup" title="Show set up"><b>+</b><span class="vt">Set up</span></button>
+    <button class="tab" data-col="setup" title="Open set up"><b>↔</b><span class="vt">Set up</span></button>
   </section>
 
+  <div class="coldiv d2"><div class="pill">
+    <button class="edge" data-col="setup" style="--c:var(--c-setup)" title="Slide set up shut">◀</button>
+    <button class="edge" data-col="watch" style="--c:var(--c-watch)" title="Slide watching shut">▶</button>
+  </div></div>
+
   <section class="col col-watch" data-col="watch">
-    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="col-btn" data-col="watch" title="Collapse">−</button></div>
+    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="fullbtn" data-full="watch" title="Fill the window">⤢</button><button class="foldbtn" data-col="watch" title="Fold">▾</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span></h2>
@@ -366,7 +396,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
       </section>
     </div>
-    <button class="rail" data-col="watch" title="Show watching"><b>+</b><span class="vt">Watching</span></button>
+    <button class="tab" data-col="watch" title="Open watching"><b>◀</b><span class="vt">Watching</span></button>
   </section>
  </div>
 </div>
@@ -421,29 +451,53 @@ $("themeBtn").onclick = () => {
 themeLabel();
 
 // ---------- columns ----------
-// Each column can be collapsed to a thin bar (remembered in this browser).
-// The others share the space, so collapsing two gives the third the room.
+// The coloured ◀ ▶ tabs on the dividers slide a column shut, and the tab it
+// leaves brings it back; ⤢ makes one column fill the window (⤡ or Esc to go
+// back). All remembered in this browser.
+const COLS = ["stream", "setup", "watch"];
 const COL_W = { stream: "minmax(0,1.1fr)", setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
-let collapsed = {};
-try { collapsed = JSON.parse(localStorage.getItem("dropCols") || "{}") || {}; } catch {}
-function layoutCols() {
-  $("cols").style.setProperty("--cols", Object.keys(COL_W).map((c) => collapsed[c] ? "46px" : COL_W[c]).join(" "));
-  document.querySelectorAll(".col").forEach((col) => {
-    const shut = !!collapsed[col.dataset.col], btn = col.querySelector(".col-btn");
-    col.classList.toggle("collapsed", shut);
-    btn.textContent = shut ? "+" : "−";
-    btn.title = shut ? "Expand" : "Collapse";
-  });
-  streamOn(!collapsed.stream);
+let collapsed = {}, full = null;
+try {
+  collapsed = JSON.parse(localStorage.getItem("dropCols") || "{}") || {};
+  full = localStorage.getItem("dropFull") || null;
+} catch {}
+if (!COLS.includes(full)) full = null;
+const openCols = () => COLS.filter((c) => !collapsed[c]);
+function saveCols() {
+  try { localStorage.setItem("dropCols", JSON.stringify(collapsed)); localStorage.setItem("dropFull", full || ""); } catch {}
 }
-function toggleCol(c) {
-  const open = Object.keys(COL_W).filter((k) => !collapsed[k]);
-  if (!collapsed[c] && open.length === 1) return; // keep at least one column open
-  collapsed[c] = !collapsed[c];
-  try { localStorage.setItem("dropCols", JSON.stringify(collapsed)); } catch {}
+function layoutCols() {
+  const w = (c) => collapsed[c] ? "30px" : COL_W[c];
+  $("cols").classList.toggle("full", !!full);
+  $("cols").style.setProperty("--cols", full ? "1fr" : [w("stream"), "26px", w("setup"), "26px", w("watch")].join(" "));
+  document.querySelectorAll(".col").forEach((col) => {
+    const c = col.dataset.col, fb = col.querySelector(".fullbtn");
+    col.classList.toggle("collapsed", !full && !!collapsed[c]);
+    col.classList.toggle("focused", full === c);
+    fb.textContent = full === c ? "⤡" : "⤢";
+    fb.title = full === c ? "Back to the columns (Esc)" : "Fill the window";
+    col.querySelector(".foldbtn").textContent = collapsed[c] ? "▸" : "▾";
+  });
+  const lastOne = openCols().length === 1; // the last open column can't be slid shut
+  document.querySelectorAll(".edge").forEach((b) => { b.hidden = !!collapsed[b.dataset.col] || lastOne; });
+  streamOn(full ? full === "stream" : !collapsed.stream);
+}
+function setCollapsed(c, shut) {
+  if (shut && !collapsed[c] && openCols().length === 1) return;
+  collapsed[c] = shut;
+  saveCols();
   layoutCols();
 }
-document.querySelectorAll(".col-btn, .rail").forEach((b) => b.onclick = () => toggleCol(b.dataset.col));
+function setFull(c) {
+  full = full === c ? null : c;
+  saveCols();
+  layoutCols();
+  scrollTo(0, 0);
+}
+document.querySelectorAll(".edge").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, true));
+document.querySelectorAll(".tab").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, false));
+document.querySelectorAll(".foldbtn").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, !collapsed[b.dataset.col]));
+document.querySelectorAll(".fullbtn").forEach((b) => b.onclick = () => setFull(b.dataset.full));
 
 // ---------- live stream ----------
 // Tofu's Twitch stream and chat. Collapsing the column removes them, so the
@@ -473,7 +527,11 @@ document.querySelectorAll("[data-pop]").forEach((btn) => btn.onclick = () => {
   btn.setAttribute("aria-expanded", String(open));
 });
 document.addEventListener("click", (e) => { if (!e.target.closest(".popwrap")) closePops(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if ([...document.querySelectorAll(".pop")].some((p) => !p.hidden)) closePops();
+  else if (full) setFull(full); // Esc leaves full-window mode
+});
 
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
@@ -789,35 +847,40 @@ $("stopBtn").onclick = () => api("/api/stop", {});
 let soundInfo = null;
 async function loadSound() {
   const r = soundInfo = await api("/api/sound");
-  $("sound").innerHTML = r.sounds.map((s) =>
-    `<option value="${s.id}">${esc(s.name)}${s.id === "custom" && r.customName ? `: ${esc(r.customName)}` : ""}</option>`).join("");
+  const opt = (s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`;
+  $("sound").innerHTML = `<optgroup label="Built in">${r.sounds.filter((s) => s.id !== "none").map(opt).join("")}</optgroup>`
+    + (r.files.length ? `<optgroup label="Your sounds">${r.files.map(opt).join("")}</optgroup>` : "")
+    + opt({ id: "none", name: "No sound" });
   $("sound").value = r.sound;
-  const picked = r.sounds.find((s) => s.id === r.sound);
-  $("soundName").textContent = r.sound === "custom" ? "My sound" : picked ? picked.name.replace(/\s*\(.*\)$/, "") : "Sound";
+  const picked = r.sounds.concat(r.files).find((s) => s.id === r.sound);
+  $("soundName").textContent = picked ? picked.name.replace(/\s*\(.*\)$/, "") : "Sound";
+  $("soundDel").hidden = !r.sound.startsWith("file:");
   $("volume").value = r.volume; $("volVal").textContent = r.volume + "%";
-  $("customRow").hidden = r.sound !== "custom";
-  $("customName").textContent = r.customName ? "Or choose a different one." : "";
 }
 $("sound").onchange = async () => {
-  const sound = $("sound").value;
-  $("customRow").hidden = sound !== "custom";
-  if (sound === "custom" && !soundInfo.hasCustom) { $("customName").textContent = "Pick an MP3 or WAV file (the first 15 seconds are used)."; return; }
-  await api("/api/sound", { sound, play: true }); // play it so you hear what you picked
+  await api("/api/sound", { sound: $("sound").value, play: true }); // play it so you hear what you picked
   loadSound();
 };
 $("volume").oninput = () => { $("volVal").textContent = $("volume").value + "%"; };
 $("volume").onchange = async () => { await api("/api/sound", { volume: +$("volume").value, play: true }); loadSound(); };
 $("soundTest").onclick = () => api("/api/sound/test", {});
+$("soundDel").onclick = async () => {
+  if (!confirm(`Remove "${$("sound").selectedOptions[0].text}" from your sounds?`)) return;
+  await api("/api/sound/delete", { id: $("sound").value });
+  loadSound();
+};
+// Add one of your own sound files (MP3, WAV...) to "Your sounds"
 $("soundFile").onchange = async () => {
   const file = $("soundFile").files[0];
   $("soundFile").value = "";
   if (!file) return;
-  $("customName").textContent = "Loading…";
+  $("soundMsg").textContent = "Adding…";
   try {
     const r = await api("/api/sound/custom", { name: file.name, wav: await toWav(await file.arrayBuffer()) });
     if (r.error) throw new Error(r.error);
+    $("soundMsg").textContent = "";
   } catch {
-    $("customName").textContent = "Couldn't use that file. Try an MP3 or WAV.";
+    $("soundMsg").textContent = "Couldn't use that file. Try an MP3 or WAV.";
     return;
   }
   loadSound();
