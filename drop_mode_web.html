@@ -46,42 +46,31 @@ h1 span{color:var(--accent)}
 .theme:hover{color:var(--text)}
 
 /* Three columns (live stream | set up | watching), each with its own colour.
-   The coloured ◀ ▶ tabs on the dividers slide a column shut (a tab in its
-   colour stays to bring it back); ⤢ makes one column fill the window.
+   The coloured buttons by the title show or hide a column; the others spread
+   out. The stream runs the full height and stays put while the others scroll.
    Narrow windows stack the columns instead. */
-.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) 26px minmax(0,1fr) 26px minmax(0,.95fr));grid-template-rows:auto 1fr;row-gap:16px;align-items:start}
-.cols>header{grid-column:3 / span 3;grid-row:1;min-height:36px}
+.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-areas:var(--areas,"stream head head" "stream setup watch");grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
+.cols>header{grid-area:head;min-height:36px}
 .col{min-width:0}
-.col-stream{--c:var(--c-stream);grid-column:1;grid-row:1 / span 2;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
-.col-setup{--c:var(--c-setup);grid-column:3;grid-row:2}
-.col-watch{--c:var(--c-watch);grid-column:5;grid-row:2}
-.coldiv{align-self:stretch;position:relative}
-.d1{grid-column:2;grid-row:1 / span 2}
-.d2{grid-column:4;grid-row:2}
-.coldiv .pill{position:sticky;top:calc(50vh - 40px);display:flex;flex-direction:column;align-items:center;gap:6px}
-.edge{width:20px;height:38px;padding:0;border:0;border-radius:7px;background:var(--c);color:var(--tab-ink);font:700 11px/1 Inter,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3);opacity:.85;transition:opacity .15s,transform .15s}
-.edge:hover{opacity:1;transform:scale(1.12)}
+.col-stream{--c:var(--c-stream);grid-area:stream;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
+.cols.stream-only .col-stream{height:calc(100vh - 100px)}
+.col-setup{--c:var(--c-setup);grid-area:setup}
+.col-watch{--c:var(--c-watch);grid-area:watch}
+.brand{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.views{display:flex;gap:6px;flex-wrap:wrap}
+.view{font:600 13px Inter,sans-serif;padding:4px 13px;border-radius:999px;border:1.5px solid var(--c);background:transparent;color:var(--c)}
+.view[data-col="stream"]{--c:var(--c-stream)}
+.view[data-col="setup"]{--c:var(--c-setup)}
+.view[data-col="watch"]{--c:var(--c-watch)}
+.view[aria-pressed="true"]{background:var(--c);color:var(--tab-ink)}
+.view:hover{filter:brightness(1.12)}
+.view:disabled{opacity:.75;cursor:default;filter:none}
 .col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:30px}
 .col-title{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .col-title::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--c)}
 .col-head .spacer{flex:1}
-.fullbtn,.foldbtn{width:32px;height:28px;padding:0;border:0;border-radius:8px;background:var(--c);color:var(--tab-ink);font:700 15px/28px Inter,sans-serif;opacity:.9}
-.fullbtn:hover,.foldbtn:hover{opacity:1}
-.foldbtn{display:none}
 .col-link{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px}
 .col-link:hover{color:var(--text);background:var(--surface2)}
-.tab{display:none}
-.col.collapsed>:not(.tab){display:none}
-.col.collapsed{position:sticky;top:16px}
-.col.collapsed .tab{display:flex;flex-direction:column;align-items:center;gap:12px;width:30px;height:min(70vh,640px);padding:12px 0;border:0;border-radius:10px;background:var(--c);color:var(--tab-ink);box-shadow:0 2px 10px rgba(0,0,0,.3)}
-.col-stream.collapsed .tab{height:100%}
-.tab:hover{filter:brightness(1.1)}
-.tab b{font-size:13px;line-height:1}
-.tab .vt{writing-mode:vertical-rl;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-.cols.full>.col:not(.focused),.cols.full>.coldiv{display:none}
-.cols.full>header{grid-column:1}
-.cols.full>.col.focused{grid-column:1;grid-row:2}
-.cols.full>.col-stream.focused{position:static;height:calc(100vh - 100px)}
 .stream-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
 .player{position:relative;aspect-ratio:16/9;max-height:calc(100vh - 340px);flex:none;background:#000;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .chat{position:relative;flex:1;min-height:240px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -92,15 +81,11 @@ h1 span{color:var(--accent)}
   .chat{flex:none;width:340px}
 }
 @media (max-width:1099px){
-  .cols,.cols.full{grid-template-columns:1fr}
-  .cols>header,.col-stream,.col-setup,.col-watch,.cols.full>.col.focused{grid-column:1;grid-row:auto}
-  .coldiv{display:none}
-  .col-stream,.col.collapsed,.cols.full>.col-stream.focused{position:static;height:auto}
+  .cols{grid-template-columns:1fr;grid-template-areas:none}
+  .cols>header,.cols>.col{grid-area:auto}
+  .col-stream,.cols.stream-only .col-stream{position:static;height:auto}
   .player{max-height:none}
   .chat{flex:none;height:420px}
-  .col.collapsed>.col-head{display:flex}
-  .col.collapsed .tab{display:none}
-  .foldbtn{display:inline-block}
 }
 .stack{display:grid;gap:20px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
@@ -269,7 +254,14 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 <div class="wrap">
  <div class="cols" id="cols">
   <header>
-    <h1>Mr Tofu <span>Drop Mode</span></h1>
+    <div class="brand">
+      <h1>Mr Tofu <span>Drop Mode</span></h1>
+      <div class="views" role="group" aria-label="Columns">
+        <button class="view" data-col="stream" aria-pressed="true">Stream</button>
+        <button class="view" data-col="setup" aria-pressed="true">Set up</button>
+        <button class="view" data-col="watch" aria-pressed="true">Watching</button>
+      </div>
+    </div>
     <div class="status">
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
@@ -312,23 +304,15 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         </div>
       </div>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
-      <button class="fullbtn" data-full="stream" title="Fill the window">⤢</button>
-      <button class="foldbtn" data-col="stream" title="Fold">▾</button>
     </div>
     <div class="stream-body">
       <div class="player" id="player"></div>
       <div class="chat" id="chat"></div>
     </div>
-    <button class="tab" data-col="stream" title="Open the live stream"><b>▶</b><span class="vt">Live stream</span></button>
   </aside>
 
-  <div class="coldiv d1"><div class="pill">
-    <button class="edge" data-col="stream" style="--c:var(--c-stream)" title="Slide the live stream shut">◀</button>
-    <button class="edge" data-col="setup" style="--c:var(--c-setup)" title="Slide set up shut">▶</button>
-  </div></div>
-
   <section class="col col-setup" data-col="setup">
-    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="fullbtn" data-full="setup" title="Fill the window">⤢</button><button class="foldbtn" data-col="setup" title="Fold">▾</button></div>
+    <div class="col-head"><span class="col-title">Set up</span></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">1</span>Load the shop</h2>
@@ -363,16 +347,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
       </section>
     </div>
-    <button class="tab" data-col="setup" title="Open set up"><b>↔</b><span class="vt">Set up</span></button>
   </section>
 
-  <div class="coldiv d2"><div class="pill">
-    <button class="edge" data-col="setup" style="--c:var(--c-setup)" title="Slide set up shut">◀</button>
-    <button class="edge" data-col="watch" style="--c:var(--c-watch)" title="Slide watching shut">▶</button>
-  </div></div>
-
   <section class="col col-watch" data-col="watch">
-    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="fullbtn" data-full="watch" title="Fill the window">⤢</button><button class="foldbtn" data-col="watch" title="Fold">▾</button></div>
+    <div class="col-head"><span class="col-title">Watching</span></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span></h2>
@@ -396,7 +374,6 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
       </section>
     </div>
-    <button class="tab" data-col="watch" title="Open watching"><b>◀</b><span class="vt">Watching</span></button>
   </section>
  </div>
 </div>
@@ -451,53 +428,42 @@ $("themeBtn").onclick = () => {
 themeLabel();
 
 // ---------- columns ----------
-// The coloured ◀ ▶ tabs on the dividers slide a column shut, and the tab it
-// leaves brings it back; ⤢ makes one column fill the window (⤡ or Esc to go
-// back). All remembered in this browser.
+// The coloured Stream / Set up / Watching buttons by the title show or hide a
+// column, and the others spread out to fill the space (remembered in this
+// browser). At least one column always stays.
 const COLS = ["stream", "setup", "watch"];
 const COL_W = { stream: "minmax(0,1.1fr)", setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
-let collapsed = {}, full = null;
-try {
-  collapsed = JSON.parse(localStorage.getItem("dropCols") || "{}") || {};
-  full = localStorage.getItem("dropFull") || null;
-} catch {}
-if (!COLS.includes(full)) full = null;
-const openCols = () => COLS.filter((c) => !collapsed[c]);
-function saveCols() {
-  try { localStorage.setItem("dropCols", JSON.stringify(collapsed)); localStorage.setItem("dropFull", full || ""); } catch {}
-}
+let hiddenCols = {};
+try { hiddenCols = JSON.parse(localStorage.getItem("dropHidden") || "{}") || {}; } catch {}
+if (COLS.every((c) => hiddenCols[c])) hiddenCols = {};
 function layoutCols() {
-  const w = (c) => collapsed[c] ? "30px" : COL_W[c];
-  $("cols").classList.toggle("full", !!full);
-  $("cols").style.setProperty("--cols", full ? "1fr" : [w("stream"), "26px", w("setup"), "26px", w("watch")].join(" "));
-  document.querySelectorAll(".col").forEach((col) => {
-    const c = col.dataset.col, fb = col.querySelector(".fullbtn");
-    col.classList.toggle("collapsed", !full && !!collapsed[c]);
-    col.classList.toggle("focused", full === c);
-    fb.textContent = full === c ? "⤡" : "⤢";
-    fb.title = full === c ? "Back to the columns (Esc)" : "Fill the window";
-    col.querySelector(".foldbtn").textContent = collapsed[c] ? "▸" : "▾";
+  const shown = COLS.filter((c) => !hiddenCols[c]);
+  const under = shown.filter((c) => c !== "stream"); // the columns under the header
+  const lead = hiddenCols.stream ? [] : ["stream"];  // the stream runs down the left, beside the header
+  const cols = $("cols");
+  if (under.length) {
+    const list = lead.concat(under); // (one column on its own gets the full width)
+    cols.style.setProperty("--cols", list.length === 1 ? "minmax(0,1fr)" : list.map((c) => COL_W[c]).join(" "));
+    cols.style.setProperty("--areas", `"${lead.concat(under.map(() => "head")).join(" ")}" "${lead.concat(under).join(" ")}"`);
+  } else { // only the stream: header above it
+    cols.style.setProperty("--cols", "minmax(0,1fr)");
+    cols.style.setProperty("--areas", `"head" "stream"`);
+  }
+  cols.classList.toggle("stream-only", !under.length);
+  document.querySelectorAll(".col").forEach((col) => { col.hidden = !!hiddenCols[col.dataset.col]; });
+  document.querySelectorAll(".view").forEach((b) => {
+    const on = !hiddenCols[b.dataset.col];
+    b.setAttribute("aria-pressed", String(on));
+    b.disabled = on && shown.length === 1;
+    b.title = b.disabled ? "At least one column stays open" : `${on ? "Hide" : "Show"} ${b.textContent.trim().toLowerCase()}`;
   });
-  const lastOne = openCols().length === 1; // the last open column can't be slid shut
-  document.querySelectorAll(".edge").forEach((b) => { b.hidden = !!collapsed[b.dataset.col] || lastOne; });
-  streamOn(full ? full === "stream" : !collapsed.stream);
+  streamOn(!hiddenCols.stream);
 }
-function setCollapsed(c, shut) {
-  if (shut && !collapsed[c] && openCols().length === 1) return;
-  collapsed[c] = shut;
-  saveCols();
+document.querySelectorAll(".view").forEach((b) => b.onclick = () => {
+  hiddenCols[b.dataset.col] = !hiddenCols[b.dataset.col];
+  try { localStorage.setItem("dropHidden", JSON.stringify(hiddenCols)); } catch {}
   layoutCols();
-}
-function setFull(c) {
-  full = full === c ? null : c;
-  saveCols();
-  layoutCols();
-  scrollTo(0, 0);
-}
-document.querySelectorAll(".edge").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, true));
-document.querySelectorAll(".tab").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, false));
-document.querySelectorAll(".foldbtn").forEach((b) => b.onclick = () => setCollapsed(b.dataset.col, !collapsed[b.dataset.col]));
-document.querySelectorAll(".fullbtn").forEach((b) => b.onclick = () => setFull(b.dataset.full));
+});
 
 // ---------- live stream ----------
 // Tofu's Twitch stream and chat. Collapsing the column removes them, so the
@@ -527,11 +493,7 @@ document.querySelectorAll("[data-pop]").forEach((btn) => btn.onclick = () => {
   btn.setAttribute("aria-expanded", String(open));
 });
 document.addEventListener("click", (e) => { if (!e.target.closest(".popwrap")) closePops(); });
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  if ([...document.querySelectorAll(".pop")].some((p) => !p.hidden)) closePops();
-  else if (full) setFull(full); // Esc leaves full-window mode
-});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
 
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
