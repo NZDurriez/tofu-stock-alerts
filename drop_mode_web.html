@@ -191,9 +191,13 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
 .count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
 .warnline{color:var(--bad);width:100%}
-.soundwrap{position:relative}
+.popwrap{position:relative}
 .pop{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:min(370px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.pop.left{left:0;right:auto}
 .pop-title{font-weight:600;font-size:15px}
+.pop ol.steps{margin:0;padding-left:18px;font-size:13.5px;line-height:1.5;color:var(--text)}
+.pop ol.steps li{margin:6px 0}
+button.col-link{background:none;font:500 13px Inter,sans-serif}
 .pop .lead{font-size:13px;margin:2px 0 12px}
 .pop select{flex:1;min-width:0}
 .vol{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:14px;color:var(--muted)}
@@ -252,8 +256,8 @@ input[type=search]:focus{border-color:var(--accent)}
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
       <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
-      <div class="soundwrap">
-        <button class="theme" id="soundBtn" aria-expanded="false" title="Alert sound">🔔 <span id="soundName">Sound</span></button>
+      <div class="popwrap">
+        <button class="theme" id="soundBtn" data-pop="soundPop" aria-expanded="false" title="Alert sound">🔔 <span id="soundName">Sound</span></button>
         <div class="pop" id="soundPop" hidden>
           <div class="pop-title">Alert sound</div>
           <p class="lead">Plays on this PC when checkout opens or the shop locks, even when this page is in the background.</p>
@@ -275,7 +279,20 @@ input[type=search]:focus{border-color:var(--accent)}
   <aside class="col col-stream" data-col="stream">
     <div class="col-head">
       <span class="col-title">📺 Live stream</span><span class="spacer"></span>
-      <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Browsers block Twitch log-in inside the page, so chat in this window">Pop out chat ↗</a>
+      <div class="popwrap">
+        <button class="col-link" data-pop="chatHelp" aria-expanded="false">Can't chat here?</button>
+        <div class="pop left" id="chatHelp" hidden>
+          <div class="pop-title">Chatting here</div>
+          <p class="lead">Twitch can only log you in inside this page if your browser lets it use its cookies here. It's a one-time change, and only for this drop mode page.</p>
+          <ol class="steps">
+            <li><b>Brave:</b> click the lion icon in the address bar and set <i>Cross-site cookies</i> to <i>All cookies allowed</i> (it may be under <i>Advanced controls</i>). Or turn Shields off for this page.</li>
+            <li><b>Chrome or Edge:</b> click the icon at the left of the address bar and allow third-party cookies for this site.</li>
+            <li>Reload this page, then press <b>Log In</b> in the chat (or log in at twitch.tv in another tab first).</li>
+          </ol>
+          <p class="lead" style="margin:10px 0 0">Rather not change it? <b>Pop out chat</b> always works.</p>
+        </div>
+      </div>
+      <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
       <button class="col-btn" data-col="stream" title="Collapse">−</button>
     </div>
     <div class="stream-body">
@@ -443,15 +460,20 @@ function streamOn(on) {
 }
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
 
-// ---------- alert sound menu (🔔 in the header) ----------
-function closeSoundPop() { $("soundPop").hidden = true; $("soundBtn").setAttribute("aria-expanded", "false"); }
-$("soundBtn").onclick = () => {
-  const open = $("soundPop").hidden;
-  $("soundPop").hidden = !open;
-  $("soundBtn").setAttribute("aria-expanded", String(open));
-};
-document.addEventListener("click", (e) => { if (!$("soundPop").hidden && !e.target.closest(".soundwrap")) closeSoundPop(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSoundPop(); });
+// ---------- small pop-up menus (🔔 alert sound, chat help) ----------
+// Open on click; close on a click anywhere else, or Esc.
+function closePops() {
+  document.querySelectorAll(".pop").forEach((p) => { p.hidden = true; });
+  document.querySelectorAll("[data-pop]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+document.querySelectorAll("[data-pop]").forEach((btn) => btn.onclick = () => {
+  const pop = $(btn.dataset.pop), open = pop.hidden;
+  closePops();
+  pop.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+});
+document.addEventListener("click", (e) => { if (!e.target.closest(".popwrap")) closePops(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
 
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
