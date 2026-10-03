@@ -164,6 +164,8 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 .qtyset button.on{background:var(--accent);color:var(--accent-ink)}
 .thumb{width:52px;height:52px;flex:none;border-radius:10px;object-fit:contain;background:#fff;border:1px solid var(--line)}
 .thumb.none{display:grid;place-items:center;background:var(--surface2);color:var(--faint);font-size:20px}
+.thumbwrap{position:relative;flex:none;line-height:0}
+.thumbwrap .kwmark{position:absolute;right:-5px;bottom:-5px;width:20px;height:20px;display:grid;place-items:center;font-size:11px;line-height:1;background:var(--surface);border:1px solid var(--line);border-radius:50%}
 input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 14px 13px 40px;outline:none;transition:border-color .15s;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='m13 13 4 4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:14px center}
 input[type=search]:focus{border-color:var(--accent)}
@@ -806,6 +808,12 @@ function statusHtml(w) {
   return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
     + (m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "");
 }
+// A keyword watch shows the picture of what it matches (in stock first, else
+// the sold-out one), with a little 🔎 so it's clearly a keyword watch
+function keywordThumb(w) {
+  const m = info.words[w.text], pic = m && [...m.items, ...m.unavailable].find((it) => it.image);
+  return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch">🔎</span></span>` : '<span class="thumb none">🔎</span>';
+}
 function renderWatchlist() {
   $("wlCount").textContent = watchlist.length ? `${watchlist.length} item${watchlist.length === 1 ? "" : "s"}` : "";
   if (!watchlist.length) {
@@ -814,7 +822,7 @@ function renderWatchlist() {
   }
   $("watchlist").innerHTML = watchlist.map((w, i) => `
     <div class="wl-row" data-i="${i}">
-      ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : '<span class="thumb none">🔎</span>'}
+      ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : keywordThumb(w)}
       <div class="t">
         <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
         <div class="st">${statusHtml(w)}</div>
