@@ -95,6 +95,16 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert h3{font-size:20px;font-weight:600;margin:0 0 6px}
 #lockAlert p{color:var(--muted);margin:0 0 16px;font-size:14.5px}
 #lockAlert .err{color:var(--bad);font-size:14px;margin-top:10px;min-height:1em}
+#askNow{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;place-items:center;padding:16px}
+#askNow.show{display:grid}
+#askNow .box{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:16px;padding:26px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+#askNow h3{font-size:20px;font-weight:600;margin:0 0 6px}
+#askNow p{color:var(--muted);margin:0 0 12px;font-size:14.5px}
+#askNow ul{margin:0 0 18px;padding-left:20px}
+#askNow li{margin:4px 0}
+#askNow li b{color:var(--accent)}
+#askNow .row{margin-bottom:14px}
+#dirtyNote{color:var(--accent)}
 details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weight:500}
 .list{margin-top:12px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px}
 .item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--line)}
@@ -223,6 +233,7 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
           <button class="primary" id="startBtn" disabled>Start watching</button>
           <button class="danger" id="stopBtn" disabled>Stop</button>
         </div>
+        <p class="hint" id="dirtyNote" hidden>You've changed what to watch. Click <b>Update</b> when you're done to apply it.</p>
         <div class="tip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</div>
       </section>
 
@@ -244,6 +255,17 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
   </div>
   <div class="err" id="lockErr"></div>
   <button class="linkish" id="lockLater">Not now</button>
+</div></div>
+
+<div id="askNow"><div class="box">
+  <h3>Already in stock</h3>
+  <p>These are on sale right now:</p>
+  <ul id="askList"></ul>
+  <div class="row">
+    <button class="primary" id="askBuy">Open checkout now</button>
+    <button class="secondary" id="askWatch">Just watch</button>
+  </div>
+  <p style="margin:0;font-size:13.5px">"Just watch" only opens checkout if one sells out and comes back, or for new products that match.</p>
 </div></div>
 
 <div id="alert"><div class="box">
@@ -444,22 +466,47 @@ function renderPicks() {
   $("picks").innerHTML = parts.length ? `<span class="chips">${parts.join("")}</span>` : "nothing yet.";
   $("picks").querySelectorAll("button").forEach((b) => b.onclick = () => { picks.delete(b.dataset.id); loadList(); changed(); });
 }
-function changed() { renderPicks(); if (running) sendPicks(); } // a running watch updates straight away
+// While watching, edits wait for Update, so half-typed keywords never kick anything off
+let dirty = false;
+function changed() { renderPicks(); if (running) { dirty = true; showDirty(); } }
+function showDirty() { $("dirtyNote").hidden = !(running && dirty); }
 
 // ---------- step 3 ----------
-function sendPicks() {
-  return api("/api/start", {
+function watchList() {
+  return {
     picks: [...picks].map(([id, p]) => ({ id, qty: p.qty })),
     watches: watches.filter((w) => w.text.trim()),
     interval: +$("interval").value,
+  };
+}
+// Ask before buying anything that's already on sale. Answers are remembered so
+// pressing Update again doesn't ask about the same things.
+const declined = new Set();
+function askOpenNow(items) {
+  return new Promise((resolve) => {
+    $("askList").innerHTML = items.map((i) => `<li>${esc(i.title)} <b>×${i.qty}</b></li>`).join("");
+    $("askNow").classList.add("show");
+    const done = (yes) => { $("askNow").classList.remove("show"); resolve(yes); };
+    $("askBuy").onclick = () => done(true);
+    $("askWatch").onclick = () => done(false);
   });
 }
 $("startBtn").onclick = async () => {
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-  await sendPicks();
+  const body = watchList();
+  let openNow = false;
+  try {
+    const ready = ((await api("/api/ready", body)).items || []).filter((i) => !declined.has(i.title));
+    if (ready.length) {
+      openNow = await askOpenNow(ready);
+      if (!openNow) ready.forEach((i) => declined.add(i.title));
+    }
+  } catch {}
+  await api("/api/start", { ...body, openNow });
+  dirty = false; showDirty();
 };
-$("interval").onchange = () => { if (running) sendPicks(); };
+$("interval").onchange = changed;
 $("stopBtn").onclick = () => api("/api/stop", {});
 
 function beep() {
@@ -558,6 +605,8 @@ async function poll() {
     $("startBtn").textContent = r.running ? "Update" : "Start watching";
     $("startBtn").disabled = !r.products;
     $("stopBtn").disabled = !r.running;
+    if (!running) dirty = false;
+    showDirty();
     renderLoginState();
   } catch {
     setChip("sRun", "Drop mode program isn't running", "warn");

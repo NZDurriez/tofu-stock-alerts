@@ -64,6 +64,7 @@ class Watcher:
         self.logged_in = self.shop_state == "ok"
         # Keep a password we couldn't check yet (shop open) so it's tried if the shop locks
         self.password = password if self.shop_state in ("ok", "open") else ""
+        before = self.products
         ok, info = self.refresh()
         self.log(*{
             "ok": ("ok", "Password accepted: watching behind the lock."),
@@ -75,7 +76,7 @@ class Watcher:
         if ok:
             self.log("info", f"Shop has {info} products.")
             if self.running:  # logged in mid-watch (e.g. after a lock): catch anything that went live meanwhile
-                self.open_ready()
+                self.checkout(self.went_live(before, self.products, quiet=True))
         elif self.shop_state not in ("locked", "bad"):
             self.log("warn", f"Couldn't list the shop (reply {info}).")
         return ok
@@ -122,10 +123,12 @@ class Watcher:
             webbrowser.open(url)
         threading.Thread(target=dm.alarm, daemon=True).start()
 
-    def target_qty(self, pid, it):
-        if pid in self.picks:
-            return self.picks[pid]
-        for keys, q, _ in self.words:
+    def target_qty(self, pid, it, wanted=None, words=None):
+        wanted = self.picks if wanted is None else wanted
+        words = self.words if words is None else words
+        if pid in wanted:
+            return wanted[pid]
+        for keys, q, _ in words:
             if keyword_match(keys, it["title"]):
                 return q
         return None
@@ -146,31 +149,61 @@ class Watcher:
             "unavailableTotal": len(gone),
         }
 
-    def start(self, picks, watches, interval):
-        self.picks = {str(p["id"]): max(1, int(p["qty"])) for p in picks if str(p["id"]) in self.products}
-        self.words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
+    def parse_wanted(self, picks, watches):
+        """Page data -> ({product id: qty}, [(keywords, qty, text)])."""
+        wanted = {str(p["id"]): max(1, int(p["qty"])) for p in picks if str(p["id"]) in self.products}
+        words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
+        return wanted, words
+
+    def ready_items(self, wanted=None, words=None):
+        """What would go to checkout right now: wanted items that are buyable and not opened yet."""
+        wanted = self.picks if wanted is None else wanted
+        words = self.words if words is None else words
+        ready = []
+        for pid, it in self.products.items():
+            q = self.target_qty(pid, it, wanted, words)
+            live = [vid for vid, v in it["variants"].items() if v[1] and vid not in self.opened]
+            if q and live:
+                ready.append((live[0], q, it["title"]))
+        return ready
+
+    def start(self, picks, watches, interval, open_now=False):
+        """Start (or update) watching. Items already in stock are only sent to
+        checkout when the page confirmed that (open_now); otherwise they're
+        watched, and open if they sell out and come back."""
+        self.picks, self.words = self.parse_wanted(picks, watches)
         self.interval = max(1.0, float(interval or 3))
         if self.running:
             self.log("info", "Updated what to watch.")
         else:
-            self.opened = set()  # kept across updates so changing picks never re-opens a checkout
+            self.opened = set()
             self.running = True
             self.thread = threading.Thread(target=self.loop, daemon=True)
             self.thread.start()
         summary = [f"{self.products[p]['title'][:60]} x{q}" for p, q in self.picks.items()]
         summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
-        self.open_ready()
+        if open_now:
+            self.checkout(self.ready_items())
 
-    def open_ready(self):
-        """Anything wanted that's already buyable (and not opened yet) goes straight to checkout."""
+    def went_live(self, old, current, quiet=False):
+        """Wanted items that came on sale (new, or back in stock) between two
+        fetches, ready for checkout. Logs each change unless quiet."""
         ready = []
-        for pid, it in self.products.items():
+        for pid, it in current.items():
+            before = old.get(pid, {"variants": {}})
+            fresh = [(vid, v) for vid, v in it["variants"].items()
+                     if v[1] and not before["variants"].get(vid, ("", False))[1]]
+            if not fresh:
+                continue
             q = self.target_qty(pid, it)
-            live = [vid for vid, v in it["variants"].items() if v[1] and vid not in self.opened]
-            if q and live:
-                ready.append((live[0], q, it["title"]))
-        self.checkout(ready)
+            if not quiet:
+                tag = "🎯 YOUR PICK" if q else ("🚨 watch list" if dm.watched(it["title"]) else "new/restock")
+                self.log("pick" if q else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
+                         None if q else f"{dm.SHOP}/products/{it['handle']}")
+            if q and fresh[0][0] not in self.opened:
+                ready.append((fresh[0][0], q, it["title"]))
+        return ready
 
     def stop(self):
         self.running = False
@@ -191,20 +224,7 @@ class Watcher:
                         self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
                     self.etag = headers.get("etag")
                     current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
-                    ready = []
-                    for pid, it in current.items():
-                        old = self.products.get(pid, {"variants": {}})
-                        fresh = [(vid, v) for vid, v in it["variants"].items()
-                                 if v[1] and not old["variants"].get(vid, ("", False))[1]]
-                        if not fresh:
-                            continue
-                        q = self.target_qty(pid, it)
-                        tag = "🎯 YOUR PICK" if q else ("🚨 watch list" if dm.watched(it["title"]) else "new/restock")
-                        self.log("pick" if q else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
-                                 None if q else f"{dm.SHOP}/products/{it['handle']}")
-                        if q and fresh[0][0] not in self.opened:
-                            ready.append((fresh[0][0], q, it["title"]))
-                    self.checkout(ready)
+                    self.checkout(self.went_live(self.products, current))
                     self.products = current
                     with self.lock:
                         self.last_check = time.strftime("%H:%M:%S")
@@ -338,8 +358,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/login":
             ok = W.login(data.get("password", ""))
             self.send_json({"ok": ok, "loggedIn": W.logged_in, "shopState": W.shop_state, "products": len(W.products)})
+        elif self.path == "/api/ready":
+            # Which of these would go to checkout right now? (Asked before starting.)
+            wanted, words = W.parse_wanted(data.get("picks", []), data.get("watches", []))
+            self.send_json({"items": [{"title": title, "qty": q} for _, q, title in W.ready_items(wanted, words)]})
         elif self.path == "/api/start":
-            W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3))
+            W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3), bool(data.get("openNow")))
             self.send_json({"ok": True})
         elif self.path == "/api/logout":
             W.logout()
