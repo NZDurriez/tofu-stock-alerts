@@ -74,12 +74,12 @@ class Watcher:
         return ok
 
     def listing(self, flt):
-        words = dm_words(flt)
+        words = dm_words(flt)  # search box: every word must appear
         out = []
         for pid, it in self.products.items():
             if not (dm.buyable(it) or dm.upcoming(it)):
                 continue  # old sold-out stock is never listed
-            if words and not all(w in it["title"].lower() for w in words):
+            if words and not all(w in norm(it["title"]) for w in words):
                 continue
             vs = list(it["variants"].values())
             price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
@@ -109,32 +109,45 @@ class Watcher:
     def target_qty(self, pid, it):
         if pid in self.picks:
             return self.picks[pid]
-        title = it["title"].lower()
-        for words, q, _ in self.words:
-            if all(w in title for w in words):
+        for keys, q, _ in self.words:
+            if keyword_match(keys, it["title"]):
                 return q
         return None
 
-    def start(self, picks, words, interval):
+    def matches(self, text, limit=6):
+        """Products a keyword watch would hit right now (any state), for the page's preview."""
+        keys = keywords(text)
+        if not keys:
+            return []
+        hits = [it for it in self.products.values() if keyword_match(keys, it["title"])]
+        rank = lambda it: (0 if dm.buyable(it) else 1 if dm.upcoming(it) else 2, it["title"])
+        out = []
+        for it in sorted(hits, key=rank)[:limit]:
+            state = "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon"
+            out.append({"title": it["title"], "state": state})
+        return {"items": out, "total": len(hits)}
+
+    def start(self, picks, watches, interval):
         self.picks = {str(p["id"]): max(1, int(p["qty"])) for p in picks if str(p["id"]) in self.products}
-        self.words = [(dm_words(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in words if dm_words(w["text"])]
+        self.words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
         self.interval = max(1.5, float(interval or 3))
-        self.opened = set()
         if self.running:
-            self.log("info", "Updated picks.")
+            self.log("info", "Updated what to watch.")
         else:
+            self.opened = set()  # kept across updates so changing picks never re-opens a checkout
             self.running = True
             self.thread = threading.Thread(target=self.loop, daemon=True)
             self.thread.start()
         summary = [f"{self.products[p]['title'][:60]} x{q}" for p, q in self.picks.items()]
-        summary += [f"anything new matching '{t}' x{q}" for _, q, t in self.words]
-        self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing picked (announcing only)"))
-        # Picks that are already buyable go straight to checkout
+        summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
+        self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
+        # Anything wanted that's already buyable goes straight to checkout
         ready = []
-        for pid, q in self.picks.items():
-            live = [vid for vid, v in self.products[pid]["variants"].items() if v[1]]
-            if live:
-                ready.append((live[0], q, self.products[pid]["title"]))
+        for pid, it in self.products.items():
+            q = self.target_qty(pid, it)
+            live = [vid for vid, v in it["variants"].items() if v[1] and vid not in self.opened]
+            if q and live:
+                ready.append((live[0], q, it["title"]))
         self.checkout(ready)
 
     def stop(self):
@@ -189,7 +202,25 @@ class Watcher:
 
 
 def dm_words(text):
-    return [w for w in re.split(r"\s+", (text or "").lower().strip()) if w]
+    return [w for w in re.split(r"\s+", norm(text)) if w]
+
+
+def norm(text):
+    """Lowercase and drop accents, so 'pokemon' matches 'Pokémon'."""
+    import unicodedata
+    text = unicodedata.normalize("NFD", text or "")
+    return "".join(c for c in text if unicodedata.category(c) != "Mn").lower().strip()
+
+
+def keywords(text):
+    """'Delta Reign, Elite Trainer Box' -> ['delta reign', 'elite trainer box']."""
+    return [re.sub(r"\s+", " ", norm(k)) for k in (text or "").split(",") if k.strip()]
+
+
+def keyword_match(keys, title):
+    """Every keyword (phrase) must appear in the product name."""
+    t = re.sub(r"\s+", " ", norm(title))
+    return all(k in t for k in keys)
 
 
 W = Watcher()
@@ -229,6 +260,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/products":
             from urllib.parse import unquote_plus
             self.send_json({"items": W.listing(unquote_plus(params.get("filter", "")))})
+        elif path == "/api/match":
+            from urllib.parse import unquote_plus
+            self.send_json(W.matches(unquote_plus(params.get("k", ""))) or {"items": [], "total": 0})
         elif path == "/api/events":
             W.last_poll = time.time()
             since = int(params.get("since", "0") or 0)
@@ -248,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             ok = W.login(data.get("password", ""))
             self.send_json({"ok": ok, "loggedIn": W.logged_in, "products": len(W.products)})
         elif self.path == "/api/start":
-            W.start(data.get("picks", []), data.get("words", []), data.get("interval", 3))
+            W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3))
             self.send_json({"ok": True})
         elif self.path == "/api/stop":
             W.stop()

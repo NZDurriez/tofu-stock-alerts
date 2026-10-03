@@ -46,6 +46,18 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .b-soldout{background:rgba(239,68,68,.13);color:#fca5a5}
 .b-soon{background:rgba(56,189,248,.13);color:#7dd3fc}
 .empty{padding:16px;color:var(--muted)}
+.watch{background:var(--field);border:1px solid var(--line2);border-radius:12px;padding:10px;margin-top:10px}
+.watch .row{align-items:center}
+.watch .lbl{font-size:12px;font-weight:600;color:var(--muted)}
+.watch .rm{background:none;color:var(--muted);font-size:20px;padding:4px 8px}
+.watch .rm:hover{color:var(--bad)}
+.watch .m{margin-top:8px;font-size:12.5px;color:var(--muted)}
+.watch .m .hit{display:block;color:var(--ink);padding:1px 0}
+.watch .m .none{color:#fca5a5}
+details.more{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+details.more summary{cursor:pointer;color:var(--muted);font-weight:600}
+.summary{margin-top:14px;font-size:13.5px;color:var(--muted)}
+.summary b{color:var(--ink)}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{background:var(--card2);border:1px solid var(--line2);border-radius:999px;padding:4px 10px;font-size:13px}
 .chip b{color:var(--honey2)}
@@ -91,19 +103,22 @@ button:disabled{opacity:.45;cursor:not-allowed}
       </section>
 
       <section class="card" style="margin-top:16px">
-        <h2><span class="n">2</span>Pick what to buy</h2>
-        <div class="row">
-          <input type="text" id="filter" placeholder="Search, e.g. delta reign, elite trainer box (blank = new releases from the last week)">
-          <button class="ghost" id="filterBtn">Search</button>
-        </div>
-        <div class="list" id="list"><div class="empty">Log in first to load the shop.</div></div>
-        <p class="hint">Old sold-out stock is hidden. ❌ sold out items can still be picked in case they restock.</p>
-        <div class="row" style="margin-top:12px">
-          <input type="text" id="word" placeholder="Also catch items not listed yet, e.g. elite trainer box">
-          <input type="number" id="wordQty" value="1" min="1" title="Quantity">
-          <button class="ghost" id="addWord">Add</button>
-        </div>
-        <div class="chips" id="picks"></div>
+        <h2><span class="n">2</span>What do you want to buy?</h2>
+        <p class="hint" style="margin-top:0">One row per product. Type keywords separated by commas; <b>every keyword must be in the product's name</b>. It catches restocks <i>and</i> brand-new listings.</p>
+        <div id="watches"></div>
+        <button class="ghost" id="addWatch" style="margin-top:10px">+ Add another product to watch</button>
+
+        <details class="more" id="shopList">
+          <summary>Or tick items from the shop list</summary>
+          <div class="row" style="margin-top:10px">
+            <input type="text" id="filter" placeholder="Search, e.g. delta reign (blank = new releases from the last week)">
+            <button class="ghost" id="filterBtn">Search</button>
+          </div>
+          <div class="list" id="list"><div class="empty">Log in first to load the shop.</div></div>
+          <p class="hint">Old sold-out stock is hidden. ❌ sold out items can still be picked in case they restock.</p>
+        </details>
+
+        <div class="summary"><b>Watching for:</b> <span id="picks"></span></div>
       </section>
     </div>
 
@@ -138,9 +153,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const picks = new Map();   // product id -> {title, qty}
-const words = [];          // [{text, qty}]
-let lastId = 0, audio = null, loggedIn = false, running = false;
+const picks = new Map();   // product id -> {title, qty}  (ticked in the shop list)
+const watches = [{ text: "", qty: 1 }]; // keyword watches, one per product wanted
+let lastId = 0, audio = null, loggedIn = false, running = false, lastProducts = 0;
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -152,8 +167,8 @@ $("loginBtn").onclick = async () => {
   $("loginBtn").disabled = true; $("loginBtn").textContent = "Logging in…";
   const r = await api("/api/login", { password: $("pw").value });
   $("loginBtn").disabled = false; $("loginBtn").textContent = "Log in & load shop";
-  loggedIn = r.ok; $("startBtn").disabled = !r.ok;
-  loadList();
+  loggedIn = r.ok; lastProducts = r.products; $("startBtn").disabled = !r.ok;
+  loadList(); renderWatches();
 };
 
 // ---------- step 2 ----------
@@ -174,7 +189,7 @@ async function loadList() {
     const title = row.querySelector("a").textContent;
     const sync = () => {
       if (cb.checked) picks.set(id, { title, qty: Math.max(1, +q.value || 1) }); else picks.delete(id);
-      row.classList.toggle("picked", cb.checked); renderPicks();
+      row.classList.toggle("picked", cb.checked); changed();
     };
     cb.onchange = sync; q.onchange = () => { if (!cb.checked) cb.checked = true; sync(); };
   });
@@ -182,27 +197,58 @@ async function loadList() {
 $("filterBtn").onclick = loadList;
 $("filter").onkeydown = (e) => { if (e.key === "Enter") loadList(); };
 
-$("addWord").onclick = () => {
-  const text = $("word").value.trim(); if (!text) return;
-  words.push({ text, qty: Math.max(1, +$("wordQty").value || 1) });
-  $("word").value = ""; renderPicks();
-};
-$("word").onkeydown = (e) => { if (e.key === "Enter") $("addWord").click(); };
+// ---------- keyword watches ----------
+const badgeHtml = { buyable: '<span class="badge b-buyable">✅ buyable</span>', soldout: '<span class="badge b-soldout">❌ sold out</span>', soon: '<span class="badge b-soon">🔜 not on sale yet</span>' };
+
+function renderWatches() {
+  $("watches").innerHTML = watches.map((w, i) => `
+    <div class="watch" data-i="${i}">
+      <div class="row">
+        <input type="text" class="kw" value="${esc(w.text)}" placeholder="Keywords, e.g. Delta Reign, Elite Trainer Box">
+        <span class="lbl">Qty</span><input type="number" class="qty" min="1" value="${w.qty}">
+        <button class="rm" title="Remove this product">×</button>
+      </div>
+      <div class="m"></div>
+    </div>`).join("");
+  $("watches").querySelectorAll(".watch").forEach((row) => {
+    const i = +row.dataset.i, kw = row.querySelector(".kw"), qty = row.querySelector(".qty");
+    let timer;
+    kw.oninput = () => { watches[i].text = kw.value; clearTimeout(timer); timer = setTimeout(() => { preview(row, kw.value); changed(); }, 350); };
+    qty.onchange = () => { watches[i].qty = Math.max(1, +qty.value || 1); qty.value = watches[i].qty; changed(); };
+    row.querySelector(".rm").onclick = () => { watches.splice(i, 1); if (!watches.length) watches.push({ text: "", qty: 1 }); renderWatches(); changed(); };
+    preview(row, w(i));
+  });
+  function w(i) { return watches[i].text; }
+}
+
+// Show what each watch matches in the shop right now
+async function preview(row, text) {
+  const el = row.querySelector(".m");
+  if (!text.trim()) { el.innerHTML = ""; return; }
+  if (!loggedIn && !lastProducts) { el.textContent = "Log in to see what this matches."; return; }
+  const r = await api("/api/match?k=" + encodeURIComponent(text));
+  el.innerHTML = r.total
+    ? `Matches now (${r.total}):` + r.items.map((it) => `<span class="hit">${badgeHtml[it.state]}${esc(it.title)}</span>`).join("") + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
+    : `<span class="none">No product matches yet.</span> That's fine if it isn't listed yet: it'll be caught the moment it appears.`;
+}
+
+$("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatches(); $("watches").lastElementChild.querySelector(".kw").focus(); };
 
 function renderPicks() {
-  const chips = [...picks].map(([id, p]) => `<span class="chip">${esc(p.title.slice(0, 50))} <b>x${p.qty}</b><button data-id="${id}" title="Remove">×</button></span>`)
-    .concat(words.map((w, i) => `<span class="chip">new: “${esc(w.text)}” <b>x${w.qty}</b><button data-w="${i}" title="Remove">×</button></span>`));
-  $("picks").innerHTML = chips.length ? chips.join("") : '<span class="hint">Nothing picked yet.</span>';
-  $("picks").querySelectorAll("button").forEach((b) => b.onclick = () => {
-    if (b.dataset.id) { picks.delete(b.dataset.id); loadList(); } else words.splice(+b.dataset.w, 1);
-    renderPicks();
-  });
-  if (running) sendPicks(); // update a running watch straight away
+  const parts = watches.filter((w) => w.text.trim()).map((w) => `<span class="chip">🔑 ${esc(w.text.trim())} <b>x${w.qty}</b></span>`)
+    .concat([...picks].map(([id, p]) => `<span class="chip">${esc(p.title.slice(0, 50))} <b>x${p.qty}</b><button data-id="${id}" title="Remove">×</button></span>`));
+  $("picks").innerHTML = parts.length ? `<span class="chips">${parts.join("")}</span>` : "nothing yet.";
+  $("picks").querySelectorAll("button").forEach((b) => b.onclick = () => { picks.delete(b.dataset.id); loadList(); changed(); });
 }
+function changed() { renderPicks(); if (running) sendPicks(); } // a running watch updates straight away
 
 // ---------- step 3 ----------
 function sendPicks() {
-  return api("/api/start", { picks: [...picks].map(([id, p]) => ({ id, qty: p.qty })), words, interval: +$("interval").value });
+  return api("/api/start", {
+    picks: [...picks].map(([id, p]) => ({ id, qty: p.qty })),
+    watches: watches.filter((w) => w.text.trim()),
+    interval: +$("interval").value,
+  });
 }
 $("startBtn").onclick = async () => {
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
@@ -249,7 +295,7 @@ async function poll() {
       $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
       if (ev.kind === "checkout" && Date.now() - pageStart > 3000) openCheckout(ev);
     }
-    running = r.running; loggedIn = r.loggedIn || loggedIn;
+    running = r.running; loggedIn = r.loggedIn || loggedIn; lastProducts = r.products;
     $("pLogin").textContent = r.loggedIn ? "🔓 Behind the password" : (r.products ? "Shop loaded" : "Not logged in");
     $("pLogin").className = "pill" + (r.loggedIn || r.products ? " on" : "");
     $("pRun").textContent = r.running ? `👀 Watching every ${r.interval}s` : "Not watching";
@@ -263,7 +309,7 @@ async function poll() {
   }
 }
 const pageStart = Date.now();
-renderPicks(); poll(); setInterval(poll, 1000);
+renderWatches(); renderPicks(); poll(); setInterval(poll, 1000);
 </script>
 </body>
 </html>
