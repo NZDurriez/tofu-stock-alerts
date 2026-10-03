@@ -17,7 +17,7 @@
   --info:#86b9df; --info-soft:rgba(134,185,223,.14);
   --c-stream:#a970ff; --c-setup:#e0a84f; --c-watch:#5fb4e6; --tab-ink:#17181c; /* column colours */
   --shadow:none;
-  --solid:#23262d; --panel-a:.84; /* pop-ups stay solid; panels over a background picture are this opaque */
+  --solid:#23262d; --panel-a:.84; /* pop-ups stay solid; panels over a background picture are this opaque (1 - see-through) */
 }
 :root[data-theme="light"]{
   --bg:#f5f4f0; --surface:#ffffff; --surface2:#f3f1ec; --field:#fbfaf7; --line:#e4e0d7;
@@ -252,13 +252,13 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
 .controls label{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:8px}
 /* ⓘ help: a small round "i" that shows its explanation on hover, tap or keyboard focus */
-.info{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:2px;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;font-style:italic;cursor:help;vertical-align:middle;outline:none}
-.info:hover,.info:focus-visible{border-color:var(--accent);color:var(--accent)}
+.tipicon{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:2px;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;font-style:italic;cursor:help;vertical-align:middle;outline:none}
+.tipicon:hover,.tipicon:focus-visible{border-color:var(--accent);color:var(--accent)}
 .tiptext{display:none;position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:60;width:max-content;max-width:min(320px,80vw);padding:10px 12px;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:400 13px/1.5 Inter,sans-serif;font-style:normal;text-align:left;text-transform:none;letter-spacing:normal;white-space:normal}
 .tiptext b{font-weight:600}
-.info.right .tiptext{left:auto;right:-8px;transform:none} /* for icons near the right edge */
-.info:hover .tiptext,.info:focus .tiptext{display:block}
-.card:has(.info:hover),.card:has(.info:focus){position:relative;z-index:40} /* keep an open tip above the next panel */
+.tipicon.right .tiptext{left:auto;right:-8px;transform:none} /* for icons near the right edge */
+.tipicon:hover .tiptext,.tipicon:focus .tiptext{display:block}
+.card:has(.tipicon:hover),.card:has(.tipicon:focus){position:relative;z-index:40} /* keep an open tip above the next panel */
 
 .feed{height:380px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--field);padding:6px 0}
 .ev{display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:start;padding:7px 14px;font-size:14px;color:var(--text)}
@@ -283,9 +283,12 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   // Apply the saved theme before the page draws (no flash)
   try { if (localStorage.getItem("dropTheme") === "light") document.documentElement.dataset.theme = "light"; } catch {}
   try {
-    const bg = localStorage.getItem("dropBg"), see = localStorage.getItem("dropPanels");
+    const bg = localStorage.getItem("dropBg");
+    const old = localStorage.getItem("dropPanels"); // (was "how solid"; now it's "how see-through")
+    if (old !== null && localStorage.getItem("dropSeeThrough") === null) localStorage.setItem("dropSeeThrough", 100 - old);
+    const see = localStorage.getItem("dropSeeThrough");
     if (bg) { document.documentElement.classList.add("has-bg"); document.documentElement.style.setProperty("--bg-url", `url("/background?v=${bg}")`); }
-    if (see) document.documentElement.style.setProperty("--panel-a", see / 100);
+    if (see !== null) document.documentElement.style.setProperty("--panel-a", 1 - see / 100);
   } catch {}
 </script>
 </head>
@@ -326,8 +329,8 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             <button class="linkish" id="bgRemove" hidden>Remove</button>
           </div>
           <p class="hint" id="bgMsg" style="margin:6px 0 0"></p>
-          <label class="vol" id="bgSee">Panels <input type="range" id="panelA" min="55" max="100" step="1" aria-label="How solid the panels are"><span id="panelVal"></span></label>
-          <p class="hint" style="margin:4px 0 0">Lower shows more of the picture; higher keeps text easiest to read.</p>
+          <label class="vol" id="bgSee">See-through <input type="range" id="panelA" min="0" max="100" step="1" aria-label="How see-through the panels are"><span id="panelVal"></span></label>
+          <p class="hint" style="margin:4px 0 0">0% is solid panels; 100% is fully see-through (just the blur behind the text).</p>
         </div>
       </div>
       <button class="theme" id="themeBtn">☀️ Light</button>
@@ -349,7 +352,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">1</span>Load the shop <span class="info" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Only enter the password if Mr Tofu's shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</span></span></h2>
+        <h2><span class="step">1</span>Load the shop <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Only enter the password if Mr Tofu's shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</span></span></h2>
         <div class="row">
           <input type="text" id="pw" placeholder="Shop password (optional)" autocomplete="off">
           <button class="primary" id="loginBtn">Load shop</button>
@@ -364,7 +367,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <section class="card">
         <h2><span class="step">2</span>Add to your watchlist</h2>
 
-        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="info" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment Tofu adds or restocks them, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</span></span></h3>
+        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment Tofu adds or restocks them, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</span></span></h3>
         <div class="kwbox">
           <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
           <div class="suggest" id="suggest"></div>
@@ -389,7 +392,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">3</span>Your watchlist <span class="info" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.</span></span> <span class="count" id="wlCount"></span></h2>
+        <h2><span class="step">3</span>Your watchlist <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.</span></span> <span class="count" id="wlCount"></span></h2>
         <div class="wl" id="watchlist"></div>
         <div class="controls" style="margin-top:16px">
           <label>Check every
@@ -399,12 +402,12 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="controls" style="margin-top:12px">
           <button class="primary" id="startBtn" disabled>Start watching</button>
           <button class="danger" id="stopBtn" disabled>Stop</button>
-          <span class="info right" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</span></span>
+          <span class="tipicon right" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</span></span>
         </div>
       </section>
 
       <section class="card">
-        <h2>Activity <span class="info" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Everything drop mode sees, newest at the bottom.</span></span></h2>
+        <h2>Activity <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Everything drop mode sees, newest at the bottom.</span></span></h2>
         <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
       </section>
     </div>
@@ -934,8 +937,9 @@ async function loadBackground() {
   $("bgPrev").textContent = r.has ? "" : "No picture";
   $("bgRemove").hidden = !r.has;
   $("bgSee").hidden = !r.has;
-  const a = Math.round(parseFloat(getComputedStyle(root).getPropertyValue("--panel-a")) * 100) || 84;
-  $("panelA").value = a; $("panelVal").textContent = a + "%";
+  const opacity = parseFloat(getComputedStyle(root).getPropertyValue("--panel-a"));
+  const see = Math.round(100 - (isNaN(opacity) ? 0.84 : opacity) * 100);
+  $("panelA").value = see; $("panelVal").textContent = see + "%";
 }
 $("bgFile").onchange = async () => {
   const file = $("bgFile").files[0];
@@ -951,10 +955,10 @@ $("bgFile").onchange = async () => {
 };
 $("bgRemove").onclick = async () => { await api("/api/background/remove", {}); loadBackground(); };
 $("panelA").oninput = () => {
-  const a = +$("panelA").value;
-  document.documentElement.style.setProperty("--panel-a", a / 100);
-  $("panelVal").textContent = a + "%";
-  try { localStorage.setItem("dropPanels", a); } catch {}
+  const see = +$("panelA").value;
+  document.documentElement.style.setProperty("--panel-a", 1 - see / 100);
+  $("panelVal").textContent = see + "%";
+  try { localStorage.setItem("dropSeeThrough", see); } catch {}
 };
 
 // ---------- alert sound ----------
