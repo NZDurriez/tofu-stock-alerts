@@ -252,11 +252,12 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
 .controls label{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:8px}
 /* ⓘ help: a small round "i" that shows its explanation on hover, tap or keyboard focus */
-.tipicon{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:2px;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;font-style:italic;cursor:help;vertical-align:middle;outline:none}
+.tipicon{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:auto;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;font-style:italic;cursor:help;vertical-align:middle;outline:none}
 .tipicon:hover,.tipicon:focus-visible{border-color:var(--accent);color:var(--accent)}
-.tiptext{display:none;position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:60;width:max-content;max-width:min(320px,80vw);padding:10px 12px;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:400 13px/1.5 Inter,sans-serif;font-style:normal;text-align:left;text-transform:none;letter-spacing:normal;white-space:normal}
+.tiptext{display:none;position:absolute;top:calc(100% + 8px);right:-8px;z-index:60;width:max-content;max-width:min(320px,80vw);padding:10px 12px;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:400 13px/1.5 Inter,sans-serif;font-style:normal;text-align:left;text-transform:none;letter-spacing:normal;white-space:normal}
 .tiptext b{font-weight:600}
-.tipicon.right .tiptext{left:auto;right:-8px;transform:none} /* for icons near the right edge */
+.count~.tipicon{margin-left:0} /* (after "2 items", which already takes the space) */
+.watchctl{margin:0 0 14px}
 .tipicon:hover .tiptext,.tipicon:focus .tiptext{display:block}
 .card:has(.tipicon:hover),.card:has(.tipicon:focus){position:relative;z-index:40} /* keep an open tip above the next panel */
 
@@ -392,18 +393,15 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">3</span>Your watchlist <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.</span></span> <span class="count" id="wlCount"></span></h2>
-        <div class="wl" id="watchlist"></div>
-        <div class="controls" style="margin-top:16px">
+        <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</span></span></h2>
+        <div class="controls watchctl">
           <label>Check every
-            <select id="interval"><option value="0.5">½ second (fastest: drops only)</option><option value="1">1 second (drops)</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
+            <select id="interval"><option value="0.5">½ second (drops)</option><option value="1">1 second</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
           </label>
-        </div>
-        <div class="controls" style="margin-top:12px">
           <button class="primary" id="startBtn" disabled>Start watching</button>
           <button class="danger" id="stopBtn" disabled>Stop</button>
-          <span class="tipicon right" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</span></span>
         </div>
+        <div class="wl" id="watchlist"></div>
       </section>
 
       <section class="card">
