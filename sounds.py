@@ -139,7 +139,7 @@ def write_wav(path, samples, rate, volume):
     if isinstance(path, str):
         write(path + ".tmp")
         os.replace(path + ".tmp", path)  # never play a half-written file
-    else:  # a file object (e.g. for sending to a phone)
+    else:  # a file object
         write(path)
 
 
@@ -182,18 +182,6 @@ def render(settings=None):
     else:
         samples, rate = built_in(settings["sound"]), RATE
     write_wav(dm.ALERT_WAV, samples, rate, settings["volume"] if settings["sound"] != "none" else 0)
-
-
-def wav_bytes(volume=100):
-    """The current alert sound as WAV data at another volume (for playing on a phone)."""
-    settings = load()
-    if settings["sound"].startswith("file:"):
-        samples, rate = read_wav(file_path(settings["sound"]))
-    else:
-        samples, rate = built_in(settings["sound"]), RATE
-    buf = io.BytesIO()
-    write_wav(buf, samples, rate, volume if settings["sound"] != "none" else 0)
-    return buf.getvalue()
 
 
 def ensure():
