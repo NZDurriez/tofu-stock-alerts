@@ -153,28 +153,27 @@ class Watcher:
     def category_list(self):
         if self.products and time.time() - self.cats_at > 600 and self.cats_at:  # refresh every 10 minutes
             self.load_categories_soon()
+        in_stock = {pid for pid, it in self.products.items() if dm.buyable(it)}
         return {"loading": not self.cats_at and bool(self.products),
-                "categories": [{"id": cid, "name": name,
-                                "count": len(self.categories.get(cid, set()) & self.products.keys())}
+                "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & in_stock)}
                                for cid, name, _ in CATEGORIES]}
 
     def listing(self, flt, cat="", limit=40):
-        """Search results. With no search: what's in stock right now. With a
-        search, or a category picked: everything matching (sold out too, so you
-        can watch for a restock), in stock first."""
+        """The exact-product search: only what you can buy right now (sold out
+        or unlisted things are for keyword watches), optionally in one of
+        Tofu's categories."""
         keys = keywords(flt)
         in_cat = self.categories.get(cat) if cat else None
         out = []
         for pid, it in self.products.items():
+            if not dm.buyable(it):
+                continue
             if in_cat is not None and pid not in in_cat:
                 continue
             if keys and not keyword_match(keys, it["title"]):
                 continue
-            if not keys and not cat and not dm.buyable(it):
-                continue
             out.append(card(pid, it))
-        order = {"buyable": 0, "soon": 1, "soldout": 2}
-        out.sort(key=lambda x: (order[x["state"]], x["title"]))
+        out.sort(key=lambda x: x["title"])
         return {"items": out[:limit], "total": len(out)}
 
     def watch_info(self, ids, texts):

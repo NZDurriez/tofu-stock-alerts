@@ -331,7 +331,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="divider"></div>
         <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
         <div id="exactBody" hidden>
-          <p class="lead" style="margin:6px 0 12px">Search everything in the shop, sold out included, and press <b style="color:var(--text);font-weight:600">+ Watch</b>.</p>
+          <p class="lead" style="margin:6px 0 12px">What's in stock right now. Press <b style="color:var(--text);font-weight:600">+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above.</p>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
           <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
@@ -687,12 +687,12 @@ async function search() {
   if (q !== $("search").value.trim()) return; // a newer search is on its way
   let html = "";
   if (q) {
-    html += `<div class="bridge"><span>Not listed yet, or want anything with these words?</span>
+    html += `<div class="bridge"><span>Sold out or not listed yet? Catch it with keywords:</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
     html += cat
-      ? `<div class="resnote" style="border-top:0">Everything in ${esc(catNames[cat] || "this category")}, in stock first.</div>`
-      : '<div class="resnote" style="border-top:0">In stock now. Type to search everything, including sold out.</div>';
+      ? `<div class="resnote" style="border-top:0">In stock in ${esc(catNames[cat] || "this category")}.</div>`
+      : '<div class="resnote" style="border-top:0">Everything in stock right now. Type to search.</div>';
   }
   html += r.items.map((it) => {
     const already = onList("product", it.id);
@@ -703,7 +703,7 @@ async function search() {
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
-  if (!r.items.length) html += `<div class="empty">No products ${q ? "match that right now" : cat ? "in this category right now" : "in stock right now"}.</div>`;
+  if (!r.items.length) html += `<div class="empty">Nothing ${q ? "matching that is" : cat ? "in this category is" : "is"} in stock right now.</div>`;
   if (r.total > r.items.length) html += `<div class="resnote">Showing ${r.items.length} of ${r.total}. Type more to narrow it down.</div>`;
   el.innerHTML = html;
   const byId = Object.fromEntries(r.items.map((it) => [it.id, it]));
