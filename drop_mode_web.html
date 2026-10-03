@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tofu Drop Mode</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* Calm palette: soft dark by default, light mode via the toggle. No glows,
@@ -220,6 +221,8 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-row{align-items:flex-start}
 .wl-row .rm{background:none;border:0;color:var(--faint);font-size:22px;line-height:1;padding:4px 6px;flex:none}
 .wl-row .rm:hover{color:var(--bad)}
+.maxin{width:86px;padding:6px 8px;font-size:14px}
+.maxin::placeholder{color:var(--faint)}
 .wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
 .count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
 .warnline{color:var(--bad);width:100%}
@@ -827,8 +830,10 @@ function statusHtml(w) {
     const it = info.picks[w.id];
     if (!it) return "";
     if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if Tofu lists it again';
+    const over = w.max && it.price && parseFloat(it.price) > w.max;
     return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "")
-      + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale");
+      + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale")
+      + (over ? `<span class="warnline">That's over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>` : "");
   }
   const m = info.words[w.text];
   if (!m) return "";
@@ -839,8 +844,10 @@ function statusHtml(w) {
     return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or Tofu adds a new match</span>`;
   }
   const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
+  const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
   return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
-    + (m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "");
+    + (over ? `<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`
+      : m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "");
 }
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
@@ -848,7 +855,9 @@ function keywordThumb(w) {
   const m = info.words[w.text], pic = m && [...m.items, ...m.unavailable].find((it) => it.image);
   return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch">🔎</span></span>` : '<span class="thumb none">🔎</span>';
 }
+let wlRedrawLater = false; // (don't redraw while you're typing a max price)
 function renderWatchlist() {
+  if (document.activeElement && document.activeElement.classList.contains("maxin")) { wlRedrawLater = true; return; }
   $("wlCount").textContent = watchlist.length ? `${watchlist.length} item${watchlist.length === 1 ? "" : "s"}` : "";
   if (!watchlist.length) {
     $("watchlist").innerHTML = '<div class="wl-empty">Nothing on your watchlist yet. Add keywords or a product in step 2.</div>';
@@ -860,13 +869,22 @@ function renderWatchlist() {
       <div class="t">
         <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
         <div class="st">${statusHtml(w)}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty)}</div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty)}
+          <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>
       </div>
       <button class="rm" title="Remove from watchlist">×</button>
     </div>`).join("");
   $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
     const i = +row.dataset.i;
     wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
+    const maxin = row.querySelector(".maxin");
+    maxin.onchange = () => { // the most you'll pay for each (empty = no limit)
+      const v = Math.round(parseFloat(maxin.value) * 100) / 100;
+      if (v > 0) watchlist[i].max = v; else delete watchlist[i].max;
+      watchlistChanged();
+    };
+    maxin.onkeydown = (e) => { if (e.key === "Enter") maxin.blur(); };
+    maxin.onblur = () => { if (wlRedrawLater) { wlRedrawLater = false; renderWatchlist(); } };
     row.querySelector(".rm").onclick = () => { watchlist.splice(i, 1); watchlistChanged(); };
   });
 }
@@ -884,8 +902,8 @@ async function refreshInfo() {
 }
 function watchlistBody() {
   return {
-    picks: watchlist.filter((w) => w.kind === "product").map((w) => ({ id: w.id, qty: w.qty })),
-    watches: watchlist.filter((w) => w.kind === "words").map((w) => ({ text: w.text, qty: w.qty })),
+    picks: watchlist.filter((w) => w.kind === "product").map((w) => ({ id: w.id, qty: w.qty, max: w.max })),
+    watches: watchlist.filter((w) => w.kind === "words").map((w) => ({ text: w.text, qty: w.qty, max: w.max })),
     interval: +$("interval").value,
     openNow: true,
   };

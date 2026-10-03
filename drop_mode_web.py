@@ -25,6 +25,16 @@ import sounds
 
 HOST, PORT = "127.0.0.1", int(os.environ.get("DROP_WEB_PORT", "8765"))
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_web.html")
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_icon.svg")
+
+
+def price_cap(value):
+    """A max price from the page: a positive number of dollars, or None (no limit)."""
+    try:
+        value = round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 WATCHLIST_FILE = os.path.join(dm.SOUND_DIR, "watchlist.json")  # the watchlist (kept here, not in the browser)
 # The page's background picture (yours, kept in the settings folder, not the code)
 BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
@@ -91,11 +101,12 @@ class Watcher:
         self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
         self.etag = None
-        self.picks = {}         # product id -> qty
-        self.words = []         # [(words, qty, text)]
+        self.picks = {}         # product id -> (qty, max price or None)
+        self.words = []         # [(words, qty, text, max price or None)]
         self.interval = 3.0
         self.running = False
         self.opened = set()     # variant ids already sent to checkout
+        self.skipped = set()    # variant ids not opened because they cost more than your max (said once)
         self.events = []        # [{id, t, kind, text, url?}]
         self.last_poll = 0.0    # when the page last asked for events
         self.thread = None
@@ -252,15 +263,30 @@ class Watcher:
             webbrowser.open(url)
         play_alert()
 
-    def target_qty(self, pid, it, wanted=None, words=None):
+    def target(self, pid, it, wanted=None, words=None):
+        """(how many, max price) if this product is on the watchlist, else None."""
         wanted = self.picks if wanted is None else wanted
         words = self.words if words is None else words
         if pid in wanted:
             return wanted[pid]
-        for keys, q, _ in words:
+        for keys, q, _, cap in words:
             if keyword_match(keys, it["title"]):
-                return q
+                return q, cap
         return None
+
+    def affordable(self, it, vid, cap):
+        """Is it within the max price you set for it (if any)? Says so once if not."""
+        try:
+            price = float(it["variants"][vid][2])
+        except (KeyError, TypeError, ValueError):
+            return True
+        if cap is None or price <= cap + 1e-9:
+            return True
+        if vid not in self.skipped:
+            self.skipped.add(vid)
+            self.log("warn", f"⛔ Skipped {it['title'][:70]}: ${price:.2f} is over your max of ${cap:.2f}.",
+                     f"{dm.SHOP}/products/{it['handle']}")
+        return False
 
     def matches(self, text, limit=6):
         """What some keywords match right now, as cards: ones you can buy, then
@@ -279,10 +305,11 @@ class Watcher:
         }
 
     def parse_wanted(self, picks, watches):
-        """Page data -> ({product id: qty}, [(keywords, qty, text)])."""
+        """Page data -> ({product id: (qty, max)}, [(keywords, qty, text, max)])."""
         # Picks stay watched even if Tofu takes the listing down for a while
-        wanted = {str(p["id"]): max(1, int(p["qty"])) for p in picks}
-        words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
+        wanted = {str(p["id"]): (max(1, int(p["qty"])), price_cap(p.get("max"))) for p in picks}
+        words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip(), price_cap(w.get("max")))
+                 for w in watches if keywords(w["text"])]
         return wanted, words
 
     def ready_items(self, wanted=None, words=None):
@@ -291,10 +318,10 @@ class Watcher:
         words = self.words if words is None else words
         ready = []
         for pid, it in self.products.items():
-            q = self.target_qty(pid, it, wanted, words)
+            want = self.target(pid, it, wanted, words)
             live = [vid for vid, v in it["variants"].items() if v[1] and vid not in self.opened]
-            if q and live:
-                ready.append((live[0], q, it["title"]))
+            if want and live and self.affordable(it, live[0], want[1]):
+                ready.append((live[0], want[0], it["title"]))
         return ready
 
     # ---- the watchlist (kept here rather than in the browser) ----
@@ -312,19 +339,25 @@ class Watcher:
         clean = []
         for w in items[:200] if isinstance(items, list) else []:
             qty = max(1, min(5, int(w.get("qty") or 1))) if isinstance(w, dict) else 1
+            cap = price_cap(w.get("max")) if isinstance(w, dict) else None
             if isinstance(w, dict) and w.get("kind") == "product" and w.get("id"):
                 clean.append({"kind": "product", "id": str(w["id"]), "title": str(w.get("title", ""))[:200],
                               "image": w["image"] if isinstance(w.get("image"), str) else None, "qty": qty})
             elif isinstance(w, dict) and w.get("kind") == "words" and str(w.get("text", "")).strip():
                 clean.append({"kind": "words", "text": str(w["text"]).strip()[:200], "qty": qty})
+            else:
+                continue
+            if cap:
+                clean[-1]["max"] = cap
         self.watchlist = clean
         self.wl_version += 1
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
         with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
             json.dump(clean, f)
         if self.running:
-            self.start([{"id": w["id"], "qty": w["qty"]} for w in clean if w["kind"] == "product"],
-                       [{"text": w["text"], "qty": w["qty"]} for w in clean if w["kind"] == "words"], self.interval)
+            self.start([{"id": w["id"], "qty": w["qty"], "max": w.get("max")} for w in clean if w["kind"] == "product"],
+                       [{"text": w["text"], "qty": w["qty"], "max": w.get("max")} for w in clean if w["kind"] == "words"],
+                       self.interval)
 
     def start(self, picks, watches, interval, open_now=True):
         """Start (or update) watching. Anything on the watchlist that's in stock
@@ -338,13 +371,15 @@ class Watcher:
             if faster_or_slower:
                 self.renew()
         else:
-            self.opened = set()
+            self.opened, self.skipped = set(), set()
             self.running = True
             self.gen += 1
             self.thread = threading.Thread(target=self.loop, args=(self.gen,), daemon=True)
             self.thread.start()
-        summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}" for p, q in self.picks.items()]
-        summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
+        upto = lambda cap: f" (max ${cap:.2f} each)" if cap else ""
+        summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}{upto(cap)}"
+                   for p, (q, cap) in self.picks.items()]
+        summary += [f"keywords [{t}] x{q}{upto(cap)}" for _, q, t, cap in self.words]
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
         if open_now:
             self.checkout(self.ready_items())
@@ -359,13 +394,13 @@ class Watcher:
                      if v[1] and not before["variants"].get(vid, ("", False))[1]]
             if not fresh:
                 continue
-            q = self.target_qty(pid, it)
+            want = self.target(pid, it)
             if not quiet:
-                tag = "🎯 YOUR PICK" if q else ("🚨 hot item" if dm.watched(it["title"]) else "new/restock")
-                self.log("pick" if q else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
-                         None if q else f"{dm.SHOP}/products/{it['handle']}")
-            if q and fresh[0][0] not in self.opened:
-                ready.append((fresh[0][0], q, it["title"]))
+                tag = "🎯 YOUR PICK" if want else ("🚨 hot item" if dm.watched(it["title"]) else "new/restock")
+                self.log("pick" if want else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
+                         None if want else f"{dm.SHOP}/products/{it['handle']}")
+            if want and fresh[0][0] not in self.opened and self.affordable(it, fresh[0][0], want[1]):
+                ready.append((fresh[0][0], want[0], it["title"]))
         return ready
 
     def stop(self):
@@ -578,6 +613,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(W.matches(unquote_plus(params.get("k", "")), limit))
         elif path == "/api/sound":
             self.send_json(sound_info())
+        elif path in ("/favicon.svg", "/favicon.ico"):
+            with open(ICON, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.send_header("Cache-Control", "max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/background":
             self.send_json(background_info())
         elif path == "/background":

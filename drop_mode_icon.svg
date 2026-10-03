@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Tofu Drop Mode: a happy block of tofu with a lightning bolt (fast checkout) -->
+  <g stroke="#2b2a26" stroke-width="2.6" stroke-linejoin="round">
+    <path d="M8 24 L20 12 H54 L42 24 Z" fill="#fffaf0"/>
+    <path d="M42 24 L54 12 V46 L42 58 Z" fill="#e2d5b4"/>
+    <rect x="8" y="24" width="34" height="34" rx="4" fill="#f4ecd6"/>
+  </g>
+  <circle cx="19" cy="39" r="2.7" fill="#2b2a26"/>
+  <circle cx="31" cy="39" r="2.7" fill="#2b2a26"/>
+  <ellipse cx="14.5" cy="45" rx="3" ry="2" fill="#f2a6a0"/>
+  <ellipse cx="35.5" cy="45" rx="3" ry="2" fill="#f2a6a0"/>
+  <path d="M22 45.5 Q25 49 28 45.5" fill="none" stroke="#2b2a26" stroke-width="2.3" stroke-linecap="round"/>
+  <path d="M49 1.5 L39 20 H46.5 L41.5 34 L58 13.5 H50 L55 1.5 Z" fill="#e8a83e" stroke="#2b2a26" stroke-width="2.4" stroke-linejoin="round"/>
+</svg>
