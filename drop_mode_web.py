@@ -147,18 +147,18 @@ class Watcher:
         return None
 
     def matches(self, text, limit=6):
-        """For a watch row's preview: in-stock matches as cards, plus the names of
-        matches you can't buy right now (so you can see a restock would be caught)."""
+        """What some keywords match right now, as cards: ones you can buy, then
+        ones you can't (coming soon first, then sold out)."""
         keys = keywords(text)
         if not keys:
-            return {"items": [], "total": 0, "unavailable": []}
+            return {"items": [], "total": 0, "unavailable": [], "unavailableTotal": 0}
         hits = [(pid, it) for pid, it in self.products.items() if keyword_match(keys, it["title"])]
         live = sorted([(p, it) for p, it in hits if dm.buyable(it)], key=lambda x: x[1]["title"])
-        gone = sorted([it for _, it in hits if not dm.buyable(it)], key=lambda it: (not dm.upcoming(it), it["title"]))
+        gone = sorted([(p, it) for p, it in hits if not dm.buyable(it)], key=lambda x: (not dm.upcoming(x[1]), x[1]["title"]))
         return {
             "items": [card(p, it) for p, it in live[:limit]],
             "total": len(live),
-            "unavailable": [{"title": it["title"], "state": "soldout" if dm.sold_out(it) else "soon"} for it in gone[:3]],
+            "unavailable": [card(p, it) for p, it in gone[:limit]],
             "unavailableTotal": len(gone),
         }
 
@@ -303,8 +303,10 @@ def norm(text):
 
 
 def keywords(text):
-    """'Delta Reign, Elite Trainer Box' -> ['delta', 'reign', 'elite', 'trainer', 'box']."""
-    return [w for w in re.split(r"[\s,]+", norm(text)) if w]
+    """'Delta Reign, Elite Trainer Box' -> ['delta', 'reign', 'elite', 'trainer', 'box'].
+    Punctuation around words doesn't count ('TCG:' -> 'tcg', '(Pre-order)' -> 'pre-order')."""
+    words = re.split(r"[\s,:;|/·•—–]+", norm(text))
+    return [w for w in (re.sub(r"^\W+|\W+$", "", w) for w in words) if w]
 
 
 def keyword_match(keys, title):
@@ -363,7 +365,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"password": W.password, "shop": dm.SHOP})
         elif path == "/api/match":
             from urllib.parse import unquote_plus
-            self.send_json(W.matches(unquote_plus(params.get("k", ""))) or {"items": [], "total": 0})
+            limit = max(1, min(50, int(params.get("limit", "6") or 6)))
+            self.send_json(W.matches(unquote_plus(params.get("k", "")), limit))
         elif path == "/api/sound":
             self.send_json(sound_info())
         elif path == "/api/events":

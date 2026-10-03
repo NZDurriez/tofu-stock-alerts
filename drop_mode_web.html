@@ -114,13 +114,21 @@ input[type=search]:focus{border-color:var(--accent)}
 .suggest{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
 .suggest button{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:3px 11px;font:500 13px Inter,sans-serif}
 .suggest button:hover{border-color:var(--accent);color:var(--accent)}
-.kwprev{margin-top:12px;font-size:13.5px;color:var(--muted)}
+.kwprev{margin-top:14px}
 .kwprev:empty{display:none}
-.kwprev .pv-h{color:var(--text);font-weight:600;margin:6px 0 4px}
-.kwprev .hit{display:flex;align-items:center;gap:10px;color:var(--text);padding:3px 0}
-.kwprev .hit .thumb{width:40px;height:40px}
-.kwprev .gone{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:2px 0}
-.kwprev .warnline{margin-top:8px}
+.pv-head{display:flex;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:8px}
+.pv-head b{color:var(--text);font-weight:600}
+.pv-note{font-size:13px;color:var(--muted)}
+.pv-warn{font-size:13px;color:var(--text);background:var(--bad-soft);border-radius:8px;padding:7px 10px;margin-bottom:8px}
+.sugs{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.sug{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:7px 10px;color:var(--text);font:400 13.5px/1.35 Inter,sans-serif;cursor:pointer}
+.sug:first-child{border-top:0}
+.sug:hover,.sug:focus-visible{background:var(--surface2);outline:none}
+.sug .thumb{width:36px;height:36px;border-radius:8px}
+.sug .nm{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sug .badge{flex:none}
+.sug-more{width:100%;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:8px;color:var(--accent);font:600 13px Inter,sans-serif}
+.sug-more:hover{background:var(--surface2)}
 .divider{border-top:1px solid var(--line);margin:22px 0 16px}
 .bridge{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 14px;font-size:13.5px;color:var(--muted);background:var(--accent-soft)}
 .bridge button{padding:6px 12px}
@@ -417,14 +425,21 @@ function thumb(it, icon = "📦") {
     ? `<img class="thumb" src="${esc(it.image)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb none',textContent:'📦'}))">`
     : `<span class="thumb none">${icon}</span>`;
 }
-// Same words in any order = the same keyword watch
-const wordsKey = (s) => s.toLowerCase().split(/[\s,]+/).filter(Boolean).sort().join(" ");
+// Same words in any order = the same keyword watch (punctuation and accents don't count)
+const kwWords = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .split(/[\s,:;|/·•—–]+/).map((w) => w.replace(/^\W+|\W+$/g, "")).filter(Boolean);
+const wordsKey = (s) => kwWords(s).sort().join(" ");
 const onList = (kind, key) => watchlist.some((w) => w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
 
 // ---- keywords ----
 const SUGGEST = ["Elite Trainer Box", "Booster Bundle", "Booster Box", "Booster Pack", "Pre-order"];
 let kwQty = 1;
 const cleanKw = (s) => s.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").replace(/\s*,\s*/g, ", ").replace(/(, )+/g, ", ");
+// A product's name as keywords: no price, no "(Pre-order)" tag (that changes), no stray punctuation
+const nameAsKeywords = (title) => title
+  .replace(/\((?:pre[\s-]?order|pre[\s-]?release)\)/gi, " ")
+  .replace(/[:·•|—–]/g, " ").replace(/\s+-\s+/g, " ")
+  .replace(/\s+/g, " ").trim();
 function renderKwActs() {
   const text = cleanKw($("kwInput").value), already = text && onList("words", wordsKey(text));
   $("kwActs").innerHTML = `<span class="lbl">Buy</span>${qtyButtons(kwQty)}
@@ -439,29 +454,50 @@ $("suggest").querySelectorAll("button").forEach((b) => b.onclick = () => {
   $("kwInput").focus();
   kwChanged(0);
 });
-// Show what the keywords match right now. Typing never adds anything: only the button (or Enter) does.
+// Show what the keywords match right now, as a list you can click to use a
+// product's name. Typing never adds anything: only the button (or Enter) does.
+let kwShowAll = false;
+const pill = (it) => it.state === "buyable"
+  ? `<span class="badge b-buyable">${it.price ? "$" + esc(it.price) : "In stock"}</span>`
+  : badgeHtml[it.state];
 async function kwPreview() {
   const text = cleanKw($("kwInput").value), el = $("kwPrev");
-  if (!text) { el.innerHTML = ""; return; }
-  if (!lastProducts) { el.textContent = "Load the shop to see what these keywords match right now."; return; }
-  const m = await api("/api/match?k=" + encodeURIComponent(text));
+  if (!text) { el.innerHTML = ""; kwShowAll = false; return; }
+  if (!lastProducts) { el.innerHTML = '<div class="pv-note">Load the shop to see what these keywords match.</div>'; return; }
+  const m = await api("/api/match?limit=50&k=" + encodeURIComponent(text));
   if (text !== cleanKw($("kwInput").value)) return; // still typing
-  let html = "";
-  if (m.total) {
-    html += `<div class="pv-h">In stock now (${m.total})</div>`
-      + m.items.map((it) => `<div class="hit">${thumb(it)}<span>${esc(it.title)}${it.price ? ` · $${esc(it.price)}` : ""}</span></div>`).join("")
-      + (m.total > m.items.length ? `<div class="hit">…and ${m.total - m.items.length} more</div>` : "");
-    const all = m.total === 1 ? "it" : `all ${m.total}`;
-    html += `<div class="warnline">${running ? `You're watching, so adding this opens checkout for ${all} straight away.` : `Checkout opens for ${all} as soon as you start watching.`}${m.total > 1 ? " Add more keywords to narrow it down." : ""}</div>`;
+  const rows = m.items.concat(m.unavailable);
+  if (!rows.length) {
+    el.innerHTML = '<div class="pv-note">Nothing in the shop matches yet. Checkout opens the moment Tofu adds something that does.</div>';
+    return;
   }
-  if (m.unavailableTotal) {
-    html += `<div class="pv-h">Matches you can't buy right now (${m.unavailableTotal})</div>`
-      + m.unavailable.map((u) => `<div class="gone">${badgeHtml[u.state]}<span>${esc(u.title)}</span></div>`).join("")
-      + (m.unavailableTotal > m.unavailable.length ? `<div class="gone">…and ${m.unavailableTotal - m.unavailable.length} more</div>` : "")
-      + '<div style="margin-top:4px">Checkout opens if they come back in stock.</div>';
-  }
-  if (!m.total && !m.unavailableTotal) html = "Nothing in the shop matches yet. Checkout opens the moment Tofu adds something that does.";
-  el.innerHTML = html;
+  const soldOut = m.unavailable.filter((u) => u.state === "soldout").length;
+  const counts = [
+    m.total && `<b>${m.total}</b> in stock`,
+    m.unavailableTotal && `<b>${m.unavailableTotal}</b> ${soldOut === m.unavailable.length ? "sold out" : "not in stock"}`,
+  ].filter(Boolean).join(" · ");
+  const when = running ? "straight away" : "when you start watching";
+  const note = m.total > 1
+    ? `<div class="pv-warn">As typed, checkout opens for all ${m.total} in stock ${when}. Click one to watch just that.</div>`
+    : m.total === 1 ? `<div class="pv-note" style="margin-bottom:8px">The one in stock goes to checkout ${when}.</div>`
+    : `<div class="pv-note" style="margin-bottom:8px">Checkout opens if ${m.unavailableTotal === 1 ? "it comes" : "one comes"} back in stock, or Tofu adds a new match.</div>`;
+  const shown = kwShowAll ? rows : rows.slice(0, 6);
+  el.innerHTML = `<div class="pv-head"><span>Matches right now: ${counts}</span>${rows.length > 1 && m.total < 2 ? "<span>Click one to use its name</span>" : ""}</div>
+    ${note}
+    <div class="sugs">${shown.map((it) => `
+      <button type="button" class="sug" data-title="${esc(it.title)}" title="Use this product's name as the keywords">
+        ${thumb(it)}<span class="nm">${esc(it.title)}</span>${pill(it)}
+      </button>`).join("")}
+      ${rows.length > 6 ? `<button type="button" class="sug-more" id="kwMore">${kwShowAll ? "Show fewer" : `Show all ${rows.length}`}</button>` : ""}
+    </div>`;
+  el.querySelectorAll(".sug").forEach((b) => b.onclick = () => {
+    $("kwInput").value = nameAsKeywords(b.dataset.title);
+    kwShowAll = false;
+    kwChanged(0);
+    $("kwInput").focus();
+  });
+  const more = $("kwMore");
+  if (more) more.onclick = () => { kwShowAll = !kwShowAll; kwPreview(); };
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
@@ -473,7 +509,7 @@ function addKeywords() {
   kwChanged(0);
   watchlistChanged();
 }
-$("kwInput").oninput = () => kwChanged();
+$("kwInput").oninput = () => { kwShowAll = false; kwChanged(); };
 $("kwInput").onkeydown = (e) => { if (e.key === "Enter") addKeywords(); };
 
 // ---- exact products ----
