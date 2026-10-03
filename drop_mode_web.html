@@ -45,26 +45,31 @@ h1 span{color:var(--accent)}
 .theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 12px;font:500 13px Inter;cursor:pointer}
 .theme:hover{color:var(--text)}
 
-/* Three columns (live stream | set up | watching), each with its own colour.
-   The coloured buttons by the title show or hide a column; the others spread
-   out. The stream runs the full height and stays put while the others scroll.
-   Narrow windows stack the columns instead. */
+/* Three columns: live stream (always there) | set up | watching. Set up and
+   Watching each have a coloured − / + on their header line that folds the
+   column to a slim bar, so the others get the room. Narrow windows stack. */
 .cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-areas:var(--areas,"stream head head" "stream setup watch");grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
 .cols>header{grid-area:head;min-height:36px}
 .col{min-width:0}
 .col-stream{--c:var(--c-stream);grid-area:stream;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
-.cols.stream-only .col-stream{height:calc(100vh - 100px)}
+.cols.both-folded .col-stream{height:calc(100vh - 100px)}
 .col-setup{--c:var(--c-setup);grid-area:setup}
 .col-watch{--c:var(--c-watch);grid-area:watch}
-.brand{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.views{display:flex;gap:6px;flex-wrap:wrap}
-.view{font:600 13px Inter,sans-serif;padding:4px 13px;border-radius:999px;border:1.5px solid var(--c);background:transparent;color:var(--c)}
-.view[data-col="stream"]{--c:var(--c-stream)}
-.view[data-col="setup"]{--c:var(--c-setup)}
-.view[data-col="watch"]{--c:var(--c-watch)}
-.view[aria-pressed="true"]{background:var(--c);color:var(--tab-ink)}
-.view:hover{filter:brightness(1.12)}
-.view:disabled{opacity:.75;cursor:default;filter:none}
+.colbtn{flex:none;width:28px;height:28px;padding:0;border-radius:50%;border:2px solid var(--c);background:transparent;color:var(--c);font:700 17px/24px Inter,sans-serif}
+.colbtn:hover{background:var(--c);color:var(--tab-ink)}
+.col.collapsed .stack{display:none}
+@media (min-width:1100px){ /* folded: a slim bar with the + at the top */
+  .col.collapsed{position:sticky;top:16px}
+  .col.collapsed .col-head{flex-direction:column;align-items:center;gap:14px;width:44px;height:min(70vh,640px);margin:0;padding:10px 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;cursor:pointer}
+  .col.collapsed .col-head:hover{border-color:var(--c)}
+  .col.collapsed .colbtn{order:-1}
+  .col.collapsed .spacer{display:none}
+  .col.collapsed .col-title{writing-mode:vertical-rl}
+}
+.subtoggle{display:flex;align-items:center;gap:8px;width:100%;padding:2px 0;background:none;border:0;border-radius:0;color:var(--text);font:600 15px Inter,sans-serif;text-align:left}
+.subtoggle:hover{color:var(--accent)}
+.subtoggle .chev{display:inline-block;color:var(--c-setup);transition:transform .15s}
+.subtoggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
 .col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:30px}
 .col-title{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .col-title::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--c)}
@@ -83,7 +88,7 @@ h1 span{color:var(--accent)}
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr;grid-template-areas:none}
   .cols>header,.cols>.col{grid-area:auto}
-  .col-stream,.cols.stream-only .col-stream{position:static;height:auto}
+  .col-stream,.cols.both-folded .col-stream{position:static;height:auto}
   .player{max-height:none}
   .chat{flex:none;height:420px}
 }
@@ -195,10 +200,7 @@ input[type=search]:focus{border-color:var(--accent)}
 .warnline{color:var(--bad);width:100%}
 .popwrap{position:relative}
 .pop{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:min(370px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
-.pop.left{left:0;right:auto}
 .pop-title{font-weight:600;font-size:15px}
-.pop ol.steps{margin:0;padding-left:18px;font-size:13.5px;line-height:1.5;color:var(--text)}
-.pop ol.steps li{margin:6px 0}
 button.col-link{background:none;font:500 13px Inter,sans-serif}
 .pop .lead{font-size:13px;margin:2px 0 12px}
 .pop select{flex:1;min-width:0}
@@ -254,14 +256,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 <div class="wrap">
  <div class="cols" id="cols">
   <header>
-    <div class="brand">
-      <h1>Mr Tofu <span>Drop Mode</span></h1>
-      <div class="views" role="group" aria-label="Columns">
-        <button class="view" data-col="stream" aria-pressed="true">Stream</button>
-        <button class="view" data-col="setup" aria-pressed="true">Set up</button>
-        <button class="view" data-col="watch" aria-pressed="true">Watching</button>
-      </div>
-    </div>
+    <h1>Mr Tofu <span>Drop Mode</span></h1>
     <div class="status">
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
@@ -290,19 +285,6 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   <aside class="col col-stream" data-col="stream">
     <div class="col-head">
       <span class="col-title">Live stream</span><span class="spacer"></span>
-      <div class="popwrap">
-        <button class="col-link" data-pop="chatHelp" aria-expanded="false">Can't chat here?</button>
-        <div class="pop left" id="chatHelp" hidden>
-          <div class="pop-title">Chatting here</div>
-          <p class="lead">Twitch can only log you in inside this page if your browser lets it use its cookies here. It's a one-time change, and only for this drop mode page.</p>
-          <ol class="steps">
-            <li><b>Brave:</b> click the lion icon in the address bar and set <i>Cross-site cookies</i> to <i>All cookies allowed</i> (it may be under <i>Advanced controls</i>). Or turn Shields off for this page.</li>
-            <li><b>Chrome or Edge:</b> click the icon at the left of the address bar and allow third-party cookies for this site.</li>
-            <li>Reload this page, then press <b>Log In</b> in the chat (or log in at twitch.tv in another tab first).</li>
-          </ol>
-          <p class="lead" style="margin:10px 0 0">Rather not change it? <b>Pop out chat</b> always works.</p>
-        </div>
-      </div>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
     </div>
     <div class="stream-body">
@@ -312,7 +294,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   </aside>
 
   <section class="col col-setup" data-col="setup">
-    <div class="col-head"><span class="col-title">Set up</span></div>
+    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">1</span>Load the shop</h2>
@@ -341,16 +323,18 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         </div>
 
         <div class="divider"></div>
-        <h3 class="sub">Or pick an exact product</h3>
-        <p class="lead" style="margin-top:2px">Search everything in the shop, sold out included, and press <b style="color:var(--text);font-weight:600">+ Watch</b>.</p>
-        <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
-        <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
+        <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
+        <div id="exactBody" hidden>
+          <p class="lead" style="margin:6px 0 12px">Search everything in the shop, sold out included, and press <b style="color:var(--text);font-weight:600">+ Watch</b>.</p>
+          <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
+          <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
+        </div>
       </section>
     </div>
   </section>
 
   <section class="col col-watch" data-col="watch">
-    <div class="col-head"><span class="col-title">Watching</span></div>
+    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span></h2>
@@ -428,53 +412,53 @@ $("themeBtn").onclick = () => {
 themeLabel();
 
 // ---------- columns ----------
-// The coloured Stream / Set up / Watching buttons by the title show or hide a
-// column, and the others spread out to fill the space (remembered in this
-// browser). At least one column always stays.
-const COLS = ["stream", "setup", "watch"];
-const COL_W = { stream: "minmax(0,1.1fr)", setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
-let hiddenCols = {};
-try { hiddenCols = JSON.parse(localStorage.getItem("dropHidden") || "{}") || {}; } catch {}
-if (COLS.every((c) => hiddenCols[c])) hiddenCols = {};
+// Set up and Watching each have a − / + on their header line that folds the
+// column down to a slim bar (click the bar or + to open it again). The stream
+// and chat always stay. Remembered in this browser.
+const COL_W = { setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
+let folded = {};
+try { folded = JSON.parse(localStorage.getItem("dropFolded") || "{}") || {}; } catch {}
 function layoutCols() {
-  const shown = COLS.filter((c) => !hiddenCols[c]);
-  const under = shown.filter((c) => c !== "stream"); // the columns under the header
-  const lead = hiddenCols.stream ? [] : ["stream"];  // the stream runs down the left, beside the header
-  const cols = $("cols");
-  if (under.length) {
-    const list = lead.concat(under); // (one column on its own gets the full width)
-    cols.style.setProperty("--cols", list.length === 1 ? "minmax(0,1fr)" : list.map((c) => COL_W[c]).join(" "));
-    cols.style.setProperty("--areas", `"${lead.concat(under.map(() => "head")).join(" ")}" "${lead.concat(under).join(" ")}"`);
-  } else { // only the stream: header above it
-    cols.style.setProperty("--cols", "minmax(0,1fr)");
-    cols.style.setProperty("--areas", `"head" "stream"`);
+  const both = !!(folded.setup && folded.watch), cols = $("cols");
+  cols.style.setProperty("--cols", ["minmax(0,1.1fr)", folded.setup ? "44px" : COL_W.setup, folded.watch ? "44px" : COL_W.watch].join(" "));
+  // with both folded the header goes across the top (there's no room for it beside the stream)
+  cols.style.setProperty("--areas", both ? `"head head head" "stream setup watch"` : `"stream head head" "stream setup watch"`);
+  cols.classList.toggle("both-folded", both);
+  for (const c of ["setup", "watch"]) {
+    const col = document.querySelector(`.col[data-col="${c}"]`), btn = col.querySelector(".colbtn"), shut = !!folded[c];
+    col.classList.toggle("collapsed", shut);
+    btn.textContent = shut ? "+" : "−";
+    btn.setAttribute("aria-expanded", String(!shut));
+    btn.title = `${shut ? "Expand" : "Collapse"} ${c === "setup" ? "set up" : "watching"}`;
   }
-  cols.classList.toggle("stream-only", !under.length);
-  document.querySelectorAll(".col").forEach((col) => { col.hidden = !!hiddenCols[col.dataset.col]; });
-  document.querySelectorAll(".view").forEach((b) => {
-    const on = !hiddenCols[b.dataset.col];
-    b.setAttribute("aria-pressed", String(on));
-    b.disabled = on && shown.length === 1;
-    b.title = b.disabled ? "At least one column stays open" : `${on ? "Hide" : "Show"} ${b.textContent.trim().toLowerCase()}`;
-  });
-  streamOn(!hiddenCols.stream);
 }
-document.querySelectorAll(".view").forEach((b) => b.onclick = () => {
-  hiddenCols[b.dataset.col] = !hiddenCols[b.dataset.col];
-  try { localStorage.setItem("dropHidden", JSON.stringify(hiddenCols)); } catch {}
+function toggleFold(c) {
+  folded[c] = !folded[c];
+  try { localStorage.setItem("dropFolded", JSON.stringify(folded)); } catch {}
   layoutCols();
+}
+document.querySelectorAll(".colbtn").forEach((b) => b.onclick = (e) => { e.stopPropagation(); toggleFold(b.dataset.col); });
+document.querySelectorAll(".col-setup .col-head, .col-watch .col-head").forEach((h) => h.onclick = () => {
+  const c = h.closest(".col").dataset.col;
+  if (folded[c]) toggleFold(c); // a folded column's whole bar opens it
 });
 
+// "Or pick an exact product" starts folded away
+$("exactToggle").onclick = () => {
+  const open = $("exactBody").hidden;
+  $("exactBody").hidden = !open;
+  $("exactToggle").setAttribute("aria-expanded", String(open));
+  if (open) $("search").focus();
+};
+
 // ---------- live stream ----------
-// Tofu's Twitch stream and chat. Collapsing the column removes them, so the
-// stream stops (and stops using your connection) until it's opened again.
+// Tofu's Twitch stream and chat, always on the left.
 const CHANNEL = "mrtofulive";
 function chatSrc() {
   return `https://www.twitch.tv/embed/${CHANNEL}/chat?parent=${location.hostname}`
     + (document.documentElement.dataset.theme === "light" ? "" : "&darkpopout");
 }
-function streamOn(on) {
-  if (!on) { $("player").innerHTML = ""; $("chat").innerHTML = ""; return; }
+function streamOn() {
   if (!$("player").firstChild) $("player").innerHTML = `<iframe src="https://player.twitch.tv/?channel=${CHANNEL}&parent=${location.hostname}&muted=false&autoplay=true" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Mr Tofu's live stream"></iframe>`;
   if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
 }
@@ -959,7 +943,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-layoutCols(); renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
+layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>
