@@ -269,6 +269,12 @@ function beep() {
 
 function openCheckout(ev) {
   beep();
+  if (ev.openedByProgram) {                            // already opened in your default browser
+    $("alertText").textContent = ev.text.replace(/^⚡ Opening checkout: /, "") + " (already opened in your browser)";
+    $("alertGo").href = ev.url;
+    $("alert").classList.add("show");
+    return;
+  }
   const win = window.open(ev.url, "_blank");          // works once pop-ups are allowed for this page
   $("alertText").textContent = ev.text.replace(/^⚡ Opening checkout: /, "");
   $("alertGo").href = ev.url;

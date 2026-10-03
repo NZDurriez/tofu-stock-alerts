@@ -39,9 +39,9 @@ class Watcher:
         self.last_poll = 0.0    # when the page last asked for events
         self.thread = None
 
-    def log(self, kind, text, url=None):
+    def log(self, kind, text, url=None, **extra):
         with self.lock:
-            ev = {"id": len(self.events) + 1, "t": time.strftime("%H:%M:%S"), "kind": kind, "text": text}
+            ev = {"id": len(self.events) + 1, "t": time.strftime("%H:%M:%S"), "kind": kind, "text": text, **extra}
             if url:
                 ev["url"] = url
             self.events.append(ev)
@@ -100,9 +100,13 @@ class Watcher:
             self.opened.add(vid)
         url = f"{dm.SHOP}/cart/" + ",".join(f"{vid}:{q}" for vid, q, _ in items)
         names = "; ".join(f"x{q} {t[:60]}" for _, q, t in items)
-        self.log("checkout", f"⚡ Opening checkout: {names}", url)
-        # The page opens it in this browser; if the page isn't open, use the default browser
-        if time.time() - self.last_poll > 5:
+        # The page normally opens it (in the browser with Shop Pay). If the page
+        # hasn't checked in for a few seconds (closed, or a background tab the
+        # browser has slowed down), open it here in the default browser straight
+        # away, and tell the page so it doesn't open a second copy later.
+        by_program = time.time() - self.last_poll > 3
+        self.log("checkout", f"⚡ Opening checkout: {names}", url, openedByProgram=by_program)
+        if by_program:
             webbrowser.open(url)
         threading.Thread(target=dm.alarm, daemon=True).start()
 
