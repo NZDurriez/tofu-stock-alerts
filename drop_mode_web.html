@@ -27,12 +27,13 @@
   --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{color-scheme:dark}
 :root[data-theme="light"]{color-scheme:light}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1160px;margin:0 auto;padding:28px 20px 64px}
+.wrap{padding:16px 20px 40px}
 
-header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-.01em}
 h1 span{color:var(--accent)}
 .status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -42,8 +43,48 @@ h1 span{color:var(--accent)}
 .theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 12px;font:500 13px Inter;cursor:pointer}
 .theme:hover{color:var(--text)}
 
-.grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start}
-@media(max-width:920px){.grid{grid-template-columns:1fr}}
+/* Three columns (live stream | set up | watching), each can be collapsed to a
+   thin bar. The stream column runs the full height and stays put while the
+   others scroll. Narrow windows stack them instead. */
+.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
+.cols>header{grid-column:2 / span 2;grid-row:1;min-height:36px}
+.col{min-width:0}
+.col-stream{grid-column:1;grid-row:1 / span 2;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
+.col-setup{grid-column:2;grid-row:2}
+.col-watch{grid-column:3;grid-row:2}
+.col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:30px}
+.col-title{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.col-head .spacer{flex:1}
+.col-btn{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:0 9px;font:600 16px/26px Inter,sans-serif}
+.col-btn:hover{color:var(--text);background:var(--surface2)}
+.col-link{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px}
+.col-link:hover{color:var(--text);background:var(--surface2)}
+.rail{display:none}
+.col.collapsed>:not(.rail){display:none}
+.col.collapsed{position:sticky;top:16px}
+.col.collapsed .rail{display:flex;flex-direction:column;align-items:center;gap:12px;width:46px;height:min(70vh,640px);padding:12px 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;color:var(--muted)}
+.col-stream.collapsed .rail{height:100%}
+.rail:hover{color:var(--text);border-color:var(--accent)}
+.rail b{font-size:18px;line-height:1}
+.rail .vt{writing-mode:vertical-rl;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.stream-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px}
+.player{position:relative;aspect-ratio:16/9;max-height:calc(100vh - 340px);flex:none;background:#000;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.chat{position:relative;flex:1;min-height:240px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.player iframe,.chat iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+@container (min-width:900px){ /* lots of room: chat beside the stream, like Twitch */
+  .stream-body{flex-direction:row}
+  .player{flex:1;aspect-ratio:auto;max-height:none}
+  .chat{flex:none;width:340px}
+}
+@media (max-width:1099px){
+  .cols{grid-template-columns:1fr}
+  .cols>header,.col-stream,.col-setup,.col-watch{grid-column:1;grid-row:auto}
+  .col-stream,.col.collapsed{position:static;height:auto}
+  .player{max-height:none}
+  .chat{flex:none;height:420px}
+  .col.collapsed>.col-head{display:flex}
+  .col.collapsed .rail{display:none}
+}
 .stack{display:grid;gap:20px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
 .card h2{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:0 0 4px}
@@ -150,7 +191,11 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
 .count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
 .warnline{color:var(--bad);width:100%}
-.sound select{flex:1;min-width:180px}
+.soundwrap{position:relative}
+.pop{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:min(370px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.pop-title{font-weight:600;font-size:15px}
+.pop .lead{font-size:13px;margin:2px 0 12px}
+.pop select{flex:1;min-width:0}
 .vol{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:14px;color:var(--muted)}
 .vol input{flex:1;accent-color:var(--accent)}
 .vol span{min-width:42px;text-align:right;color:var(--text)}
@@ -200,17 +245,48 @@ input[type=search]:focus{border-color:var(--accent)}
 </head>
 <body>
 <div class="wrap">
+ <div class="cols" id="cols">
   <header>
     <h1>Mr Tofu <span>Drop Mode</span></h1>
     <div class="status">
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
       <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
+      <div class="soundwrap">
+        <button class="theme" id="soundBtn" aria-expanded="false" title="Alert sound">🔔 <span id="soundName">Sound</span></button>
+        <div class="pop" id="soundPop" hidden>
+          <div class="pop-title">Alert sound</div>
+          <p class="lead">Plays on this PC when checkout opens or the shop locks, even when this page is in the background.</p>
+          <div class="row">
+            <select id="sound" aria-label="Alert sound"></select>
+            <button class="secondary" id="soundTest" title="Play it">▶</button>
+          </div>
+          <div class="row" id="customRow" hidden>
+            <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">Choose a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
+            <span class="hint" id="customName" style="margin:0"></span>
+          </div>
+          <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
+        </div>
+      </div>
       <button class="theme" id="themeBtn">☀️ Light</button>
     </div>
   </header>
 
-  <div class="grid">
+  <aside class="col col-stream" data-col="stream">
+    <div class="col-head">
+      <span class="col-title">📺 Live stream</span><span class="spacer"></span>
+      <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Browsers block Twitch log-in inside the page, so chat in this window">Pop out chat ↗</a>
+      <button class="col-btn" data-col="stream" title="Collapse">−</button>
+    </div>
+    <div class="stream-body">
+      <div class="player" id="player"></div>
+      <div class="chat" id="chat"></div>
+    </div>
+    <button class="rail" data-col="stream" title="Show the live stream"><b>+</b><span class="vt">Live stream</span></button>
+  </aside>
+
+  <section class="col col-setup" data-col="setup">
+    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="col-btn" data-col="setup" title="Collapse">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">1</span>Load the shop</h2>
@@ -245,7 +321,11 @@ input[type=search]:focus{border-color:var(--accent)}
         <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
       </section>
     </div>
+    <button class="rail" data-col="setup" title="Show set up"><b>+</b><span class="vt">Set up</span></button>
+  </section>
 
+  <section class="col col-watch" data-col="watch">
+    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="col-btn" data-col="watch" title="Collapse">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span></h2>
@@ -263,27 +343,15 @@ input[type=search]:focus{border-color:var(--accent)}
         <div class="tip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</div>
       </section>
 
-      <section class="card sound">
-        <h2>🔔 Alert sound</h2>
-        <p class="lead">Plays on this PC when checkout opens or the shop locks, even when this page is in the background.</p>
-        <div class="row">
-          <select id="sound" aria-label="Alert sound"></select>
-          <button class="secondary" id="soundTest">▶ Play</button>
-        </div>
-        <div class="row" id="customRow" hidden>
-          <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:9px 14px;font-weight:600;font-size:14px">Choose a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
-          <span class="hint" id="customName" style="margin:0"></span>
-        </div>
-        <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
-      </section>
-
       <section class="card">
         <h2>Activity</h2>
         <p class="lead" style="margin-bottom:12px">Everything drop mode sees, newest at the bottom.</p>
         <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
       </section>
     </div>
-  </div>
+    <button class="rail" data-col="watch" title="Show watching"><b>+</b><span class="vt">Watching</span></button>
+  </section>
+ </div>
 </div>
 
 <div id="lockAlert"><div class="box">
@@ -330,8 +398,60 @@ $("themeBtn").onclick = () => {
   if (light) document.documentElement.dataset.theme = "light"; else delete document.documentElement.dataset.theme;
   try { localStorage.setItem("dropTheme", light ? "light" : "dark"); } catch {}
   themeLabel();
+  const chat = $("chat").firstChild;
+  if (chat) chat.src = chatSrc(); // Twitch chat in the matching theme
 };
 themeLabel();
+
+// ---------- columns ----------
+// Each column can be collapsed to a thin bar (remembered in this browser).
+// The others share the space, so collapsing two gives the third the room.
+const COL_W = { stream: "minmax(0,1.1fr)", setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
+let collapsed = {};
+try { collapsed = JSON.parse(localStorage.getItem("dropCols") || "{}") || {}; } catch {}
+function layoutCols() {
+  $("cols").style.setProperty("--cols", Object.keys(COL_W).map((c) => collapsed[c] ? "46px" : COL_W[c]).join(" "));
+  document.querySelectorAll(".col").forEach((col) => {
+    const shut = !!collapsed[col.dataset.col], btn = col.querySelector(".col-btn");
+    col.classList.toggle("collapsed", shut);
+    btn.textContent = shut ? "+" : "−";
+    btn.title = shut ? "Expand" : "Collapse";
+  });
+  streamOn(!collapsed.stream);
+}
+function toggleCol(c) {
+  const open = Object.keys(COL_W).filter((k) => !collapsed[k]);
+  if (!collapsed[c] && open.length === 1) return; // keep at least one column open
+  collapsed[c] = !collapsed[c];
+  try { localStorage.setItem("dropCols", JSON.stringify(collapsed)); } catch {}
+  layoutCols();
+}
+document.querySelectorAll(".col-btn, .rail").forEach((b) => b.onclick = () => toggleCol(b.dataset.col));
+
+// ---------- live stream ----------
+// Tofu's Twitch stream and chat. Collapsing the column removes them, so the
+// stream stops (and stops using your connection) until it's opened again.
+const CHANNEL = "mrtofulive";
+function chatSrc() {
+  return `https://www.twitch.tv/embed/${CHANNEL}/chat?parent=${location.hostname}`
+    + (document.documentElement.dataset.theme === "light" ? "" : "&darkpopout");
+}
+function streamOn(on) {
+  if (!on) { $("player").innerHTML = ""; $("chat").innerHTML = ""; return; }
+  if (!$("player").firstChild) $("player").innerHTML = `<iframe src="https://player.twitch.tv/?channel=${CHANNEL}&parent=${location.hostname}&muted=false&autoplay=true" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Mr Tofu's live stream"></iframe>`;
+  if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
+}
+$("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
+
+// ---------- alert sound menu (🔔 in the header) ----------
+function closeSoundPop() { $("soundPop").hidden = true; $("soundBtn").setAttribute("aria-expanded", "false"); }
+$("soundBtn").onclick = () => {
+  const open = $("soundPop").hidden;
+  $("soundPop").hidden = !open;
+  $("soundBtn").setAttribute("aria-expanded", String(open));
+};
+document.addEventListener("click", (e) => { if (!$("soundPop").hidden && !e.target.closest(".soundwrap")) closeSoundPop(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSoundPop(); });
 
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
@@ -650,6 +770,8 @@ async function loadSound() {
   $("sound").innerHTML = r.sounds.map((s) =>
     `<option value="${s.id}">${esc(s.name)}${s.id === "custom" && r.customName ? `: ${esc(r.customName)}` : ""}</option>`).join("");
   $("sound").value = r.sound;
+  const picked = r.sounds.find((s) => s.id === r.sound);
+  $("soundName").textContent = r.sound === "custom" ? "My sound" : picked ? picked.name.replace(/\s*\(.*\)$/, "") : "Sound";
   $("volume").value = r.volume; $("volVal").textContent = r.volume + "%";
   $("customRow").hidden = r.sound !== "custom";
   $("customName").textContent = r.customName ? "Or choose a different one." : "";
@@ -790,7 +912,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
+layoutCols(); renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>

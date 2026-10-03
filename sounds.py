@@ -28,6 +28,7 @@ NAMES = {
     "coin": "Arcade coin",
     "alarm": "Alarm clock",
     "siren": "Siren",
+    "fryer": "Fry timer (McDonald's kitchen)",
     "beeps": "Original beeps",
     "custom": "My own sound file",
     "none": "No sound",
@@ -88,6 +89,14 @@ def built_in(name):
     elif name == "siren":  # rising and falling wail
         buf = [0.0] * int(2.7 * RATE)
         add_note(buf, 0, lambda t: 850 + 350 * math.sin(2 * math.pi * 1.1 * t - math.pi / 2), 2.6, 0, WARM)
+    elif name == "fryer":  # fast-food kitchen: two fryer timers beeping over each other, then the grill
+        buf = [0.0] * int(3.0 * RATE)
+        for k in range(21):  # fryer 1: fast, piercing
+            add_note(buf, 0.125 * k, 2950.0, 0.07, 0, PURE, square=True)
+        for k in range(10):  # fryer 2: a little lower and slower, out of step
+            add_note(buf, 0.45 + 0.2 * k, 2600.0, 0.09, 0, ((1, 0.6, 1.0),), square=True)
+        for k in range(3):  # the grill's longer beeps
+            add_note(buf, 1.05 + 0.5 * k, 1950.0, 0.25, 0, ((1, 0.45, 1.0),), square=True)
     elif name == "beeps":  # what drop mode used to play
         buf = [0.0] * int(1.3 * RATE)
         for t, f in zip((0, .18, .36, .7, .88, 1.06), (1400, 1900, 2400) * 2):
