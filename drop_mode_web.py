@@ -20,9 +20,9 @@ import socket
 import subprocess
 import threading
 import time
+import traceback
 import webbrowser
 from contextlib import closing
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import drop_mode as dm  # shop access, labels and matching come from drop mode
@@ -496,6 +496,7 @@ class Phone:
         self.notify = saved.get("notify", "")
         self.mention = saved.get("mention") or my_discord_id()
         self.server, self.error = None, ""
+        self.last_reject = 0.0  # when something last tried the phone link without the key
 
     def save(self):
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
@@ -627,17 +628,21 @@ class Handler(BaseHTTPRequestHandler):
         if not self.remote:
             return True
         given = params.get("key", "")
-        if not given:
-            cookie = SimpleCookie(self.headers.get("Cookie", ""))
-            given = cookie["dropkey"].value if "dropkey" in cookie else ""
+        if not given:  # read only our own cookie (other sites' cookies for this address can be odd)
+            m = re.search(r"(?:^|;)\s*dropkey=([A-Za-z0-9_-]+)", self.headers.get("Cookie", ""))
+            given = m.group(1) if m else ""
         if PHONE.enabled and given and hmac.compare_digest(given, PHONE.key):
             if not params.get("key"):
                 return True
+            W.log("ok", "📱 Your phone scanned the link.")
             self.send_response(303)
             self.send_header("Set-Cookie", f"dropkey={PHONE.key}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict")
             self.send_header("Location", "/")
             self.end_headers()
             return False
+        if not self.path.startswith("/favicon") and time.time() - PHONE.last_reject > 60:
+            PHONE.last_reject = time.time()
+            W.log("warn", "📱 Something opened the phone link without the right key (an old link?). Scan the QR code again.")
         body = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Tofu Drop Mode</title>"
                 "<p style='font:16px system-ui,sans-serif;padding:24px;line-height:1.5'>To use drop mode from your phone, "
                 "open <b>📱 Phone</b> in drop mode on your PC and scan the QR code.</p>").encode()
@@ -647,7 +652,32 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
+    def oops(self, exc):
+        """Something went wrong answering a page: show it (instead of an empty
+        reply) and log it, so it can be fixed."""
+        traceback.print_exc()
+        W.log("warn", f"Drop mode couldn't answer {self.path.split('?')[0]}: {exc}")
+        try:
+            self.send_response(500)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(f"Drop mode hit an error: {exc}".encode())
+        except Exception:
+            pass
+
     def do_GET(self):
+        try:
+            self.get()
+        except Exception as exc:
+            self.oops(exc)
+
+    def do_POST(self):
+        try:
+            self.post()
+        except Exception as exc:
+            self.oops(exc)
+
+    def get(self):
         path, _, query = self.path.partition("?")
         params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
         if not self.gate(params):
@@ -657,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = f.read()
             if self.remote:  # tell the page it's open on a phone
                 body = body.replace(b"<head>", b"<head><script>window.DROP_REMOTE = true;</script>", 1)
+                W.log("ok", "📱 Your phone opened drop mode.")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -703,7 +734,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def post(self):
         if not self.gate({}) or not self.local_only():
             return
         n = int(self.headers.get("Content-Length", "0") or 0)
