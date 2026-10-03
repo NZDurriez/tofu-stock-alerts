@@ -170,6 +170,10 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
           <button class="primary" id="loginBtn">Load shop</button>
         </div>
         <div class="loginState" id="loginState">Not loaded yet.</div>
+        <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer">
+          <input type="checkbox" id="autoUnlock" checked style="accent-color:var(--accent)">
+          Unlock mrtofu.store in this browser automatically when the shop locks (needs pop-ups allowed)
+        </label>
       </section>
 
       <section class="card">
@@ -229,10 +233,13 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",
 const picks = new Map();                 // product id -> {title, qty}  (ticked in the shop list)
 const watches = [{ text: "", qty: 1 }];  // keyword watches, one per product wanted
 let lastId = 0, audio = null, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
+let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
 const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
 
-async function api(path, body) {
-  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+async function api(path, body, headers = {}) {
+  const res = await fetch(path, body
+    ? { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
+    : { headers });
   return res.json();
 }
 
@@ -249,6 +256,41 @@ themeLabel();
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
 
+// Log THIS browser in to the locked shop: submit the password to mrtofu.store/password
+// in a new tab, exactly like typing it on Tofu's password page. Afterwards checkout
+// links open properly in this browser instead of bouncing to the password page.
+async function unlockBrowser(fromClick) {
+  const r = await api("/api/password", null, { "X-Drop-Mode": "1" });
+  const pw = $("pw").value.trim() || r.password;
+  if (!pw) { if (fromClick) alert("Enter the shop password in step 1 first."); return; }
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = r.shop + "/password";
+  form.target = "tofu_unlock";
+  form.acceptCharset = "UTF-8";
+  for (const [k, v] of Object.entries({ form_type: "storefront_password", utf8: "✓", password: pw })) {
+    const input = document.createElement("input");
+    input.type = "hidden"; input.name = k; input.value = v;
+    form.appendChild(input);
+  }
+  const win = window.open("", "tofu_unlock"); // a named tab for the form to load into
+  if (!win) {
+    if (!fromClick) logLocal("warn", "Couldn't open a tab to unlock the shop in your browser (pop-ups blocked). Click 🔓 Unlock in step 1.");
+    return;
+  }
+  document.body.appendChild(form); form.submit(); form.remove();
+  logLocal("ok", "Unlocked mrtofu.store in this browser (opened in a new tab).");
+}
+
+// Show a message in the activity feed that only this page knows about
+function logLocal(kind, text) {
+  document.querySelector("#feed .empty-ev")?.remove();
+  const line = document.createElement("div");
+  line.className = "ev " + kind;
+  line.innerHTML = `<span class="tm">${new Date().toLocaleTimeString([], { hour12: false })}</span><i class="k"></i><span>${esc(text)}</span>`;
+  $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
+}
+
 let loginSig = "";
 function renderLoginState() {
   const sig = [shopState, loggedIn, passwordSaved].join("|");
@@ -262,7 +304,11 @@ function renderLoginState() {
     bad: ["warn", "That password didn't work. Check it and try again."],
   }[shopState] || ["", "Not loaded yet."];
   el.className = "loginState" + (msg[0] ? " " + msg[0] : "");
-  el.innerHTML = `<span>${esc(msg[1])}</span>` + (loggedIn || passwordSaved ? '<button class="secondary" id="logoutBtn">Log out</button>' : "");
+  el.innerHTML = `<span>${esc(msg[1])}</span><span class="row">`
+    + (shopState === "ok" ? '<button class="primary" id="unlockBtn">🔓 Unlock mrtofu.store in this browser</button>' : "")
+    + (loggedIn || passwordSaved ? '<button class="secondary" id="logoutBtn">Log out</button>' : "") + "</span>";
+  const ub = $("unlockBtn");
+  if (ub) ub.onclick = () => unlockBrowser(true);
   const lo = $("logoutBtn");
   if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); loadList(); renderWatches(); };
 }
@@ -272,6 +318,8 @@ $("loginBtn").onclick = async () => {
   const r = await api("/api/login", { password: $("pw").value });
   $("loginBtn").disabled = false; $("loginBtn").textContent = "Load shop";
   lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
+  if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false); // locked shop + right password
+  seenState = r.shopState;
   await poll(); loadList(); renderWatches();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
@@ -409,7 +457,7 @@ async function poll() {
   try {
     const r = await api("/api/events?since=" + lastId);
     for (const ev of r.events) {
-      if (!lastId) $("feed").innerHTML = "";
+      document.querySelector("#feed .empty-ev")?.remove(); // drop the "Nothing yet" placeholder (keep page-only notes)
       lastId = ev.id;
       const line = document.createElement("div");
       line.className = "ev " + ev.kind;
@@ -417,6 +465,9 @@ async function poll() {
       $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
       if (ev.kind === "checkout" && Date.now() - pageStart > 3000) openCheckout(ev);
     }
+    // The shop just locked and drop mode got in with the password: log this browser in too
+    if (r.shopState === "ok" && seenState !== null && seenState !== "ok" && $("autoUnlock").checked) unlockBrowser(false);
+    seenState = r.shopState;
     running = r.running; lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn; passwordSaved = r.passwordSaved;
     const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"] }[shopState];
     setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"),

@@ -296,6 +296,14 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/products":
             from urllib.parse import unquote_plus
             self.send_json({"items": W.listing(unquote_plus(params.get("filter", "")))})
+        elif path == "/api/password":
+            # Lets the page unlock mrtofu.store in your browser with the saved password.
+            # The custom header can't be sent by other websites without a CORS
+            # pre-flight (which this server never approves), so only this page can read it.
+            if self.headers.get("X-Drop-Mode") != "1":
+                self.send_json({"error": "forbidden"}, 403)
+            else:
+                self.send_json({"password": W.password, "shop": dm.SHOP})
         elif path == "/api/match":
             from urllib.parse import unquote_plus
             self.send_json(W.matches(unquote_plus(params.get("k", ""))) or {"items": [], "total": 0})
