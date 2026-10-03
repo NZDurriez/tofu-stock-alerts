@@ -74,7 +74,9 @@ class Watcher:
         }[self.shop_state])
         if ok:
             self.log("info", f"Shop has {info} products.")
-        elif self.shop_state != "locked":
+            if self.running:  # logged in mid-watch (e.g. after a lock): catch anything that went live meanwhile
+                self.open_ready()
+        elif self.shop_state not in ("locked", "bad"):
             self.log("warn", f"Couldn't list the shop (reply {info}).")
         return ok
 
@@ -88,17 +90,18 @@ class Watcher:
         self.log("info", "Logged out and forgot the password."
                  + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
 
-    def listing(self, flt):
-        """The shop list: only things you can buy right now (watch rows cover the rest)."""
+    def listing(self, flt, include_unavailable=False):
+        """The shop list: things you can buy right now, plus (if asked) recent
+        releases that are sold out or not on sale yet. Old sold-out stock never."""
         words = dm_words(flt)  # search box: every word must appear
         out = []
         for pid, it in self.products.items():
-            if not dm.buyable(it):
+            if not (dm.buyable(it) or (include_unavailable and dm.upcoming(it))):
                 continue
             if words and not all(w in norm(it["title"]) for w in words):
                 continue
             out.append(card(pid, it))
-        out.sort(key=lambda x: x["title"])
+        out.sort(key=lambda x: (x["state"] != "buyable", x["title"]))
         return out
 
     # ---- watching ----
@@ -157,7 +160,10 @@ class Watcher:
         summary = [f"{self.products[p]['title'][:60]} x{q}" for p, q in self.picks.items()]
         summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
-        # Anything wanted that's already buyable goes straight to checkout
+        self.open_ready()
+
+    def open_ready(self):
+        """Anything wanted that's already buyable (and not opened yet) goes straight to checkout."""
         ready = []
         for pid, it in self.products.items():
             q = self.target_qty(pid, it)
@@ -180,6 +186,9 @@ class Watcher:
                     with self.lock:
                         self.last_check = time.strftime("%H:%M:%S")
                 elif code == 200:
+                    if self.shop_state in ("locked", "bad"):  # reopened before a working password was given
+                        self.shop_state = "open"
+                        self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
                     self.etag = headers.get("etag")
                     current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
                     ready = []
@@ -209,10 +218,13 @@ class Watcher:
                         if self.password:
                             self.log("warn", "🔒 The shop locked and the saved password didn't work. Log in again with the right one.")
                             self.password = ""
-                        elif self.shop_state != "locked":
-                            self.log("warn", "🔒 The shop is password-locked and I'm not logged in. Enter the password above.")
-                        self.logged_in, self.shop_state = False, "locked"
-                        wait = 10
+                        if self.shop_state not in ("locked", "bad"):  # once per lock, not after each wrong try
+                            # Ask the page to sound the alarm and pop up a password box
+                            self.log("lock", "🔒 Mr Tofu just locked the shop. Enter the password to keep watching.", None, alert="lock")
+                        self.logged_in = False
+                        if self.shop_state != "bad":  # keep showing "wrong password" until a new try
+                            self.shop_state = "locked"
+                        wait = self.interval  # keep checking so a password (or reopening) is picked up fast
                 elif code in (429, 430, 503):
                     wait = min(wait * 2, 30)
                     self.log("warn", f"Shop said slow down ({code}); waiting {wait:g}s.")
@@ -295,7 +307,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/products":
             from urllib.parse import unquote_plus
-            self.send_json({"items": W.listing(unquote_plus(params.get("filter", "")))})
+            self.send_json({"items": W.listing(unquote_plus(params.get("filter", "")), params.get("all") == "1")})
         elif path == "/api/password":
             # Lets the page unlock mrtofu.store in your browser with the saved password.
             # The custom header can't be sent by other websites without a CORS
