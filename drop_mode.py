@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import webbrowser
 
@@ -85,10 +86,102 @@ def login_status(password):
 
 
 def fetch(etag=None):
-    args = [f"{SHOP}/products.json?limit=250&_={time.time_ns()}", "-H", "Accept: application/json"]
+    args = [f"{SHOP}/products.json?limit=250&_={time.time_ns()}", "-H", "Accept: application/json", "--compressed"]
     if etag:
         args += ["-H", f"If-None-Match: {etag}"]
     return curl(args)
+
+
+MARK = "@@drop@@"  # ends each check's output in a Checker batch
+
+
+class Checker:
+    """Checks the shop again and again over ONE kept-open connection: a single
+    curl is given a minute's worth of checks and paced with --rate, so each
+    check takes ~0.3 s instead of ~0.6 s (no new connection and handshake every
+    time) and they start a steady `interval` apart. Falls back to a new curl
+    per check if this curl is too old for --rate."""
+
+    def __init__(self):
+        self.proc = None
+        self.keep_open = True
+        self.failed = False
+        self.lock = threading.Lock()
+
+    def checks(self, etag, interval, minutes=1.0):
+        """Yields (status, etag, body, retry_after) for each check, for about
+        `minutes`. Stop early by closing the generator, or with stop()."""
+        count = max(2, round(minutes * 60 / interval))
+        if self.keep_open:
+            got, batch = 0, self._kept_open(etag, interval, count)
+            try:
+                for got, item in enumerate(batch, 1):
+                    yield item
+            finally:
+                batch.close()
+            if got or not self.failed:
+                return
+            self.keep_open = False  # curl can't do it: carry on the old way
+        yield from self._one_by_one(etag, interval, count)
+
+    def _kept_open(self, etag, interval, count):
+        rate = f"{round(1 / interval)}/s" if interval < 1 else f"{round(60 / interval)}/m"
+        # -N writes each reply straight through; the line saying how the check went
+        # goes via stderr, which curl doesn't hold back (stdout would sit on it
+        # until the next check), into the same pipe, so it always follows its reply.
+        args = ["curl", "-s", "-N", "--max-time", "10", "-A", UA, "-b", COOKIES, "--compressed",
+                "-H", "Accept: application/json", "--rate", rate,
+                "-w", "%{stderr}\n" + MARK + " %{http_code}\t%header{etag}\t%header{retry-after}\n"]
+        if etag:
+            args += ["-H", f"If-None-Match: {etag}"]
+        stamp = time.time_ns()
+        args += [f"{SHOP}/products.json?limit=250&_={stamp}{i}" for i in range(count)]
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding="utf-8", errors="replace")
+        with self.lock:
+            self.proc = proc
+        self.failed, got, body, ended = False, 0, [], False
+        try:
+            for line in proc.stdout:
+                if line.startswith(MARK):
+                    code, tag, retry = (line[len(MARK):].strip().split("\t") + ["", ""])[:3]
+                    got += 1
+                    yield (int(code) if code.isdigit() else 0), tag.strip(), "".join(body).strip(), retry.strip()
+                    body = []
+                else:
+                    body.append(line)
+            ended = True
+        finally:
+            if ended:  # curl finished (or was stopped): let it exit so its exit code is real
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    pass
+            self.stop(proc)
+            proc.stdout.close()
+        self.failed = not got and proc.returncode != 0 and not getattr(proc, "stopped", False)
+
+    def _one_by_one(self, etag, interval, count):
+        due = time.monotonic()
+        for _ in range(count):
+            due += interval
+            code, headers, body = fetch(etag)
+            yield code, headers.get("etag", ""), body, headers.get("retry-after", "")
+            time.sleep(max(0.0, due - time.monotonic()))
+
+    def stop(self, proc=None):
+        """End the current batch (e.g. to start again with new settings)."""
+        with self.lock:
+            proc = proc or self.proc
+            if proc is self.proc:
+                self.proc = None
+        if proc and proc.poll() is None:
+            proc.stopped = True
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
 
 
 def alarm(times=3):

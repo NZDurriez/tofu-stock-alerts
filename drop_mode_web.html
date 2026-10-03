@@ -253,7 +253,7 @@ input[type=search]:focus{border-color:var(--accent)}
         <div class="wl" id="watchlist"></div>
         <div class="controls" style="margin-top:16px">
           <label>Check every
-            <select id="interval"><option value="1">1 second (drops only)</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
+            <select id="interval"><option value="0.5">½ second (fastest: drops only)</option><option value="1">1 second (drops)</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
           </label>
         </div>
         <div class="controls" style="margin-top:12px">
@@ -633,7 +633,12 @@ $("startBtn").onclick = async () => {
   await api("/api/start", watchlistBody());
   poll();
 };
-$("interval").onchange = () => { if (running) api("/api/start", watchlistBody()); };
+// The speed is remembered in this browser
+try { const s = localStorage.getItem("dropInterval"); if (s && [...$("interval").options].some((o) => o.value === s)) $("interval").value = s; } catch {}
+$("interval").onchange = () => {
+  try { localStorage.setItem("dropInterval", $("interval").value); } catch {}
+  if (running) api("/api/start", watchlistBody());
+};
 $("stopBtn").onclick = () => api("/api/stop", {});
 
 // ---------- alert sound ----------

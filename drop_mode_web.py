@@ -16,6 +16,7 @@ import re
 import threading
 import time
 import webbrowser
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import drop_mode as dm  # shop access, labels and matching come from drop mode
@@ -43,6 +44,11 @@ class Watcher:
         self.events = []        # [{id, t, kind, text, url?}]
         self.last_poll = 0.0    # when the page last asked for events
         self.thread = None
+        self.checker = dm.Checker()  # keeps one connection to the shop open while watching
+        self.gen = 0            # bumped on start/stop, so an old watch thread knows to quit
+        self.restart = False    # start a fresh batch of checks (new speed or new login)
+        self.slow_downs = 0     # "slow down" replies in a row
+        self.trouble = None     # what's going wrong with the checks, if anything
 
     def log(self, kind, text, url=None, **extra):
         with self.lock:
@@ -83,6 +89,8 @@ class Watcher:
                 self.checkout(self.went_live(before, self.products, quiet=True))
         elif self.shop_state not in ("locked", "bad"):
             self.log("warn", f"Couldn't list the shop (reply {info}).")
+        if self.running:
+            self.renew()
         return ok
 
     def logout(self):
@@ -94,6 +102,13 @@ class Watcher:
         self.shop_state = "open" if ok else "locked"
         self.log("info", "Logged out and forgot the password."
                  + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
+        if self.running:
+            self.renew()
+
+    def renew(self):
+        """Make the watch pick up a new speed or login straight away."""
+        self.restart = True
+        self.checker.stop()
 
     def listing(self, flt, limit=40):
         """Search results. With no search: what's in stock right now. With a
@@ -186,13 +201,17 @@ class Watcher:
         right now goes straight to checkout (once); the rest opens the moment
         it's added to the shop or comes back in stock."""
         self.picks, self.words = self.parse_wanted(picks, watches)
-        self.interval = max(1.0, float(interval or 3))
+        interval = max(0.5, float(interval or 3))
+        faster_or_slower, self.interval = interval != self.interval, interval
         if self.running:
             self.log("info", "Updated what to watch.")
+            if faster_or_slower:
+                self.renew()
         else:
             self.opened = set()
             self.running = True
-            self.thread = threading.Thread(target=self.loop, daemon=True)
+            self.gen += 1
+            self.thread = threading.Thread(target=self.loop, args=(self.gen,), daemon=True)
             self.thread.start()
         summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}" for p, q in self.picks.items()]
         summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
@@ -221,53 +240,85 @@ class Watcher:
 
     def stop(self):
         self.running = False
+        self.gen += 1
+        self.checker.stop()
         self.log("info", "Stopped watching.")
 
-    def loop(self):
-        wait = self.interval
-        while self.running:
+    def loop(self, gen):
+        """Watch until stopped. Checks run over one kept-open connection
+        (dm.Checker), a steady interval apart, in batches of about a minute; a
+        new batch starts after a change, a login, a new speed, or a pause."""
+        self.slow_downs, self.trouble = 0, None
+        while self.running and self.gen == gen:
+            self.restart, pause, n = False, None, 0
             try:
-                code, headers, body = dm.fetch(self.etag)
-                if code == 304:
-                    wait = self.interval
-                    with self.lock:
-                        self.last_check = time.strftime("%H:%M:%S")
-                elif code == 200:
-                    if self.shop_state in ("locked", "bad"):  # reopened before a working password was given
-                        self.shop_state = "open"
-                        self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
-                    self.etag = headers.get("etag")
-                    current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
-                    self.checkout(self.went_live(self.products, current))
-                    self.products = current
-                    with self.lock:
-                        self.last_check = time.strftime("%H:%M:%S")
-                    wait = self.interval
-                elif code == 401:
-                    if self.password and dm.login(self.password):
-                        self.logged_in, self.shop_state = True, "ok"
-                        self.log("ok", "🔒 The shop locked. Logged in with your password: watching behind the lock.")
-                        self.etag = None
-                    else:
-                        if self.password:
-                            self.log("warn", "🔒 The shop locked and the saved password didn't work. Log in again with the right one.")
-                            self.password = ""
-                        if self.shop_state not in ("locked", "bad"):  # once per lock, not after each wrong try
-                            # Ask the page to sound the alarm and pop up a password box
-                            self.log("lock", "🔒 Mr Tofu just locked the shop. Enter the password to keep watching.", None, alert="lock")
-                            play_alert()
-                        self.logged_in = False
-                        if self.shop_state != "bad":  # keep showing "wrong password" until a new try
-                            self.shop_state = "locked"
-                        wait = self.interval  # keep checking so a password (or reopening) is picked up fast
-                elif code in (429, 430, 503):
-                    wait = min(wait * 2, 30)
-                    self.log("warn", f"Shop said slow down ({code}); waiting {wait:g}s.")
-                else:
-                    self.log("warn", f"Unexpected reply {code}; retrying.")
+                with closing(self.checker.checks(self.etag, self.interval)) as checks:
+                    for n, (code, etag, body, retry) in enumerate(checks, 1):
+                        if not self.running or self.gen != gen or self.restart:
+                            break
+                        pause = self.handle(code, etag, body, retry)
+                        if pause is not None:
+                            break
             except Exception as exc:
                 self.log("warn", f"Check failed: {exc}")
-            time.sleep(wait)
+                pause = 2.0
+            if not n and not self.restart:  # nothing came back at all: don't spin
+                pause = max(pause or 0.0, self.interval)
+            if pause:
+                time.sleep(pause)
+
+    def handle(self, code, etag, body, retry):
+        """Deal with one check. Returns None to carry on with this batch, or how
+        long to wait before starting a fresh one."""
+        if code in (200, 304, 401):
+            self.slow_downs = 0
+            if self.trouble:
+                self.trouble = None
+                self.log("ok", "Checks are getting through again.")
+            with self.lock:
+                self.last_check = time.strftime("%H:%M:%S")
+        if code == 304:  # nothing changed
+            return None
+        if code == 200:
+            if self.shop_state in ("locked", "bad"):  # reopened before a working password was given
+                self.shop_state = "open"
+                self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
+            current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
+            self.etag = etag or None
+            self.checkout(self.went_live(self.products, current))
+            self.products = current
+            return 0.0  # carry on, comparing against this new version
+        if code == 401:
+            if self.password and dm.login(self.password):
+                self.logged_in, self.shop_state = True, "ok"
+                self.log("ok", "🔒 The shop locked. Logged in with your password: watching behind the lock.")
+                self.etag = None
+                return 0.0  # start again with the new login
+            if self.password:
+                self.log("warn", "🔒 The shop locked and the saved password didn't work. Log in again with the right one.")
+                self.password = ""
+            if self.shop_state not in ("locked", "bad"):  # once per lock, not after each wrong try
+                # Ask the page to pop up a password box (and sound the alert here)
+                self.log("lock", "🔒 Mr Tofu just locked the shop. Enter the password to keep watching.", None, alert="lock")
+                play_alert()
+            self.logged_in = False
+            if self.shop_state != "bad":  # keep showing "wrong password" until a new try
+                self.shop_state = "locked"
+            return None  # keep checking, so a password (or the shop reopening) is picked up fast
+        if code in (429, 430, 503):
+            # Back off briefly (or as long as the shop asks), then carry on at
+            # your speed: a long pause could mean missing the drop.
+            self.slow_downs += 1
+            wait = float(retry) if retry.replace(".", "", 1).isdigit() else (2, 5, 10)[min(self.slow_downs, 3) - 1]
+            wait = min(wait, 30.0)
+            self.log("warn", f"The shop said slow down ({code}); waiting {wait:g}s."
+                     + (" If this keeps happening, pick a slower speed." if self.interval < 2 else ""))
+            return wait
+        problem = {0: "can't reach the shop", 403: "the shop refused the check (403)"}.get(code, f"unexpected reply {code}")
+        if self.trouble != problem:  # say it once, not every check
+            self.trouble = problem
+            self.log("warn", f"Checks failing: {problem}. Still trying.")
+        return None if code == 0 else (10.0 if code == 403 else 2.0)
 
 
 def play_alert():
