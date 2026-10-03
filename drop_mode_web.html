@@ -221,8 +221,9 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-row{align-items:flex-start}
 .wl-row .rm{background:none;border:0;color:var(--faint);font-size:22px;line-height:1;padding:4px 6px;flex:none}
 .wl-row .rm:hover{color:var(--bad)}
-.maxin{width:86px;padding:6px 8px;font-size:14px}
-.maxin::placeholder{color:var(--faint)}
+input.maxin{width:120px;padding:7px 10px;font-size:14px;-moz-appearance:textfield;appearance:textfield}
+input.maxin::-webkit-outer-spin-button,input.maxin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0} /* no up/down arrows eating the space */
+input.maxin::placeholder{color:var(--faint)}
 .wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
 .count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
 .warnline{color:var(--bad);width:100%}
