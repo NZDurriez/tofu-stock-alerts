@@ -106,6 +106,11 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
 .item .t a:hover{text-decoration:underline}
 .item .meta{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:2px}
 .empty{padding:16px;color:var(--muted);font-size:14px}
+.qtyset{display:inline-flex;flex:none;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.qtyset button{border:0;border-radius:0;padding:8px 12px;min-width:38px;background:transparent;color:var(--muted);font:600 14px Inter;border-left:1px solid var(--line)}
+.qtyset button:first-child{border-left:0}
+.qtyset button:hover{background:var(--surface2);color:var(--text)}
+.qtyset button.on{background:var(--accent);color:var(--accent-ink)}
 .thumb{width:52px;height:52px;flex:none;border-radius:10px;object-fit:contain;background:#fff;border:1px solid var(--line)}
 .thumb.none{display:grid;place-items:center;background:var(--surface2);color:var(--faint);font-size:20px}
 .watch .m .hit{gap:10px;padding:5px 0}
@@ -345,22 +350,36 @@ $("loginBtn").onclick = async () => {
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
+// ---------- quantity buttons (1-5) ----------
+function qtyButtons(selected) {
+  const sel = Math.min(5, Math.max(1, selected || 1));
+  return `<span class="qtyset" role="group" aria-label="Quantity">${[1, 2, 3, 4, 5]
+    .map((n) => `<button type="button" data-q="${n}" class="${n === sel ? "on" : ""}" aria-pressed="${n === sel}">${n}</button>`).join("")}</span>`;
+}
+function wireQty(row, onPick) {
+  const set = row.querySelector(".qtyset");
+  set.querySelectorAll("button").forEach((b) => b.onclick = () => {
+    set.querySelectorAll("button").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); });
+    onPick(+b.dataset.q);
+  });
+}
+
 // ---------- step 2: keyword watches ----------
 function renderWatches() {
   $("watches").innerHTML = watches.map((w, i) => `
     <div class="watch" data-i="${i}">
       <div class="row">
         <input type="text" class="kw" value="${esc(w.text)}" placeholder="Keywords, e.g. Delta Reign, Elite Trainer Box">
-        <span class="lbl">Qty</span><input type="number" class="qty" min="1" value="${w.qty}">
+        <span class="lbl">Qty</span>${qtyButtons(w.qty)}
         <button class="rm" title="Remove">×</button>
       </div>
       <div class="m"></div>
     </div>`).join("");
   $("watches").querySelectorAll(".watch").forEach((row) => {
-    const i = +row.dataset.i, kw = row.querySelector(".kw"), qty = row.querySelector(".qty");
+    const i = +row.dataset.i, kw = row.querySelector(".kw");
     let timer;
     kw.oninput = () => { watches[i].text = kw.value; clearTimeout(timer); timer = setTimeout(() => { preview(row, kw.value); changed(); }, 350); };
-    qty.onchange = () => { watches[i].qty = Math.max(1, +qty.value || 1); qty.value = watches[i].qty; changed(); };
+    wireQty(row, (n) => { watches[i].qty = n; changed(); });
     row.querySelector(".rm").onclick = () => { watches.splice(i, 1); if (!watches.length) watches.push({ text: "", qty: 1 }); renderWatches(); changed(); };
     preview(row, watches[i].text);
   });
@@ -402,16 +421,18 @@ async function loadList() {
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div></div>
-      <input type="number" min="1" value="${picks.has(it.id) ? picks.get(it.id).qty : 1}" title="Quantity">
+      ${qtyButtons(picks.has(it.id) ? picks.get(it.id).qty : 1)}
     </div>`).join("");
   el.querySelectorAll(".item").forEach((row) => {
-    const id = row.dataset.id, cb = row.querySelector("input[type=checkbox]"), q = row.querySelector("input[type=number]");
+    const id = row.dataset.id, cb = row.querySelector("input[type=checkbox]");
+    let qty = picks.has(id) ? picks.get(id).qty : 1;
     const title = row.querySelector("a").textContent;
     const sync = () => {
-      if (cb.checked) picks.set(id, { title, qty: Math.max(1, +q.value || 1) }); else picks.delete(id);
+      if (cb.checked) picks.set(id, { title, qty }); else picks.delete(id);
       row.classList.toggle("picked", cb.checked); changed();
     };
-    cb.onchange = sync; q.onchange = () => { if (!cb.checked) cb.checked = true; sync(); };
+    cb.onchange = sync;
+    wireQty(row, (n) => { qty = n; cb.checked = true; sync(); }); // picking a quantity also ticks the item
   });
 }
 $("filterBtn").onclick = loadList;
