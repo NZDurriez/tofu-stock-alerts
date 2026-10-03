@@ -74,20 +74,11 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .loginState.warn{background:var(--bad-soft);color:var(--text)}
 .loginState.info{background:var(--info-soft);color:var(--text)}
 
-.watch{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;background:var(--field)}
-.watch .lbl{font-size:13px;color:var(--muted)}
-.watch .rm{background:none;border:0;color:var(--faint);font-size:20px;line-height:1;padding:6px 8px}
-.watch .rm:hover{color:var(--bad)}
-.watch .m{margin-top:10px;font-size:13.5px;color:var(--muted)}
-.watch .m .hit{display:flex;align-items:center;gap:8px;color:var(--text);padding:2px 0}
-.watch .m .none{color:var(--muted)}
-
 .badge{display:inline-block;font-size:12px;font-weight:500;border-radius:999px;padding:1px 9px;white-space:nowrap}
 .b-buyable{background:var(--ok-soft);color:var(--ok)}
 .b-soldout{background:var(--bad-soft);color:var(--bad)}
 .b-soon{background:var(--info-soft);color:var(--info)}
 
-.more{margin-top:22px;border-top:1px solid var(--line);padding-top:16px}
 h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;place-items:center;padding:16px}
 #lockAlert.show{display:grid}
@@ -95,17 +86,6 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert h3{font-size:20px;font-weight:600;margin:0 0 6px}
 #lockAlert p{color:var(--muted);margin:0 0 16px;font-size:14.5px}
 #lockAlert .err{color:var(--bad);font-size:14px;margin-top:10px;min-height:1em}
-#askNow{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;place-items:center;padding:16px}
-#askNow.show{display:grid}
-#askNow .box{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:16px;padding:26px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35)}
-#askNow h3{font-size:20px;font-weight:600;margin:0 0 6px}
-#askNow p{color:var(--muted);margin:0 0 12px;font-size:14.5px}
-#askNow ul{margin:0 0 18px;padding-left:20px}
-#askNow li{margin:4px 0}
-#askNow li b{color:var(--accent)}
-#askNow .row{margin-bottom:14px}
-#dirtyNote{color:var(--accent)}
-details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weight:500}
 .list{margin-top:12px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px}
 .item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
@@ -123,11 +103,30 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
 .qtyset button.on{background:var(--accent);color:var(--accent-ink)}
 .thumb{width:52px;height:52px;flex:none;border-radius:10px;object-fit:contain;background:#fff;border:1px solid var(--line)}
 .thumb.none{display:grid;place-items:center;background:var(--surface2);color:var(--faint);font-size:20px}
-.watch .m .hit{gap:10px;padding:5px 0}
-.watch .m .hit .thumb{width:44px;height:44px}
-.watch .m .gone{display:block;margin-top:6px;color:var(--faint);font-size:13px}
-.addbtn{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
-.addbtn:hover{background:transparent}
+input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 14px 13px 40px;outline:none;transition:border-color .15s;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='m13 13 4 4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:14px center}
+input[type=search]:focus{border-color:var(--accent)}
+.watchbtn{flex:none;background:var(--accent);color:var(--accent-ink);padding:8px 14px}
+.watchbtn:disabled{background:var(--ok-soft);color:var(--ok);opacity:1;cursor:default}
+.item.anything{background:var(--accent-soft)}
+.item.anything .thumb.none{background:var(--surface);color:var(--accent)}
+.resnote{padding:10px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line)}
+.wl{display:grid;gap:10px}
+.wl-row{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--field)}
+.wl-row .t{flex:1;min-width:0}
+.wl-row .name{font-weight:600;font-size:14.5px}
+.wl-row .st{font-size:13px;color:var(--muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.acts{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.acts .lbl{font-size:13px;color:var(--muted)}
+.acts .qtyset button{padding:6px 10px;min-width:34px}
+.item{align-items:flex-start}
+.item .thumb{margin-top:2px}
+.wl-row{align-items:flex-start}
+.wl-row .rm{background:none;border:0;color:var(--faint);font-size:22px;line-height:1;padding:4px 6px;flex:none}
+.wl-row .rm:hover{color:var(--bad)}
+.wl-empty{border:1px dashed var(--line);border-radius:12px;padding:20px;text-align:center;color:var(--muted);font-size:14px}
+.count{margin-left:auto;font-size:13px;font-weight:500;color:var(--muted)}
+.warnline{color:var(--bad);width:100%}
 @keyframes ping{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 @keyframes glow{50%{background:var(--ok-soft)}}
 .chip-s.live{color:var(--text);animation:glow 2s ease-in-out infinite}
@@ -199,32 +198,19 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
       </section>
 
       <section class="card">
-        <h2><span class="step">2</span>What do you want to buy?</h2>
-        <p class="lead">One row per product. Type keywords separated by commas: <b style="color:var(--text);font-weight:600">every keyword must be in the product's name</b>. Catches restocks and brand-new listings.</p>
-        <div id="watches"></div>
-        <button class="addbtn" id="addWatch" style="margin-top:12px">+ Add another product</button>
-
-        <div class="more">
-          <h3 class="sub">Or pick from the shop</h3>
-          <div class="row" style="margin-top:8px">
-            <input type="text" id="filter" placeholder="Search the shop, e.g. storm emeralda">
-            <button class="secondary" id="filterBtn">Search</button>
-          </div>
-          <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer">
-            <input type="checkbox" id="showAll" style="accent-color:var(--accent)"> Also show sold out &amp; coming soon (listed in the last week)
-          </label>
-          <div class="list" id="list"><div class="empty">Load the shop first.</div></div>
-          <p class="hint">Tick a product and set how many. Ticked sold-out or upcoming items are watched for their restock or release.</p>
-        </div>
-
-        <div class="summary"><b>Watching for:</b> <span id="picks"></span></div>
+        <h2><span class="step">2</span>Add products to your watchlist</h2>
+        <p class="lead">Search the shop and press <b style="color:var(--text);font-weight:600">+ Watch</b>. Not listed yet? Watch <b style="color:var(--text);font-weight:600">"Anything matching"</b> your search to catch it the moment Tofu adds it.</p>
+        <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
+        <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
       </section>
     </div>
 
     <div class="stack">
       <section class="card">
-        <h2><span class="step">3</span>Watch</h2>
-        <div class="controls">
+        <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span></h2>
+        <p class="lead">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.</p>
+        <div class="wl" id="watchlist"></div>
+        <div class="controls" style="margin-top:16px">
           <label>Check every
             <select id="interval"><option value="1">1 second (drops only)</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
           </label>
@@ -233,7 +219,6 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
           <button class="primary" id="startBtn" disabled>Start watching</button>
           <button class="danger" id="stopBtn" disabled>Stop</button>
         </div>
-        <p class="hint" id="dirtyNote" hidden>You've changed what to watch. Click <b>Update</b> when you're done to apply it.</p>
         <div class="tip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</div>
       </section>
 
@@ -257,17 +242,6 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
   <button class="linkish" id="lockLater">Not now</button>
 </div></div>
 
-<div id="askNow"><div class="box">
-  <h3>Already in stock</h3>
-  <p>These are on sale right now:</p>
-  <ul id="askList"></ul>
-  <div class="row">
-    <button class="primary" id="askBuy">Open checkout now</button>
-    <button class="secondary" id="askWatch">Just watch</button>
-  </div>
-  <p style="margin:0;font-size:13.5px">"Just watch" only opens checkout if one sells out and comes back, or for new products that match.</p>
-</div></div>
-
 <div id="alert"><div class="box">
   <h3>🎯 Your pick is live</h3>
   <p id="alertText"></p>
@@ -278,8 +252,11 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const picks = new Map();                 // product id -> {title, qty}  (ticked in the shop list)
-const watches = [{ text: "", qty: 1 }];  // keyword watches, one per product wanted
+// The watchlist: products picked from the search, and "anything matching" searches.
+// [{kind: "product", id, title, image, qty} | {kind: "words", text, qty}]
+let watchlist = [];
+try { watchlist = JSON.parse(localStorage.getItem("dropWatchlist") || "[]"); } catch {}
+let info = { picks: {}, words: {} }; // how each entry stands in the shop right now
 let lastId = 0, audio = null, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
 let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
 const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
@@ -358,7 +335,7 @@ function renderLoginState() {
   const ub = $("unlockBtn");
   if (ub) ub.onclick = () => unlockBrowser(true);
   const lo = $("logoutBtn");
-  if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); loadList(); renderWatches(); };
+  if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); search(); refreshInfo(); };
 }
 
 $("loginBtn").onclick = async () => {
@@ -368,7 +345,7 @@ $("loginBtn").onclick = async () => {
   lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
   if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false); // locked shop + right password
   seenState = r.shopState;
-  await poll(); loadList(); renderWatches();
+  await poll(); search(); refreshInfo();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
@@ -386,127 +363,135 @@ function wireQty(row, onPick) {
   });
 }
 
-// ---------- step 2: keyword watches ----------
-function renderWatches() {
-  $("watches").innerHTML = watches.map((w, i) => `
-    <div class="watch" data-i="${i}">
-      <div class="row">
-        <input type="text" class="kw" value="${esc(w.text)}" placeholder="Keywords, e.g. Delta Reign, Elite Trainer Box">
-        <span class="lbl">Qty</span>${qtyButtons(w.qty)}
-        <button class="rm" title="Remove">×</button>
-      </div>
-      <div class="m"></div>
-    </div>`).join("");
-  $("watches").querySelectorAll(".watch").forEach((row) => {
-    const i = +row.dataset.i, kw = row.querySelector(".kw");
-    let timer;
-    kw.oninput = () => { watches[i].text = kw.value; clearTimeout(timer); timer = setTimeout(() => { preview(row, kw.value); changed(); }, 350); };
-    wireQty(row, (n) => { watches[i].qty = n; changed(); });
-    row.querySelector(".rm").onclick = () => { watches.splice(i, 1); if (!watches.length) watches.push({ text: "", qty: 1 }); renderWatches(); changed(); };
-    preview(row, watches[i].text);
-  });
-}
-
-// What each watch matches in the shop right now
-async function preview(row, text) {
-  const el = row.querySelector(".m");
-  if (!text.trim()) { el.innerHTML = ""; return; }
-  if (!lastProducts) { el.textContent = "Load the shop to see what this matches."; return; }
-  const r = await api("/api/match?k=" + encodeURIComponent(text));
-  let html = r.total
-    ? `In stock now (${r.total}):` + r.items.map((it) => `<span class="hit">${thumb(it)}<span>${esc(it.title)}${it.price ? ` · $${esc(it.price)}` : ""}</span></span>`).join("")
-      + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
-    : `<span class="none">Nothing matching is in stock right now. It'll be caught the moment it is.</span>`;
-  if (r.unavailableTotal) {
-    const names = r.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ");
-    html += `<span class="gone">Also matches ${r.unavailableTotal} you can't buy yet: ${names}${r.unavailableTotal > r.unavailable.length ? "…" : ""}. Watching for restocks.</span>`;
-  }
-  el.innerHTML = html;
-}
-
+// ---------- step 2: search ----------
 // Product picture (Shopify's CDN), or a placeholder if there isn't one
-function thumb(it) {
-  return it.image
+function thumb(it, icon = "📦") {
+  return it && it.image
     ? `<img class="thumb" src="${esc(it.image)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb none',textContent:'📦'}))">`
-    : '<span class="thumb none">📦</span>';
+    : `<span class="thumb none">${icon}</span>`;
 }
-$("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatches(); $("watches").lastElementChild.querySelector(".kw").focus(); };
+const wordsKey = (s) => s.toLowerCase().split(/[\s,]+/).filter(Boolean).join(" ");
+const onList = (kind, key) => watchlist.some((w) => w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
 
-// ---------- step 2: shop list ----------
-async function loadList() {
-  const r = await api("/api/products?filter=" + encodeURIComponent($("filter").value) + ($("showAll").checked ? "&all=1" : ""));
-  const el = $("list");
-  if (!r.items.length) { el.innerHTML = `<div class="empty">Nothing ${$("showAll").checked ? "" : "in stock "}matches that.</div>`; return; }
-  el.innerHTML = r.items.map((it) => `
-    <div class="item ${picks.has(it.id) ? "picked" : ""}" data-id="${it.id}">
-      <input type="checkbox" ${picks.has(it.id) ? "checked" : ""} aria-label="Pick">
+async function search() {
+  const q = $("search").value.trim(), el = $("results");
+  if (!lastProducts) { el.innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
+  const [r, m] = await Promise.all([
+    api("/api/products?filter=" + encodeURIComponent(q)),
+    q ? api("/api/match?k=" + encodeURIComponent(q)) : null,
+  ]);
+  if (q !== $("search").value.trim()) return; // a newer search is on its way
+  let html = "";
+  if (q) {
+    const already = onList("words", wordsKey(q));
+    html += `<div class="item anything" data-kind="words">
+      <span class="thumb none">🔎</span>
+      <div class="t"><b>Anything matching "${esc(q)}"</b>
+        <div class="meta">Catches it when Tofu adds it, even if it's not listed yet${m && m.total ? ` · ${m.total} in stock now` : ""}</div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+    </div>`;
+  } else {
+    html += '<div class="resnote" style="border-top:0">In stock now. Type to search everything, including sold out.</div>';
+  }
+  html += r.items.map((it) => {
+    const already = onList("product", it.id);
+    return `<div class="item" data-kind="product" data-id="${it.id}">
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div></div>
-      ${qtyButtons(picks.has(it.id) ? picks.get(it.id).qty : 1)}
-    </div>`).join("");
+        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+    </div>`;
+  }).join("");
+  if (!r.items.length) html += `<div class="empty">No products ${q ? "match that right now" : "in stock right now"}.</div>`;
+  if (r.total > r.items.length) html += `<div class="resnote">Showing ${r.items.length} of ${r.total}. Type more to narrow it down.</div>`;
+  el.innerHTML = html;
+  const byId = Object.fromEntries(r.items.map((it) => [it.id, it]));
   el.querySelectorAll(".item").forEach((row) => {
-    const id = row.dataset.id, cb = row.querySelector("input[type=checkbox]");
-    let qty = picks.has(id) ? picks.get(id).qty : 1;
-    const title = row.querySelector("a").textContent;
-    const sync = () => {
-      if (cb.checked) picks.set(id, { title, qty }); else picks.delete(id);
-      row.classList.toggle("picked", cb.checked); changed();
+    let qty = 1;
+    wireQty(row, (n) => { qty = n; });
+    row.querySelector(".watchbtn").onclick = () => {
+      if (row.dataset.kind === "words") watchlist.push({ kind: "words", text: q, qty });
+      else { const it = byId[row.dataset.id]; watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty }); }
+      watchlistChanged();
+      search();
     };
-    cb.onchange = sync;
-    wireQty(row, (n) => { qty = n; cb.checked = true; sync(); }); // picking a quantity also ticks the item
   });
 }
-$("filterBtn").onclick = loadList;
-$("filter").onkeydown = (e) => { if (e.key === "Enter") loadList(); };
+let searchTimer;
+$("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 250); };
 
-function renderPicks() {
-  const parts = watches.filter((w) => w.text.trim()).map((w) => `<span class="chip">${esc(w.text.trim())} <b>×${w.qty}</b></span>`)
-    .concat([...picks].map(([id, p]) => `<span class="chip">${esc(p.title.slice(0, 50))} <b>×${p.qty}</b><button data-id="${id}" title="Remove">×</button></span>`));
-  $("picks").innerHTML = parts.length ? `<span class="chips">${parts.join("")}</span>` : "nothing yet.";
-  $("picks").querySelectorAll("button").forEach((b) => b.onclick = () => { picks.delete(b.dataset.id); loadList(); changed(); });
+// ---------- step 3: the watchlist ----------
+function statusHtml(w) {
+  if (!lastProducts) return "Load the shop to see if it's in stock.";
+  if (w.kind === "product") {
+    const it = info.picks[w.id];
+    if (!it) return "";
+    if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if Tofu lists it again';
+    return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "")
+      + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale");
+  }
+  const m = info.words[w.text];
+  if (!m) return "";
+  if (!m.total) return '<span class="badge b-soon">Not in stock</span> Opens the moment a match is added or restocked';
+  const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
+  return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
+    + (m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more words to the search, or watch the exact product instead.</span>` : "");
 }
-// While watching, edits wait for Update, so half-typed keywords never kick anything off
-let dirty = false;
-function changed() { renderPicks(); if (running) { dirty = true; showDirty(); } }
-function showDirty() { $("dirtyNote").hidden = !(running && dirty); }
-
-// ---------- step 3 ----------
-function watchList() {
+function renderWatchlist() {
+  $("wlCount").textContent = watchlist.length ? `${watchlist.length} item${watchlist.length === 1 ? "" : "s"}` : "";
+  if (!watchlist.length) {
+    $("watchlist").innerHTML = '<div class="wl-empty">Nothing on your watchlist yet. Search in step 2 and press <b>+ Watch</b>.</div>';
+    return;
+  }
+  $("watchlist").innerHTML = watchlist.map((w, i) => `
+    <div class="wl-row" data-i="${i}">
+      ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : '<span class="thumb none">🔎</span>'}
+      <div class="t">
+        <div class="name">${w.kind === "product" ? esc(w.title) : `Anything matching "${esc(w.text)}"`}</div>
+        <div class="st">${statusHtml(w)}</div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty)}</div>
+      </div>
+      <button class="rm" title="Remove from watchlist">×</button>
+    </div>`).join("");
+  $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
+    const i = +row.dataset.i;
+    wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
+    row.querySelector(".rm").onclick = () => { watchlist.splice(i, 1); watchlistChanged(); search(); };
+  });
+}
+// Ask the program how each entry stands (in stock, sold out, what a search matches)
+async function refreshInfo() {
+  if (lastProducts && watchlist.length) {
+    try {
+      info = await api("/api/watchinfo", {
+        ids: watchlist.filter((w) => w.kind === "product").map((w) => w.id),
+        texts: watchlist.filter((w) => w.kind === "words").map((w) => w.text),
+      });
+    } catch {}
+  }
+  renderWatchlist();
+}
+function watchlistBody() {
   return {
-    picks: [...picks].map(([id, p]) => ({ id, qty: p.qty })),
-    watches: watches.filter((w) => w.text.trim()),
+    picks: watchlist.filter((w) => w.kind === "product").map((w) => ({ id: w.id, qty: w.qty })),
+    watches: watchlist.filter((w) => w.kind === "words").map((w) => ({ text: w.text, qty: w.qty })),
     interval: +$("interval").value,
+    openNow: true,
   };
 }
-// Ask before buying anything that's already on sale. Answers are remembered so
-// pressing Update again doesn't ask about the same things.
-const declined = new Set();
-function askOpenNow(items) {
-  return new Promise((resolve) => {
-    $("askList").innerHTML = items.map((i) => `<li>${esc(i.title)} <b>×${i.qty}</b></li>`).join("");
-    $("askNow").classList.add("show");
-    const done = (yes) => { $("askNow").classList.remove("show"); resolve(yes); };
-    $("askBuy").onclick = () => done(true);
-    $("askWatch").onclick = () => done(false);
-  });
+// Saved in this browser, and handed to the program straight away if it's watching
+function watchlistChanged(redraw = true) {
+  try { localStorage.setItem("dropWatchlist", JSON.stringify(watchlist)); } catch {}
+  if (redraw) refreshInfo();
+  if (running) api("/api/start", watchlistBody());
 }
 $("startBtn").onclick = async () => {
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); await audio.resume(); } catch {}
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-  const body = watchList();
-  let openNow = false;
-  try {
-    const ready = ((await api("/api/ready", body)).items || []).filter((i) => !declined.has(i.title));
-    if (ready.length) {
-      openNow = await askOpenNow(ready);
-      if (!openNow) ready.forEach((i) => declined.add(i.title));
-    }
-  } catch {}
-  await api("/api/start", { ...body, openNow });
-  dirty = false; showDirty();
+  await api("/api/start", watchlistBody());
+  poll();
 };
-$("interval").onchange = changed;
+$("interval").onchange = () => { if (running) api("/api/start", watchlistBody()); };
 $("stopBtn").onclick = () => api("/api/stop", {});
 
 function beep() {
@@ -567,11 +552,10 @@ $("lockGo").onclick = async () => {
     $("lockErr").textContent = "That password didn't work. Check it and try again.";
   }
   seenState = r.shopState;
-  await poll(); loadList(); renderWatches();
+  await poll(); search(); refreshInfo();
 };
 $("lockPw").onkeydown = (e) => { if (e.key === "Enter") $("lockGo").click(); };
 $("lockLater").onclick = () => $("lockAlert").classList.remove("show");
-$("showAll").onchange = loadList;
 
 $("alertClose").onclick = () => $("alert").classList.remove("show");
 $("alertGo").onclick = () => setTimeout(() => $("alert").classList.remove("show"), 200);
@@ -602,18 +586,19 @@ async function poll() {
       shopText ? shopText[1] + (shopText[1] === "good" ? " live" : "") : "");
     setChip("sRun", r.running ? `Watching every ${r.interval}s` : "Not watching", r.running ? "good live" : "");
     setChip("sCheck", "Last check " + (r.lastCheck || "–"), r.lastCheck ? "info" : "");
-    $("startBtn").textContent = r.running ? "Update" : "Start watching";
-    $("startBtn").disabled = !r.products;
+    $("startBtn").textContent = r.running ? "✓ Watching" : "Start watching";
+    $("startBtn").disabled = !r.products || r.running;
     $("stopBtn").disabled = !r.running;
-    if (!running) dirty = false;
-    showDirty();
+    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); } // the program already had the shop loaded
     renderLoginState();
   } catch {
     setChip("sRun", "Drop mode program isn't running", "warn");
   }
 }
 const pageStart = Date.now();
-renderWatches(); renderPicks(); poll(); setInterval(poll, 1000);
+let hadProducts = false;
+renderWatchlist(); poll(); setInterval(poll, 1000);
+setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>
 </html>

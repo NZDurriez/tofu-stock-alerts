@@ -91,19 +91,28 @@ class Watcher:
         self.log("info", "Logged out and forgot the password."
                  + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
 
-    def listing(self, flt, include_unavailable=False):
-        """The shop list: things you can buy right now, plus (if asked) recent
-        releases that are sold out or not on sale yet. Old sold-out stock never."""
-        words = dm_words(flt)  # search box: every word must appear
+    def listing(self, flt, limit=40):
+        """Search results. With no search: what's in stock right now. With a
+        search: everything matching (sold out too, so you can watch for a
+        restock), in stock first."""
+        keys = keywords(flt)
         out = []
         for pid, it in self.products.items():
-            if not (dm.buyable(it) or (include_unavailable and dm.upcoming(it))):
+            if keys and not keyword_match(keys, it["title"]):
                 continue
-            if words and not all(w in norm(it["title"]) for w in words):
+            if not keys and not dm.buyable(it):
                 continue
             out.append(card(pid, it))
-        out.sort(key=lambda x: (x["state"] != "buyable", x["title"]))
-        return out
+        order = {"buyable": 0, "soon": 1, "soldout": 2}
+        out.sort(key=lambda x: (order[x["state"]], x["title"]))
+        return {"items": out[:limit], "total": len(out)}
+
+    def watch_info(self, ids, texts):
+        """How each watchlist entry stands right now (for the watchlist panel)."""
+        return {
+            "picks": {pid: card(pid, self.products[pid]) if pid in self.products else {"state": "gone"} for pid in ids},
+            "words": {text: self.matches(text, limit=3) for text in texts},
+        }
 
     # ---- watching ----
     def checkout(self, items):
@@ -151,7 +160,8 @@ class Watcher:
 
     def parse_wanted(self, picks, watches):
         """Page data -> ({product id: qty}, [(keywords, qty, text)])."""
-        wanted = {str(p["id"]): max(1, int(p["qty"])) for p in picks if str(p["id"]) in self.products}
+        # Picks stay watched even if Tofu takes the listing down for a while
+        wanted = {str(p["id"]): max(1, int(p["qty"])) for p in picks}
         words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
         return wanted, words
 
@@ -167,10 +177,10 @@ class Watcher:
                 ready.append((live[0], q, it["title"]))
         return ready
 
-    def start(self, picks, watches, interval, open_now=False):
-        """Start (or update) watching. Items already in stock are only sent to
-        checkout when the page confirmed that (open_now); otherwise they're
-        watched, and open if they sell out and come back."""
+    def start(self, picks, watches, interval, open_now=True):
+        """Start (or update) watching. Anything on the watchlist that's in stock
+        right now goes straight to checkout (once); the rest opens the moment
+        it's added to the shop or comes back in stock."""
         self.picks, self.words = self.parse_wanted(picks, watches)
         self.interval = max(1.0, float(interval or 3))
         if self.running:
@@ -180,8 +190,8 @@ class Watcher:
             self.running = True
             self.thread = threading.Thread(target=self.loop, daemon=True)
             self.thread.start()
-        summary = [f"{self.products[p]['title'][:60]} x{q}" for p, q in self.picks.items()]
-        summary += [f"keywords [{t}] x{q}" for _, q, t in self.words]
+        summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}" for p, q in self.picks.items()]
+        summary += [f"anything matching [{t}] x{q}" for _, q, t in self.words]
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
         if open_now:
             self.checkout(self.ready_items())
@@ -198,7 +208,7 @@ class Watcher:
                 continue
             q = self.target_qty(pid, it)
             if not quiet:
-                tag = "🎯 YOUR PICK" if q else ("🚨 watch list" if dm.watched(it["title"]) else "new/restock")
+                tag = "🎯 YOUR PICK" if q else ("🚨 hot item" if dm.watched(it["title"]) else "new/restock")
                 self.log("pick" if q else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
                          None if q else f"{dm.SHOP}/products/{it['handle']}")
             if q and fresh[0][0] not in self.opened:
@@ -269,10 +279,6 @@ def card(pid, it):
     }
 
 
-def dm_words(text):
-    return [w for w in re.split(r"\s+", norm(text)) if w]
-
-
 def norm(text):
     """Lowercase and drop accents, so 'pokemon' matches 'Pokémon'."""
     import unicodedata
@@ -281,13 +287,14 @@ def norm(text):
 
 
 def keywords(text):
-    """'Delta Reign, Elite Trainer Box' -> ['delta reign', 'elite trainer box']."""
-    return [re.sub(r"\s+", " ", norm(k)) for k in (text or "").split(",") if k.strip()]
+    """'Delta Reign, Elite Trainer Box' -> ['delta', 'reign', 'elite', 'trainer', 'box']."""
+    return [w for w in re.split(r"[\s,]+", norm(text)) if w]
 
 
 def keyword_match(keys, title):
-    """Every keyword (phrase) must appear in the product name."""
-    t = re.sub(r"\s+", " ", norm(title))
+    """Every word must appear somewhere in the product name, in any order
+    (same as the search box, so what you see is what's watched)."""
+    t = norm(title)
     return all(k in t for k in keys)
 
 
@@ -327,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/products":
             from urllib.parse import unquote_plus
-            self.send_json({"items": W.listing(unquote_plus(params.get("filter", "")), params.get("all") == "1")})
+            self.send_json(W.listing(unquote_plus(params.get("filter", ""))))
         elif path == "/api/password":
             # Lets the page unlock mrtofu.store in your browser with the saved password.
             # The custom header can't be sent by other websites without a CORS
@@ -358,12 +365,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/login":
             ok = W.login(data.get("password", ""))
             self.send_json({"ok": ok, "loggedIn": W.logged_in, "shopState": W.shop_state, "products": len(W.products)})
-        elif self.path == "/api/ready":
-            # Which of these would go to checkout right now? (Asked before starting.)
-            wanted, words = W.parse_wanted(data.get("picks", []), data.get("watches", []))
-            self.send_json({"items": [{"title": title, "qty": q} for _, q, title in W.ready_items(wanted, words)]})
+        elif self.path == "/api/watchinfo":
+            self.send_json(W.watch_info([str(i) for i in data.get("ids", [])], data.get("texts", [])))
         elif self.path == "/api/start":
-            W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3), bool(data.get("openNow")))
+            W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3), bool(data.get("openNow", True)))
             self.send_json({"ok": True})
         elif self.path == "/api/logout":
             W.logout()
