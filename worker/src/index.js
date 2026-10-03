@@ -18,6 +18,7 @@ const EPHEMERAL = 64;
 const LABELS = {
   new: ["🆕 New in the shop", 0xf5a524],
   "new-soon": ["🆕 New listing (not on sale yet)", 0xa78bfa],
+  "new-soldout": ["🆕 New listing (sold out)", 0x9ca3af],
   restock: ["🔁 Back in stock", 0x22c55e],
   option: ["➕ New option available", 0x38bdf8],
 };
@@ -527,9 +528,21 @@ function summarise(p) {
     available: inStock.length > 0,
     price: prices.length ? prices[0] : null,
     image: p.images && p.images[0] ? p.images[0].src : null,
+    published: p.published_at || null,
     variants: vars,
   };
 }
+
+// Shopify reports "sold out" and "not released yet" the same way (unavailable),
+// with no stock counts. If an item went public a while ago and can't be bought,
+// it sold out; if it's unavailable right as it's published, it's not on sale yet.
+const SOLD_OUT_AFTER_MS = 10 * 60 * 1000;
+function soldOut(item) {
+  if (item.available || !item.published) return false;
+  const t = Date.parse(item.published);
+  return !isNaN(t) && Date.now() - t > SOLD_OUT_AFTER_MS;
+}
+const unavailableText = (item) => (soldOut(item) ? "Sold out ❌" : "Not on sale yet 🔜");
 
 // Snapshot keeps only what diff() needs: { productId: [available, { variantId: 0|1 }] }
 function compact(current) {
@@ -557,7 +570,7 @@ function diff(previous, current, kw) {
   for (const [id, item] of Object.entries(current)) {
     const old = previous[id];
     if (!old) {
-      out.push([item.available ? "new" : "new-soon", item, null]);
+      out.push([item.available ? "new" : soldOut(item) ? "new-soldout" : "new-soon", item, null]);
       continue;
     }
     const [wasAvailable, oldVars] = old;
@@ -580,8 +593,8 @@ function diff(previous, current, kw) {
 function buyLinks(item, kind) {
   let vids = Object.entries(item.variants).filter(([, v]) => v.available);
   const live = vids.length > 0;
-  if (!live) vids = Object.entries(item.variants); // not on sale yet: links work once it goes live
-  const note = live ? "" : "\n*Not on sale yet: these work once it goes live.*";
+  if (!live) vids = Object.entries(item.variants); // links still work once it's buyable
+  const note = live ? "" : soldOut(item) ? "\n*Sold out: these work if it restocks.*" : "\n*Not on sale yet: these work once it goes live.*";
   const lines = [];
   for (const [vid, v] of vids) {
     const links = [1, 2, 3, 4, 5]
@@ -600,7 +613,7 @@ function embed(kind, item, note, kw) {
   if (watched(item, kw)) [label, color] = ["🚨 " + label, 0xef4444];
   const fields = [];
   if (item.price !== null) fields.push({ name: "Price", value: `$${item.price.toFixed(2)}`, inline: true });
-  fields.push({ name: "Stock", value: item.available ? "In stock ✅" : "Not available yet ❌", inline: true });
+  fields.push({ name: "Stock", value: item.available ? "In stock ✅" : unavailableText(item), inline: true });
   const opts = Object.values(item.variants).filter((v) => v.available && v.title !== "Default Title").map((v) => v.title);
   if (opts.length) fields.push({ name: "Available options", value: opts.join(", ").slice(0, 1024), inline: false });
   const atc = buyLinks(item, "cart");
@@ -628,8 +641,8 @@ async function postWebhook(env, payload) {
 
 // ---------- Grid layout for several alerts at once ----------
 
-const KIND_ICON = { new: "🆕", "new-soon": "🔜", restock: "🔁", option: "➕" };
-const KIND_TEXT = { new: "New", "new-soon": "Not on sale yet", restock: "Back in stock", option: "New option" };
+const KIND_ICON = { new: "🆕", "new-soon": "🔜", "new-soldout": "❌", restock: "🔁", option: "➕" };
+const KIND_TEXT = { new: "New", "new-soon": "Not on sale yet", "new-soldout": "Sold out", restock: "Back in stock", option: "New option" };
 
 // One compact tile (an inline embed field) per item: Discord lays these out
 // up to 3 across on desktop.

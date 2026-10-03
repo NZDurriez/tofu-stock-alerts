@@ -112,10 +112,23 @@ def upcoming(it):
         return False
 
 
+def sold_out(it):
+    """Unavailable and public for more than 10 minutes = sold out (Shopify has no
+    separate flag; something unavailable right as it's published isn't on sale yet)."""
+    if buyable(it):
+        return False
+    try:
+        from datetime import datetime, timezone
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(it["published"])).total_seconds() > 600
+    except ValueError:
+        return False
+
+
 def status(it):
     vs = list(it["variants"].values())
     price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
-    return ("✅ buyable" if buyable(it) else "🆕 upcoming") + (f" · ${price}" if price else "")
+    label = "✅ buyable" if buyable(it) else "❌ sold out" if sold_out(it) else "🔜 not on sale yet"
+    return label + (f" · ${price}" if price else "")
 
 
 def ask(env_name, prompt):
@@ -136,7 +149,7 @@ def choose_targets(current, default_qty):
     that aren't listed yet, matched by title when they appear."""
     by_id, by_words = {}, []
     if current:
-        flt = ask("DROP_FILTER", "\nNarrow the list? Type words like 'delta reign' (Enter = show upcoming releases): ").strip().lower()
+        flt = ask("DROP_FILTER", "\nNarrow the list? Type words like 'delta reign' (Enter = show new releases from the last week): ").strip().lower()
         if flt:
             words = flt.split()
             items = [(pid, it) for pid, it in current.items()
