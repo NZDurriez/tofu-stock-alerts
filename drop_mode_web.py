@@ -37,6 +37,23 @@ CATEGORIES = [
     ("gundam", "Gundam Card Game", ["gundam-card-game"]),
     ("events", "Store Events & Tournaments", ["store-events-tournaments"]),
 ]
+# The live stream split up by game. Those products aren't in Tofu's game
+# categories, so this goes by words in their names.
+GAMES = [
+    ("pokemon", "Pokémon", ["pokemon"]),
+    ("onepiece", "One Piece", ["one piece"]),
+    ("magic", "Magic", ["magic", "mtg"]),
+    ("finalfantasy", "Final Fantasy", ["final fantasy"]),
+    ("riftbound", "Riftbound", ["riftbound", "league of legends"]),
+    ("dragonball", "Dragon Ball", ["dragon ball"]),
+    ("gundam", "Gundam", ["gundam"]),
+    ("weiss", "Weiss Schwarz", ["weiss schwarz"]),
+]
+
+
+def game_of(title):
+    t = norm(title)
+    return next((gid for gid, _, words in GAMES if any(w in t for w in words)), "other")
 
 
 class Watcher:
@@ -158,14 +175,17 @@ class Watcher:
         if self.products and time.time() - self.cats_at > 600 and self.cats_at:  # refresh every 10 minutes
             self.load_categories_soon()
         in_stock = {pid for pid, it in self.products.items() if dm.buyable(it)}
+        live = [game_of(self.products[pid]["title"]) for pid in self.categories.get("live", set()) & in_stock]
+        games = [{"id": gid, "name": name, "count": live.count(gid)} for gid, name, _ in GAMES + [("other", "Other", [])]]
         return {"loading": not self.cats_at and bool(self.products),
                 "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & in_stock)}
-                               for cid, name, _ in CATEGORIES]}
+                               for cid, name, _ in CATEGORIES],
+                "liveGames": [g for g in games if g["count"]]}
 
-    def listing(self, flt, cat="", limit=40):
+    def listing(self, flt, cat="", game="", limit=40):
         """The exact-product search: only what you can buy right now (sold out
         or unlisted things are for keyword watches), optionally in one of
-        Tofu's categories."""
+        Tofu's categories, and one game (for the live stream)."""
         keys = keywords(flt)
         in_cat = self.categories.get(cat) if cat else None
         out = []
@@ -175,6 +195,8 @@ class Watcher:
             if in_cat is not None and pid not in in_cat:
                 continue
             if keys and not keyword_match(keys, it["title"]):
+                continue
+            if game and game_of(it["title"]) != game:
                 continue
             out.append(card(pid, it))
         out.sort(key=lambda x: x["title"])
@@ -514,7 +536,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/products":
             from urllib.parse import unquote_plus
-            self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", "")))
+            self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", ""), params.get("game", "")))
         elif path == "/api/categories":
             self.send_json(W.category_list())
         elif path == "/api/password":

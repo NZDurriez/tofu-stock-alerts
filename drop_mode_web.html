@@ -72,6 +72,13 @@ h1 span{color:var(--accent)}
 .cat .n{color:var(--faint);font-size:12px;margin-left:4px}
 .cat.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .cat.on .n{color:var(--accent-ink);opacity:.7}
+.cats.sub{margin-top:-2px;align-items:center}
+.cats.sub .lbl{font-size:12.5px;color:var(--muted);margin-right:2px}
+.cats.sub .cat{font-size:12.5px;padding:2px 10px}
+.cats.sub .cat.on{background:var(--c-stream);border-color:var(--c-stream);color:var(--tab-ink)}
+.item input.pick{margin-top:17px}
+.selbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);box-shadow:0 4px 10px rgba(0,0,0,.15)}
+.selbar .names{flex:1;min-width:0;font-size:13.5px;color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .subtoggle{display:flex;align-items:center;gap:8px;width:100%;padding:2px 0;background:none;border:0;border-radius:0;color:var(--text);font:600 15px Inter,sans-serif;text-align:left}
 .subtoggle:hover{color:var(--accent)}
 .subtoggle .chev{display:inline-block;color:var(--c-setup);transition:transform .15s}
@@ -333,6 +340,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div id="exactBody" hidden>
           <p class="lead" style="margin:6px 0 12px">What's in stock right now. Press <b style="color:var(--text);font-weight:600">+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above.</p>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
+          <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
           <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
           <div class="list" id="results"><div class="empty">Load the shop first.</div></div>
         </div>
@@ -459,15 +467,22 @@ $("exactToggle").onclick = () => {
 };
 
 // Tofu's menu headers as filters for the search (same categories as his site)
-let cat = "", catNames = {}, catTimer;
+let cat = "", game = "", catNames = {}, gameNames = {}, catTimer;
 async function loadCats() {
-  if (!lastProducts) { $("cats").innerHTML = ""; return; }
+  if (!lastProducts) { $("cats").innerHTML = ""; $("subcats").hidden = true; return; }
   const r = await api("/api/categories");
   catNames = Object.fromEntries(r.categories.map((c) => [c.id, c.name]));
-  const chip = (id, name, n) => `<button type="button" class="cat${cat === id ? " on" : ""}" data-cat="${id}">${esc(name)}${n === null ? "" : `<span class="n">${n}</span>`}</button>`;
-  $("cats").innerHTML = chip("", "All", null)
-    + r.categories.map((c) => chip(c.id, c.name, r.loading ? "…" : c.count)).join("");
-  $("cats").querySelectorAll(".cat").forEach((b) => b.onclick = () => { cat = b.dataset.cat; loadCats(); search(); });
+  const chip = (id, name, n, on) => `<button type="button" class="cat${on ? " on" : ""}" data-id="${id}">${esc(name)}${n === null ? "" : `<span class="n">${n}</span>`}</button>`;
+  $("cats").innerHTML = chip("", "All", null, cat === "")
+    + r.categories.map((c) => chip(c.id, c.name, r.loading ? "…" : c.count, cat === c.id)).join("");
+  $("cats").querySelectorAll(".cat").forEach((b) => b.onclick = () => { cat = b.dataset.id; game = ""; loadCats(); search(); });
+  // Mr Tofu Live Stream, split up by game
+  const games = r.liveGames || [];
+  gameNames = Object.fromEntries(games.map((g) => [g.id, g.name]));
+  $("subcats").hidden = cat !== "live" || games.length < 2;
+  $("subcats").innerHTML = '<span class="lbl">Game:</span>' + chip("", "All", null, game === "")
+    + games.map((g) => chip(g.id, g.name, g.count, game === g.id)).join("");
+  $("subcats").querySelectorAll(".cat").forEach((b) => b.onclick = () => { game = b.dataset.id; loadCats(); search(); });
   clearTimeout(catTimer);
   if (r.loading) catTimer = setTimeout(loadCats, 1500); // still reading the categories from the shop
 }
@@ -680,42 +695,54 @@ $("kwInput").oninput = () => { kwShowAll = false; kwChanged(); };
 $("kwInput").onkeydown = (e) => { if (e.key === "Enter") addKeywords(); };
 
 // ---- exact products ----
+// Tick several (each with its own "how many"), then one + Watch adds them all.
+// The ticks stay while you search or switch category.
+const ticked = new Map(); // product id -> {id, title, image, qty}
+let lastResults = { items: [], total: 0 }, lastQuery = "";
 async function search() {
-  const q = $("search").value.trim(), el = $("results");
-  if (!lastProducts) { el.innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat));
+  const q = $("search").value.trim();
+  if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
+  const r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game));
   if (q !== $("search").value.trim()) return; // a newer search is on its way
-  let html = "";
+  lastResults = r; lastQuery = q;
+  renderResults();
+}
+function renderResults() {
+  const r = lastResults, q = lastQuery, el = $("results");
+  const where = cat ? `${catNames[cat] || "this category"}${game ? ` · ${gameNames[game] || ""}` : ""}` : "";
+  let html = '<div class="selbar" id="selbar" hidden><span class="names"></span><button class="watchbtn" id="watchTicked"></button><button class="linkish" id="clearTicked">Clear</button></div>';
   if (q) {
     html += `<div class="bridge"><span>Sold out or not listed yet? Catch it with keywords:</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
-    html += cat
-      ? `<div class="resnote" style="border-top:0">In stock in ${esc(catNames[cat] || "this category")}.</div>`
-      : '<div class="resnote" style="border-top:0">Everything in stock right now. Type to search.</div>';
+    html += where
+      ? `<div class="resnote" style="border-top:0">In stock in ${esc(where)}. Tick several to add them together.</div>`
+      : '<div class="resnote" style="border-top:0">Everything in stock right now. Type to search, or tick several to add them together.</div>';
   }
   html += r.items.map((it) => {
-    const already = onList("product", it.id);
-    return `<div class="item" data-kind="product" data-id="${it.id}">
+    const already = onList("product", it.id), sel = ticked.get(it.id);
+    return `<div class="item" data-id="${it.id}">
+      <input type="checkbox" class="pick" ${already ? "disabled" : ""} aria-label="Tick ${esc(it.title)}">
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
-  if (!r.items.length) html += `<div class="empty">Nothing ${q ? "matching that is" : cat ? "in this category is" : "is"} in stock right now.</div>`;
+  if (!r.items.length) html += `<div class="empty">Nothing ${q ? "matching that is" : where ? "in this category is" : "is"} in stock right now.</div>`;
   if (r.total > r.items.length) html += `<div class="resnote">Showing ${r.items.length} of ${r.total}. Type more to narrow it down.</div>`;
   el.innerHTML = html;
   const byId = Object.fromEntries(r.items.map((it) => [it.id, it]));
   el.querySelectorAll(".item").forEach((row) => {
-    let qty = 1;
-    wireQty(row, (n) => { qty = n; });
-    row.querySelector(".watchbtn").onclick = () => {
-      const it = byId[row.dataset.id];
-      watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty });
-      watchlistChanged();
-    };
+    const it = byId[row.dataset.id], box = row.querySelector(".pick");
+    const entry = (qty) => ({ id: it.id, title: it.title, image: it.image, qty });
+    let qty = ticked.get(it.id)?.qty || 1;
+    box.onchange = () => { if (box.checked) ticked.set(it.id, entry(qty)); else ticked.delete(it.id); updateTicks(); };
+    wireQty(row, (n) => { qty = n; if (!box.disabled) { ticked.set(it.id, entry(qty)); updateTicks(); } }); // picking how many ticks it
+    row.querySelector(".watchbtn").onclick = () => addTicked(entry(qty));
   });
+  $("watchTicked").onclick = () => addTicked();
+  $("clearTicked").onclick = () => { ticked.clear(); renderResults(); };
   const use = $("useKw");
   if (use) use.onclick = () => {
     $("kwInput").value = q;
@@ -723,6 +750,36 @@ async function search() {
     $("kwInput").focus();
     kwChanged(0);
   };
+  updateTicks();
+}
+// Show what's ticked: the bar at the top, and how many each + Watch would add
+function updateTicks() {
+  $("results").querySelectorAll(".item").forEach((row) => {
+    const sel = ticked.has(row.dataset.id), box = row.querySelector(".pick"), btn = row.querySelector(".watchbtn");
+    row.classList.toggle("picked", sel);
+    box.checked = sel;
+    if (!btn.disabled) {
+      const n = ticked.size + (sel ? 0 : 1);
+      btn.textContent = n > 1 ? `+ Watch ${n}` : "+ Watch";
+    }
+  });
+  const bar = $("selbar");
+  if (!bar) return;
+  bar.hidden = !ticked.size;
+  const names = "Ticked: " + [...ticked.values()].map((t) => `${t.qty}× ${t.title}`).join(" · ");
+  bar.querySelector(".names").textContent = names;
+  bar.querySelector(".names").title = names; // the full list on hover
+  $("watchTicked").textContent = `+ Watch ${ticked.size}`;
+}
+// Add everything ticked (and the one whose + Watch was pressed) to the watchlist
+function addTicked(extra) {
+  const items = [...ticked.values()];
+  if (extra && !ticked.has(extra.id)) items.push(extra);
+  for (const it of items) {
+    if (!onList("product", it.id)) watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty: it.qty });
+  }
+  ticked.clear();
+  watchlistChanged(); // (this redraws the search too)
 }
 let searchTimer;
 $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 250); };
