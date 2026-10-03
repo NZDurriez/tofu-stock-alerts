@@ -102,6 +102,7 @@ def summarise(p):
         "title": p["title"],
         "handle": p["handle"],
         "published": p.get("published_at") or "",
+        "image": ((p.get("images") or [{}])[0] or {}).get("src"),
         "variants": {str(v["id"]): (v.get("title") or "", bool(v.get("available")), v.get("price")) for v in p.get("variants") or []},
     }
 

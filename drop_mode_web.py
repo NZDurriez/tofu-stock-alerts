@@ -89,22 +89,16 @@ class Watcher:
                  + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
 
     def listing(self, flt):
+        """The shop list: only things you can buy right now (watch rows cover the rest)."""
         words = dm_words(flt)  # search box: every word must appear
         out = []
         for pid, it in self.products.items():
-            if not (dm.buyable(it) or dm.upcoming(it)):
-                continue  # old sold-out stock is never listed
+            if not dm.buyable(it):
+                continue
             if words and not all(w in norm(it["title"]) for w in words):
                 continue
-            vs = list(it["variants"].values())
-            price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
-            out.append({
-                "id": pid, "title": it["title"], "price": price,
-                "state": "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon",
-                "url": f"{dm.SHOP}/products/{it['handle']}",
-                "picked": self.picks.get(pid),
-            })
-        out.sort(key=lambda x: ({"soon": 0, "soldout": 1, "buyable": 2}[x["state"]], x["title"]))
+            out.append(card(pid, it))
+        out.sort(key=lambda x: x["title"])
         return out
 
     # ---- watching ----
@@ -134,22 +128,25 @@ class Watcher:
         return None
 
     def matches(self, text, limit=6):
-        """Products a keyword watch would hit right now (any state), for the page's preview."""
+        """For a watch row's preview: in-stock matches as cards, plus the names of
+        matches you can't buy right now (so you can see a restock would be caught)."""
         keys = keywords(text)
         if not keys:
-            return []
-        hits = [it for it in self.products.values() if keyword_match(keys, it["title"])]
-        rank = lambda it: (0 if dm.buyable(it) else 1 if dm.upcoming(it) else 2, it["title"])
-        out = []
-        for it in sorted(hits, key=rank)[:limit]:
-            state = "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon"
-            out.append({"title": it["title"], "state": state})
-        return {"items": out, "total": len(hits)}
+            return {"items": [], "total": 0, "unavailable": []}
+        hits = [(pid, it) for pid, it in self.products.items() if keyword_match(keys, it["title"])]
+        live = sorted([(p, it) for p, it in hits if dm.buyable(it)], key=lambda x: x[1]["title"])
+        gone = sorted([it for _, it in hits if not dm.buyable(it)], key=lambda it: (not dm.upcoming(it), it["title"]))
+        return {
+            "items": [card(p, it) for p, it in live[:limit]],
+            "total": len(live),
+            "unavailable": [{"title": it["title"], "state": "soldout" if dm.sold_out(it) else "soon"} for it in gone[:3]],
+            "unavailableTotal": len(gone),
+        }
 
     def start(self, picks, watches, interval):
         self.picks = {str(p["id"]): max(1, int(p["qty"])) for p in picks if str(p["id"]) in self.products}
         self.words = [(keywords(w["text"]), max(1, int(w["qty"])), w["text"].strip()) for w in watches if keywords(w["text"])]
-        self.interval = max(1.5, float(interval or 3))
+        self.interval = max(1.0, float(interval or 3))
         if self.running:
             self.log("info", "Updated what to watch.")
         else:
@@ -224,6 +221,20 @@ class Watcher:
             except Exception as exc:
                 self.log("warn", f"Check failed: {exc}")
             time.sleep(wait)
+
+
+def card(pid, it):
+    """What the page needs to show one product."""
+    vs = list(it["variants"].values())
+    price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
+    img = it.get("image")
+    if img:  # Shopify's CDN resizes on request; small thumbs load fast
+        img += ("&" if "?" in img else "?") + "width=160"
+    return {
+        "id": pid, "title": it["title"], "price": price, "image": img,
+        "state": "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon",
+        "url": f"{dm.SHOP}/products/{it['handle']}",
+    }
 
 
 def dm_words(text):

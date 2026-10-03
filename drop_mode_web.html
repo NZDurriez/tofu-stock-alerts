@@ -99,6 +99,18 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
 .item .t a:hover{text-decoration:underline}
 .item .meta{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:2px}
 .empty{padding:16px;color:var(--muted);font-size:14px}
+.thumb{width:52px;height:52px;flex:none;border-radius:10px;object-fit:contain;background:#fff;border:1px solid var(--line)}
+.thumb.none{display:grid;place-items:center;background:var(--surface2);color:var(--faint);font-size:20px}
+.watch .m .hit{gap:10px;padding:5px 0}
+.watch .m .hit .thumb{width:44px;height:44px}
+.watch .m .gone{display:block;margin-top:6px;color:var(--faint);font-size:13px}
+.addbtn{background:var(--accent-soft);color:var(--accent);border:1px dashed var(--accent)}
+.addbtn:hover{background:transparent}
+@keyframes ping{0%{box-shadow:0 0 0 0 currentColor}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@keyframes glow{50%{background:var(--ok-soft)}}
+.chip-s.live{color:var(--text);animation:glow 2s ease-in-out infinite}
+.chip-s.live .dot{color:var(--ok);animation:ping 1.6s ease-out infinite}
+@media (prefers-reduced-motion:reduce){.chip-s.live,.chip-s.live .dot{animation:none}}
 
 .summary{margin-top:18px;font-size:14px;color:var(--muted)}
 .summary b{color:var(--text);font-weight:600}
@@ -164,16 +176,16 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
         <h2><span class="step">2</span>What do you want to buy?</h2>
         <p class="lead">One row per product. Type keywords separated by commas: <b style="color:var(--text);font-weight:600">every keyword must be in the product's name</b>. Catches restocks and brand-new listings.</p>
         <div id="watches"></div>
-        <button class="secondary" id="addWatch" style="margin-top:12px">+ Add another product</button>
+        <button class="addbtn" id="addWatch" style="margin-top:12px">+ Add another product</button>
 
         <details class="more">
-          <summary>Or tick items from the shop list</summary>
+          <summary>Or tick in-stock items from the shop</summary>
           <div class="row" style="margin-top:12px">
-            <input type="text" id="filter" placeholder="Search, e.g. delta reign (blank = new releases from the last week)">
+            <input type="text" id="filter" placeholder="Search in-stock items, e.g. storm emeralda">
             <button class="secondary" id="filterBtn">Search</button>
           </div>
           <div class="list" id="list"><div class="empty">Load the shop first.</div></div>
-          <p class="hint">Old sold-out stock is hidden. Sold-out items can still be picked in case they restock.</p>
+          <p class="hint">Only things you can buy right now are listed. To catch a sold-out or upcoming item, add it as a keyword row above.</p>
         </details>
 
         <div class="summary"><b>Watching for:</b> <span id="picks"></span></div>
@@ -185,7 +197,7 @@ details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weigh
         <h2><span class="step">3</span>Watch</h2>
         <div class="controls">
           <label>Check every
-            <select id="interval"><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
+            <select id="interval"><option value="1">1 second (drops only)</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
           </label>
         </div>
         <div class="controls" style="margin-top:12px">
@@ -291,9 +303,22 @@ async function preview(row, text) {
   if (!text.trim()) { el.innerHTML = ""; return; }
   if (!lastProducts) { el.textContent = "Load the shop to see what this matches."; return; }
   const r = await api("/api/match?k=" + encodeURIComponent(text));
-  el.innerHTML = r.total
-    ? `Matches now (${r.total}):` + r.items.map((it) => `<span class="hit">${badgeHtml[it.state]}${esc(it.title)}</span>`).join("") + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
-    : `<span class="none">No product matches yet. That's fine if it isn't listed yet; it'll be caught the moment it appears.</span>`;
+  let html = r.total
+    ? `In stock now (${r.total}):` + r.items.map((it) => `<span class="hit">${thumb(it)}<span>${esc(it.title)}${it.price ? ` · $${esc(it.price)}` : ""}</span></span>`).join("")
+      + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
+    : `<span class="none">Nothing matching is in stock right now. It'll be caught the moment it is.</span>`;
+  if (r.unavailableTotal) {
+    const names = r.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ");
+    html += `<span class="gone">Also matches ${r.unavailableTotal} you can't buy yet: ${names}${r.unavailableTotal > r.unavailable.length ? "…" : ""}. Watching for restocks.</span>`;
+  }
+  el.innerHTML = html;
+}
+
+// Product picture (Shopify's CDN), or a placeholder if there isn't one
+function thumb(it) {
+  return it.image
+    ? `<img class="thumb" src="${esc(it.image)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb none',textContent:'📦'}))">`
+    : '<span class="thumb none">📦</span>';
 }
 $("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatches(); $("watches").lastElementChild.querySelector(".kw").focus(); };
 
@@ -301,10 +326,11 @@ $("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatche
 async function loadList() {
   const r = await api("/api/products?filter=" + encodeURIComponent($("filter").value));
   const el = $("list");
-  if (!r.items.length) { el.innerHTML = '<div class="empty">Nothing matched (old sold-out stock is hidden).</div>'; return; }
+  if (!r.items.length) { el.innerHTML = '<div class="empty">Nothing in stock matches that.</div>'; return; }
   el.innerHTML = r.items.map((it) => `
     <div class="item ${picks.has(it.id) ? "picked" : ""}" data-id="${it.id}">
       <input type="checkbox" ${picks.has(it.id) ? "checked" : ""} aria-label="Pick">
+      ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div></div>
       <input type="number" min="1" value="${picks.has(it.id) ? picks.get(it.id).qty : 1}" title="Quantity">
@@ -393,8 +419,9 @@ async function poll() {
     }
     running = r.running; lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn; passwordSaved = r.passwordSaved;
     const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"] }[shopState];
-    setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"), shopText ? shopText[1] : "");
-    setChip("sRun", r.running ? `Watching every ${r.interval}s` : "Not watching", r.running ? "good" : "");
+    setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"),
+      shopText ? shopText[1] + (shopText[1] === "good" ? " live" : "") : "");
+    setChip("sRun", r.running ? `Watching every ${r.interval}s` : "Not watching", r.running ? "good live" : "");
     setChip("sCheck", "Last check " + (r.lastCheck || "–"), r.lastCheck ? "info" : "");
     $("startBtn").textContent = r.running ? "Update" : "Start watching";
     $("startBtn").disabled = !r.products;
