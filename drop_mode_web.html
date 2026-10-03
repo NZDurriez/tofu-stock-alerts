@@ -17,6 +17,7 @@
   --info:#86b9df; --info-soft:rgba(134,185,223,.14);
   --c-stream:#a970ff; --c-setup:#e0a84f; --c-watch:#5fb4e6; --tab-ink:#17181c; /* column colours */
   --shadow:none;
+  --solid:#23262d; --panel-a:.84; /* pop-ups stay solid; panels over a background picture are this opaque */
 }
 :root[data-theme="light"]{
   --bg:#f5f4f0; --surface:#ffffff; --surface2:#f3f1ec; --field:#fbfaf7; --line:#e4e0d7;
@@ -27,7 +28,16 @@
   --info:#2f6f9f; --info-soft:rgba(47,111,159,.09);
   --c-stream:#7c4ddb; --c-setup:#c08423; --c-watch:#2f80bd; --tab-ink:#ffffff;
   --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
+  --solid:#ffffff;
 }
+/* With a background picture: frosted, see-through panels (the 🖼 menu sets how see-through) */
+html.has-bg{--surface:rgba(32,35,41,var(--panel-a)); --surface2:rgba(46,50,58,var(--panel-a)); --field:rgba(24,26,31,var(--panel-a)); --line:rgba(255,255,255,.09)}
+html.has-bg[data-theme="light"]{--surface:rgba(255,255,255,var(--panel-a)); --surface2:rgba(246,244,239,var(--panel-a)); --field:rgba(251,250,247,var(--panel-a)); --line:rgba(0,0,0,.09)}
+html.has-bg body{background:linear-gradient(rgba(12,13,16,.28),rgba(12,13,16,.28)),var(--bg-url) center/cover no-repeat fixed,var(--bg)}
+html.has-bg[data-theme="light"] body{background:linear-gradient(rgba(255,255,255,.18),rgba(255,255,255,.18)),var(--bg-url) center/cover no-repeat fixed,var(--bg)}
+html.has-bg .card,html.has-bg .chip-s,html.has-bg .theme,html.has-bg .chat{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+html.has-bg .cols>header,html.has-bg .col-head{background:var(--surface);border-radius:12px;padding:6px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+html.has-bg .pop,html.has-bg #alert .box,html.has-bg #lockAlert .box,html.has-bg .selbar{background:var(--solid)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{color-scheme:dark}
@@ -49,7 +59,7 @@ h1 span{color:var(--accent)}
    Watching each have a coloured − / + on their header line that folds the
    column to a slim bar, so the others get the room. Narrow windows stack. */
 .cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-areas:var(--areas,"stream head head" "stream setup watch");grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
-.cols>header{grid-area:head;min-height:36px}
+.cols>header{grid-area:head;min-height:36px;position:relative;z-index:30} /* above the columns, so its menus aren't hidden behind them */
 .col{min-width:0}
 .col-stream{--c:var(--c-stream);grid-area:stream;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
 .cols.both-folded .col-stream{height:calc(100vh - 100px)}
@@ -220,6 +230,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .pop .lead{font-size:13px;margin:2px 0 12px}
 .pop select{flex:1;min-width:0}
 .vol{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:14px;color:var(--muted)}
+.bgprev{height:110px;border-radius:10px;border:1px solid var(--line);background:var(--surface2) center/cover no-repeat;display:grid;place-items:center;color:var(--muted);font-size:13px;margin-bottom:12px}
 .vol input{flex:1;accent-color:var(--accent)}
 .vol span{min-width:42px;text-align:right;color:var(--text)}
 .filebtn{display:inline-flex;align-items:center;cursor:pointer}
@@ -265,6 +276,11 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 <script>
   // Apply the saved theme before the page draws (no flash)
   try { if (localStorage.getItem("dropTheme") === "light") document.documentElement.dataset.theme = "light"; } catch {}
+  try {
+    const bg = localStorage.getItem("dropBg"), see = localStorage.getItem("dropPanels");
+    if (bg) { document.documentElement.classList.add("has-bg"); document.documentElement.style.setProperty("--bg-url", `url("/background?v=${bg}")`); }
+    if (see) document.documentElement.style.setProperty("--panel-a", see / 100);
+  } catch {}
 </script>
 </head>
 <body>
@@ -291,6 +307,21 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
           </div>
           <p class="hint" id="soundMsg" style="margin:6px 0 0"></p>
           <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
+        </div>
+      </div>
+      <div class="popwrap">
+        <button class="theme" id="bgBtn" data-pop="bgPop" aria-expanded="false" title="Background picture">🖼 Background</button>
+        <div class="pop" id="bgPop" hidden>
+          <div class="pop-title">Background</div>
+          <p class="lead">A picture behind drop mode. It stays on this PC.</p>
+          <div class="bgprev" id="bgPrev">No picture</div>
+          <div class="row">
+            <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">Choose a picture…<input type="file" id="bgFile" accept="image/*" hidden></label>
+            <button class="linkish" id="bgRemove" hidden>Remove</button>
+          </div>
+          <p class="hint" id="bgMsg" style="margin:6px 0 0"></p>
+          <label class="vol" id="bgSee">Panels <input type="range" id="panelA" min="55" max="100" step="1" aria-label="How solid the panels are"><span id="panelVal"></span></label>
+          <p class="hint" style="margin:4px 0 0">Lower shows more of the picture; higher keeps text easiest to read.</p>
         </div>
       </div>
       <button class="theme" id="themeBtn">☀️ Light</button>
@@ -890,6 +921,40 @@ $("interval").onchange = () => {
 };
 $("stopBtn").onclick = () => api("/api/stop", {});
 
+// ---------- background picture ----------
+async function loadBackground() {
+  const r = await api("/api/background");
+  const root = document.documentElement;
+  root.classList.toggle("has-bg", r.has);
+  if (r.has) root.style.setProperty("--bg-url", `url("/background?v=${r.v}")`);
+  try { if (r.has) localStorage.setItem("dropBg", r.v); else localStorage.removeItem("dropBg"); } catch {}
+  $("bgPrev").style.backgroundImage = r.has ? `url("/background?v=${r.v}")` : "";
+  $("bgPrev").textContent = r.has ? "" : "No picture";
+  $("bgRemove").hidden = !r.has;
+  $("bgSee").hidden = !r.has;
+  const a = Math.round(parseFloat(getComputedStyle(root).getPropertyValue("--panel-a")) * 100) || 84;
+  $("panelA").value = a; $("panelVal").textContent = a + "%";
+}
+$("bgFile").onchange = async () => {
+  const file = $("bgFile").files[0];
+  $("bgFile").value = "";
+  if (!file) return;
+  $("bgMsg").textContent = "Adding…";
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const r = await api("/api/background", { data: btoa(bin) });
+  $("bgMsg").textContent = r.error || "";
+  loadBackground();
+};
+$("bgRemove").onclick = async () => { await api("/api/background/remove", {}); loadBackground(); };
+$("panelA").oninput = () => {
+  const a = +$("panelA").value;
+  document.documentElement.style.setProperty("--panel-a", a / 100);
+  $("panelVal").textContent = a + "%";
+  try { localStorage.setItem("dropPanels", a); } catch {}
+};
+
 // ---------- alert sound ----------
 // Drop mode plays it on this PC the moment something happens, so it works
 // even while this page is in the background. This just picks it.
@@ -1047,7 +1112,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadWatchlist().catch(() => {}); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
+layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadWatchlist().catch(() => {}); loadSound().catch(() => {}); loadBackground().catch(() => {}); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>

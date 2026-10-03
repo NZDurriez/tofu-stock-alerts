@@ -26,6 +26,31 @@ import sounds
 HOST, PORT = "127.0.0.1", int(os.environ.get("DROP_WEB_PORT", "8765"))
 PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_web.html")
 WATCHLIST_FILE = os.path.join(dm.SOUND_DIR, "watchlist.json")  # the watchlist (kept here, not in the browser)
+# The page's background picture (yours, kept in the settings folder, not the code)
+BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
+
+
+def background_file():
+    return next((os.path.join(dm.SOUND_DIR, "background" + ext) for ext in BG_TYPES
+                 if os.path.exists(os.path.join(dm.SOUND_DIR, "background" + ext))), None)
+
+
+def background_info():
+    path = background_file()
+    return {"has": bool(path), "v": int(os.path.getmtime(path)) if path else 0}
+
+
+def picture_type(data):
+    """The file type of an image from its first bytes (None if it isn't one we show)."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:4] == b"GIF8":
+        return ".gif"
+    return None
 
 # Mr Tofu's menu, left to right: (id, name, the shop collections it covers)
 CATEGORIES = [
@@ -553,6 +578,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(W.matches(unquote_plus(params.get("k", "")), limit))
         elif path == "/api/sound":
             self.send_json(sound_info())
+        elif path == "/api/background":
+            self.send_json(background_info())
+        elif path == "/background":
+            pic = background_file()
+            if not pic:
+                self.send_json({"error": "no background"}, 404)
+                return
+            with open(pic, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", BG_TYPES[os.path.splitext(pic)[1]])
+            self.send_header("Cache-Control", "max-age=31536000")  # the page asks with ?v=<when it changed>
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/events":
             W.last_poll = time.time()
             since = int(params.get("since", "0") or 0)
@@ -607,6 +646,24 @@ class Handler(BaseHTTPRequestHandler):
                 return
             play_alert()
             self.send_json(sound_info())
+        elif self.path == "/api/background":  # a new background picture (the page sends the file)
+            data = base64.b64decode(data.get("data", ""))
+            ext = picture_type(data)
+            if not ext or len(data) > 25 * 1024 * 1024:
+                self.send_json({"error": "Pick a JPG, PNG, WebP or GIF picture (up to 25 MB)."}, 400)
+                return
+            old = background_file()
+            if old:
+                os.remove(old)
+            os.makedirs(dm.SOUND_DIR, exist_ok=True)
+            with open(os.path.join(dm.SOUND_DIR, "background" + ext), "wb") as f:
+                f.write(data)
+            self.send_json(background_info())
+        elif self.path == "/api/background/remove":
+            old = background_file()
+            if old:
+                os.remove(old)
+            self.send_json(background_info())
         elif self.path == "/api/sound/delete":  # remove one of your sound files
             sounds.delete_file(data.get("id", ""))
             self.send_json(sound_info())
