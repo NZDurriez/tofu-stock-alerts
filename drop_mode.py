@@ -65,6 +65,21 @@ def login(password):
     return code == 200
 
 
+def login_status(password):
+    """'open' (shop isn't locked, so the password can't be checked), 'locked'
+    (no password given), 'ok' (password got us in) or 'bad' (it didn't).
+    Checking the lock first matters: an open shop lets anyone in, so a
+    login 'working' there proves nothing."""
+    if os.path.exists(COOKIES):
+        os.unlink(COOKIES)
+    code, _, _ = curl([f"{SHOP}/products.json?limit=1&_={time.time_ns()}"])
+    if code == 200:
+        return "open"
+    if not password:
+        return "locked"
+    return "ok" if login(password) else "bad"
+
+
 def fetch(etag=None):
     args = [f"{SHOP}/products.json?limit=250&_={time.time_ns()}", "-H", "Accept: application/json"]
     if etag:
@@ -202,11 +217,13 @@ def main():
     interval = ask("DROP_INTERVAL", "Seconds between checks [3]: ").strip()
     interval = max(1.5, float(interval)) if re.fullmatch(r"\d+(\.\d+)?", interval) else 3.0
 
-    if os.path.exists(COOKIES):
-        os.unlink(COOKIES)
-    if password:
-        print("✅ Password accepted, watching behind the lock." if login(password)
-              else "❌ That password didn't work (or the shop isn't locked). Carrying on without it.")
+    state = login_status(password)
+    print({
+        "ok": "✅ Password accepted, watching behind the lock.",
+        "bad": "❌ That password didn't work. Carrying on without it.",
+        "open": "🔓 The shop isn't locked, so no password is needed." + (" I'll try yours if it locks." if password else ""),
+        "locked": "🔒 The shop is locked and no password was given; only new listings by name can be caught.",
+    }[state])
 
     # Baseline, then pick what to buy
     etag, seen = None, {}

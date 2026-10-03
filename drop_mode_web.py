@@ -28,6 +28,7 @@ class Watcher:
         self.lock = threading.Lock()
         self.password = ""
         self.logged_in = False
+        self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
         self.etag = None
         self.picks = {}         # product id -> qty
@@ -58,20 +59,34 @@ class Watcher:
         return False, code
 
     def login(self, password):
-        self.password = password.strip()
-        if os.path.exists(dm.COOKIES):
-            os.unlink(dm.COOKIES)
-        self.logged_in = bool(self.password) and dm.login(self.password)
+        password = password.strip()
+        self.shop_state = dm.login_status(password)  # open / locked / ok / bad
+        self.logged_in = self.shop_state == "ok"
+        # Keep a password we couldn't check yet (shop open) so it's tried if the shop locks
+        self.password = password if self.shop_state in ("ok", "open") else ""
         ok, info = self.refresh()
-        if self.password and not self.logged_in:
-            self.log("warn", "That password didn't work (or the shop isn't locked).")
-        elif self.logged_in:
-            self.log("ok", "Password accepted, watching behind the lock.")
+        self.log(*{
+            "ok": ("ok", "Password accepted: watching behind the lock."),
+            "bad": ("warn", "That password didn't work. Check it and log in again."),
+            "open": ("info", "The shop isn't locked right now, so no password is needed."
+                     + (" I'll try yours automatically if it locks." if password else "")),
+            "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
+        }[self.shop_state])
         if ok:
             self.log("info", f"Shop has {info} products.")
-        else:
+        elif self.shop_state != "locked":
             self.log("warn", f"Couldn't list the shop (reply {info}).")
         return ok
+
+    def logout(self):
+        self.password, self.logged_in = "", False
+        if os.path.exists(dm.COOKIES):
+            os.unlink(dm.COOKIES)
+        self.etag = None
+        ok, info = self.refresh()
+        self.shop_state = "open" if ok else "locked"
+        self.log("info", "Logged out and forgot the password."
+                 + ("" if ok else " The shop is locked, so watching can only catch new listings by name."))
 
     def listing(self, flt):
         words = dm_words(flt)  # search box: every word must appear
@@ -190,10 +205,16 @@ class Watcher:
                     wait = self.interval
                 elif code == 401:
                     if self.password and dm.login(self.password):
-                        self.log("info", "Logged back in behind the password.")
+                        self.logged_in, self.shop_state = True, "ok"
+                        self.log("ok", "🔒 The shop locked. Logged in with your password: watching behind the lock.")
                         self.etag = None
                     else:
-                        self.log("warn", "The shop is password-locked and I'm not logged in. Log in again with the password.")
+                        if self.password:
+                            self.log("warn", "🔒 The shop locked and the saved password didn't work. Log in again with the right one.")
+                            self.password = ""
+                        elif self.shop_state != "locked":
+                            self.log("warn", "🔒 The shop is password-locked and I'm not logged in. Enter the password above.")
+                        self.logged_in, self.shop_state = False, "locked"
                         wait = 10
                 elif code in (429, 430, 503):
                     wait = min(wait * 2, 30)
@@ -273,6 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             with W.lock:
                 evs = [e for e in W.events if e["id"] > since]
             self.send_json({"events": evs, "running": W.running, "loggedIn": W.logged_in,
+                            "shopState": W.shop_state, "passwordSaved": bool(W.password),
                             "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval})
         else:
             self.send_json({"error": "not found"}, 404)
@@ -284,9 +306,12 @@ class Handler(BaseHTTPRequestHandler):
         data = json.loads(self.rfile.read(n) or b"{}")
         if self.path == "/api/login":
             ok = W.login(data.get("password", ""))
-            self.send_json({"ok": ok, "loggedIn": W.logged_in, "products": len(W.products)})
+            self.send_json({"ok": ok, "loggedIn": W.logged_in, "shopState": W.shop_state, "products": len(W.products)})
         elif self.path == "/api/start":
             W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3))
+            self.send_json({"ok": True})
+        elif self.path == "/api/logout":
+            W.logout()
             self.send_json({"ok": True})
         elif self.path == "/api/stop":
             W.stop()

@@ -446,6 +446,12 @@ async function handleInteraction(request, env, ctx) {
     const pw = ((i.data.options || []).find((o) => o.name === "password") || {}).value || "";
     ctx.waitUntil(
       followUp(async () => {
+        // An open shop lets anyone in, so a password can only be checked while it's locked
+        const open = await shopFetch(`${SHOP}/products.json?limit=1&_=${Date.now()}`, { headers: { "User-Agent": BROWSER_UA } });
+        if (open.ok) {
+          return { content: "🔓 Mr Tofu's shop isn't locked right now, so no password is needed (and I can't check one until it locks). When you get the 🔒 lock message, send it with `/password` then." };
+        }
+        if ([429, 430, 503].includes(open.status)) return { content: "⏳ The shop is busy right now (it asked me to slow down). Try `/password` again in a moment." };
         const cookie = await loginWithPassword(pw);
         if (!cookie) return { content: "❌ That password didn't get me in. Double-check it and try `/password` again." };
         await env.STATE.put("cookie", cookie);

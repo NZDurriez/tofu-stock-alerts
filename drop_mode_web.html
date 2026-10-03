@@ -4,184 +4,309 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tofu Drop Mode</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0e1015;--card:#171a22;--card2:#1d212b;--field:#0f1218;--line:#262b37;--line2:#323848;--ink:#eef0f4;--muted:#8b93a5;--honey:#f5a524;--honey2:#ffc35c;--soft:rgba(245,165,36,.12);--ok:#22c55e;--bad:#ef4444;--info:#38bdf8}
+/* Calm palette: soft dark by default, light mode via the toggle. No glows,
+   no gradients, gentle contrast; colour is only used for meaning. */
+:root{
+  --bg:#1b1d22; --surface:#23262d; --surface2:#2a2e36; --field:#1f2228; --line:#33373f;
+  --text:#dde0e5; --muted:#9aa0ab; --faint:#6f7580;
+  --accent:#d9a24b; --accent-ink:#1f1607; --accent-soft:rgba(217,162,75,.14);
+  --ok:#6cc08d; --ok-soft:rgba(108,192,141,.14);
+  --bad:#e08585; --bad-soft:rgba(224,133,133,.14);
+  --info:#86b9df; --info-soft:rgba(134,185,223,.14);
+  --shadow:none;
+}
+:root[data-theme="light"]{
+  --bg:#f5f4f0; --surface:#ffffff; --surface2:#f3f1ec; --field:#fbfaf7; --line:#e4e0d7;
+  --text:#2c2b28; --muted:#6c685f; --faint:#9a958a;
+  --accent:#b8791b; --accent-ink:#ffffff; --accent-soft:rgba(184,121,27,.10);
+  --ok:#2f8a55; --ok-soft:rgba(47,138,85,.10);
+  --bad:#c0463f; --bad-soft:rgba(192,70,63,.09);
+  --info:#2f6f9f; --info-soft:rgba(47,111,159,.09);
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.04);
+}
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(1100px 480px at 100% -10%,rgba(245,165,36,.08),transparent 60%),var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,sans-serif;min-height:100vh}
-.wrap{max-width:1180px;margin:0 auto;padding:22px 16px 60px}
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
-h1{font:800 26px Outfit,sans-serif;margin:0;letter-spacing:-.01em}
-h1 span{color:var(--honey)}
-.pills{display:flex;gap:8px;flex-wrap:wrap}
-.pill{font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:999px;background:var(--card2);border:1px solid var(--line2);color:var(--muted)}
-.pill.on{color:#04140a;background:var(--ok);border-color:var(--ok)}
-.pill.warn{color:#fff;background:var(--bad);border-color:var(--bad)}
-.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px}
-@media(max-width:900px){.grid{grid-template-columns:1fr}}
-.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:18px;padding:18px}
-.card h2{font:700 17px Outfit,sans-serif;margin:0 0 12px;display:flex;align-items:center;gap:10px}
-.card h2 .n{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--honey);color:#1a1204;font:800 13px Inter}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-input[type=text],input[type=number],select{font:500 15px Inter,sans-serif;color:var(--ink);background:var(--field);border:1px solid var(--line2);border-radius:10px;padding:10px 12px;outline:none}
-input:focus,select:focus{border-color:var(--honey);box-shadow:0 0 0 3px var(--soft)}
-input[type=text]{flex:1;min-width:160px}
-input[type=number]{width:72px}
-button{font:700 14px Inter,sans-serif;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;color:#1a1204;background:linear-gradient(180deg,var(--honey2),var(--honey))}
-button.ghost{color:var(--ink);background:var(--card2);border:1px solid var(--line2)}
-button.stop{color:#fff;background:linear-gradient(180deg,#f87171,var(--bad))}
-button:disabled{opacity:.45;cursor:not-allowed}
-.hint{color:var(--muted);font-size:13px;margin:8px 0 0}
-.list{margin-top:12px;max-height:440px;overflow:auto;border:1px solid var(--line);border-radius:12px}
-.item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
-.item:first-child{border-top:0}
-.item.picked{background:var(--soft)}
-.item input[type=checkbox]{width:18px;height:18px;accent-color:var(--honey);flex:none}
-.item .t{flex:1;min-width:0}
-.item .t a{color:var(--ink);text-decoration:none;font-weight:600}
-.item .t a:hover{color:var(--honey2)}
-.item .meta{font-size:12.5px;color:var(--muted)}
-.badge{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;margin-right:6px}
-.b-buyable{background:rgba(34,197,94,.15);color:#4ade80}
-.b-soldout{background:rgba(239,68,68,.13);color:#fca5a5}
-.b-soon{background:rgba(56,189,248,.13);color:#7dd3fc}
-.empty{padding:16px;color:var(--muted)}
-.watch{background:var(--field);border:1px solid var(--line2);border-radius:12px;padding:10px;margin-top:10px}
-.watch .row{align-items:center}
-.watch .lbl{font-size:12px;font-weight:600;color:var(--muted)}
-.watch .rm{background:none;color:var(--muted);font-size:20px;padding:4px 8px}
+html{color-scheme:dark}
+:root[data-theme="light"]{color-scheme:light}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1160px;margin:0 auto;padding:28px 20px 64px}
+
+header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-.01em}
+h1 span{color:var(--accent)}
+.status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chip-s{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.chip-s.good .dot{background:var(--ok)} .chip-s.warn .dot{background:var(--bad)} .chip-s.info .dot{background:var(--info)}
+.theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 12px;font:500 13px Inter;cursor:pointer}
+.theme:hover{color:var(--text)}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:920px){.grid{grid-template-columns:1fr}}
+.stack{display:grid;gap:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
+.card h2{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:0 0 4px}
+.step{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:600}
+.lead{color:var(--muted);font-size:14px;margin:0 0 16px}
+.hint{color:var(--muted);font-size:13.5px;margin:10px 0 0}
+.hint b{color:var(--text);font-weight:600}
+
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input[type=text],input[type=number],select{font:400 15px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none;transition:border-color .15s}
+input::placeholder{color:var(--faint)}
+input:focus,select:focus{border-color:var(--accent)}
+input[type=text]{flex:1;min-width:180px}
+input[type=number]{width:74px}
+button{font:600 14px Inter,sans-serif;border-radius:10px;padding:10px 16px;cursor:pointer;border:1px solid transparent;transition:opacity .15s,background .15s}
+.primary{background:var(--accent);color:var(--accent-ink)}
+.primary:hover{opacity:.9}
+.secondary{background:transparent;color:var(--text);border-color:var(--line)}
+.secondary:hover{background:var(--surface2)}
+.danger{background:transparent;color:var(--bad);border-color:var(--bad-soft)}
+.danger:hover{background:var(--bad-soft)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.linkish{background:none;border:0;color:var(--muted);padding:6px 4px;font-weight:500;text-decoration:underline;text-underline-offset:3px}
+.linkish:hover{color:var(--text)}
+
+.loginState{margin-top:14px;font-size:14px;padding:10px 12px;border-radius:10px;background:var(--surface2);color:var(--muted);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.loginState.good{background:var(--ok-soft);color:var(--text)}
+.loginState.warn{background:var(--bad-soft);color:var(--text)}
+.loginState.info{background:var(--info-soft);color:var(--text)}
+
+.watch{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;background:var(--field)}
+.watch .lbl{font-size:13px;color:var(--muted)}
+.watch .rm{background:none;border:0;color:var(--faint);font-size:20px;line-height:1;padding:6px 8px}
 .watch .rm:hover{color:var(--bad)}
-.watch .m{margin-top:8px;font-size:12.5px;color:var(--muted)}
-.watch .m .hit{display:block;color:var(--ink);padding:1px 0}
-.watch .m .none{color:#fca5a5}
-details.more{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
-details.more summary{cursor:pointer;color:var(--muted);font-weight:600}
-.summary{margin-top:14px;font-size:13.5px;color:var(--muted)}
-.summary b{color:var(--ink)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.chip{background:var(--card2);border:1px solid var(--line2);border-radius:999px;padding:4px 10px;font-size:13px}
-.chip b{color:var(--honey2)}
-.chip button{background:none;color:var(--muted);padding:0 0 0 6px;font-size:14px}
+.watch .m{margin-top:10px;font-size:13.5px;color:var(--muted)}
+.watch .m .hit{display:flex;align-items:center;gap:8px;color:var(--text);padding:2px 0}
+.watch .m .none{color:var(--muted)}
+
+.badge{display:inline-block;font-size:12px;font-weight:500;border-radius:999px;padding:1px 9px;white-space:nowrap}
+.b-buyable{background:var(--ok-soft);color:var(--ok)}
+.b-soldout{background:var(--bad-soft);color:var(--bad)}
+.b-soon{background:var(--info-soft);color:var(--info)}
+
+details.more{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
+details.more summary{cursor:pointer;color:var(--muted);font-size:14px;font-weight:500}
+.list{margin-top:12px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px}
+.item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item.picked{background:var(--accent-soft)}
+.item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:none}
+.item .t{flex:1;min-width:0}
+.item .t a{color:var(--text);text-decoration:none}
+.item .t a:hover{text-decoration:underline}
+.item .meta{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:2px}
+.empty{padding:16px;color:var(--muted);font-size:14px}
+
+.summary{margin-top:18px;font-size:14px;color:var(--muted)}
+.summary b{color:var(--text);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:3px 11px;font-size:13.5px;color:var(--text)}
+.chip b{color:var(--accent);font-weight:600}
+.chip button{background:none;border:0;color:var(--faint);padding:0 0 0 4px;font-size:15px}
+
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
-.feed{height:360px;overflow:auto;font:13px/1.5 ui-monospace,Consolas,monospace;background:var(--field);border:1px solid var(--line);border-radius:12px;padding:10px}
-.ev{padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.04)}
-.ev .tm{color:var(--muted);margin-right:8px}
-.ev.ok{color:#4ade80}.ev.warn{color:#fca5a5}.ev.pick{color:var(--honey2);font-weight:700}.ev.checkout{color:#fff;font-weight:700}
+.controls label{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.tip{margin-top:16px;font-size:13.5px;color:var(--muted);background:var(--surface2);border-radius:10px;padding:12px 14px}
+.tip b{color:var(--text);font-weight:600}
+
+.feed{height:380px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--field);padding:6px 0}
+.ev{display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:start;padding:7px 14px;font-size:14px;color:var(--text)}
+.ev+.ev{border-top:1px solid var(--line)}
+.ev .tm{color:var(--faint);font-size:12.5px;font-variant-numeric:tabular-nums;padding-top:1px}
+.ev .k{width:8px;height:8px;border-radius:50%;margin-top:7px;background:var(--faint)}
+.ev.ok .k{background:var(--ok)} .ev.warn .k{background:var(--bad)} .ev.change .k{background:var(--info)}
+.ev.pick .k,.ev.checkout .k{background:var(--accent)}
+.ev.pick,.ev.checkout{font-weight:600}
 .ev a{color:var(--info)}
-#alert{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;place-items:center}
+.ev.empty-ev{color:var(--muted);display:block}
+
+#alert{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;place-items:center;padding:16px}
 #alert.show{display:grid}
-#alert .box{background:var(--card2);border:2px solid var(--honey);border-radius:20px;padding:28px;max-width:520px;width:calc(100% - 32px);text-align:center;animation:pulse 1s infinite alternate}
-@keyframes pulse{to{box-shadow:0 0 0 14px rgba(245,165,36,.0),0 0 60px rgba(245,165,36,.45)}}
-#alert h3{font:800 26px Outfit;margin:0 0 6px}
-#alert p{color:var(--muted);margin:0 0 18px}
-#alert a.go{display:block;font:800 20px Inter;color:#1a1204;background:linear-gradient(180deg,var(--honey2),var(--honey));padding:16px;border-radius:14px;text-decoration:none}
-#alert .later{margin-top:10px;background:none;color:var(--muted)}
-.tip{margin-top:12px;font-size:13px;color:var(--muted);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
-.tip b{color:var(--ink)}
+#alert .box{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:16px;padding:28px;max-width:500px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+#alert h3{font-size:22px;font-weight:600;margin:0 0 6px}
+#alert p{color:var(--muted);margin:0 0 20px}
+#alert a.go{display:block;font:600 18px Inter;color:var(--accent-ink);background:var(--accent);padding:14px;border-radius:12px;text-decoration:none}
+#alert .later{margin-top:10px;background:none;border:0;color:var(--muted)}
 </style>
+<script>
+  // Apply the saved theme before the page draws (no flash)
+  try { if (localStorage.getItem("dropTheme") === "light") document.documentElement.dataset.theme = "light"; } catch {}
+</script>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Mr Tofu <span>Drop Mode</span></h1>
-    <div class="pills">
-      <span class="pill" id="pLogin">Not logged in</span>
-      <span class="pill" id="pRun">Not watching</span>
-      <span class="pill" id="pCheck">Last check: –</span>
+    <div class="status">
+      <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
+      <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
+      <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
+      <button class="theme" id="themeBtn">☀️ Light</button>
     </div>
   </header>
 
   <div class="grid">
-    <div>
+    <div class="stack">
       <section class="card">
-        <h2><span class="n">1</span>Log in</h2>
+        <h2><span class="step">1</span>Load the shop</h2>
+        <p class="lead">Only enter the password if Mr Tofu's shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</p>
         <div class="row">
-          <input type="text" id="pw" placeholder="Shop password (leave blank if the shop isn't locked)" autocomplete="off">
-          <button id="loginBtn">Log in &amp; load shop</button>
+          <input type="text" id="pw" placeholder="Shop password (optional)" autocomplete="off">
+          <button class="primary" id="loginBtn">Load shop</button>
         </div>
-        <p class="hint">The password is only kept by the drop mode program while it's running. It's never saved.</p>
+        <div class="loginState" id="loginState">Not loaded yet.</div>
       </section>
 
-      <section class="card" style="margin-top:16px">
-        <h2><span class="n">2</span>What do you want to buy?</h2>
-        <p class="hint" style="margin-top:0">One row per product. Type keywords separated by commas; <b>every keyword must be in the product's name</b>. It catches restocks <i>and</i> brand-new listings.</p>
+      <section class="card">
+        <h2><span class="step">2</span>What do you want to buy?</h2>
+        <p class="lead">One row per product. Type keywords separated by commas: <b style="color:var(--text);font-weight:600">every keyword must be in the product's name</b>. Catches restocks and brand-new listings.</p>
         <div id="watches"></div>
-        <button class="ghost" id="addWatch" style="margin-top:10px">+ Add another product to watch</button>
+        <button class="secondary" id="addWatch" style="margin-top:12px">+ Add another product</button>
 
-        <details class="more" id="shopList">
+        <details class="more">
           <summary>Or tick items from the shop list</summary>
-          <div class="row" style="margin-top:10px">
+          <div class="row" style="margin-top:12px">
             <input type="text" id="filter" placeholder="Search, e.g. delta reign (blank = new releases from the last week)">
-            <button class="ghost" id="filterBtn">Search</button>
+            <button class="secondary" id="filterBtn">Search</button>
           </div>
-          <div class="list" id="list"><div class="empty">Log in first to load the shop.</div></div>
-          <p class="hint">Old sold-out stock is hidden. ❌ sold out items can still be picked in case they restock.</p>
+          <div class="list" id="list"><div class="empty">Load the shop first.</div></div>
+          <p class="hint">Old sold-out stock is hidden. Sold-out items can still be picked in case they restock.</p>
         </details>
 
         <div class="summary"><b>Watching for:</b> <span id="picks"></span></div>
       </section>
     </div>
 
-    <div>
+    <div class="stack">
       <section class="card">
-        <h2><span class="n">3</span>Watch</h2>
+        <h2><span class="step">3</span>Watch</h2>
         <div class="controls">
-          <label class="hint" style="margin:0">Check every
-            <select id="interval"><option value="2">2s</option><option value="3" selected>3s</option><option value="5">5s</option><option value="10">10s</option></select>
+          <label>Check every
+            <select id="interval"><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
           </label>
-          <button id="startBtn" disabled>Start watching</button>
-          <button class="stop" id="stopBtn" disabled>Stop</button>
         </div>
-        <div class="tip">So checkout opens on its own: <b>allow pop-ups for this page</b> (your browser shows a pop-up icon in the address bar the first time). Make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on mrtofu.store. You still press Pay.</div>
+        <div class="controls" style="margin-top:12px">
+          <button class="primary" id="startBtn" disabled>Start watching</button>
+          <button class="danger" id="stopBtn" disabled>Stop</button>
+        </div>
+        <div class="tip">For checkout to open on its own, <b>allow pop-ups for this page</b> the first time your browser asks. Make sure this browser is <b>signed in to Shop Pay</b>, and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</div>
       </section>
 
-      <section class="card" style="margin-top:16px">
-        <h2>Live feed</h2>
-        <div class="feed" id="feed"></div>
+      <section class="card">
+        <h2>Activity</h2>
+        <p class="lead" style="margin-bottom:12px">Everything drop mode sees, newest at the bottom.</p>
+        <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
       </section>
     </div>
   </div>
 </div>
 
 <div id="alert"><div class="box">
-  <h3>🎯 Your pick is live!</h3>
+  <h3>🎯 Your pick is live</h3>
   <p id="alertText"></p>
-  <a class="go" id="alertGo" target="_blank" rel="noopener">⚡ OPEN CHECKOUT</a>
+  <a class="go" id="alertGo" target="_blank" rel="noopener">Open checkout</a>
   <button class="later" id="alertClose">Close</button>
 </div></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const picks = new Map();   // product id -> {title, qty}  (ticked in the shop list)
-const watches = [{ text: "", qty: 1 }]; // keyword watches, one per product wanted
-let lastId = 0, audio = null, loggedIn = false, running = false, lastProducts = 0;
+const picks = new Map();                 // product id -> {title, qty}  (ticked in the shop list)
+const watches = [{ text: "", qty: 1 }];  // keyword watches, one per product wanted
+let lastId = 0, audio = null, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
+const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   return res.json();
 }
 
-// ---------- step 1 ----------
-$("loginBtn").onclick = async () => {
-  $("loginBtn").disabled = true; $("loginBtn").textContent = "Logging in…";
-  const r = await api("/api/login", { password: $("pw").value });
-  $("loginBtn").disabled = false; $("loginBtn").textContent = "Log in & load shop";
-  loggedIn = r.ok; lastProducts = r.products; $("startBtn").disabled = !r.ok;
-  loadList(); renderWatches();
+// ---------- theme ----------
+function themeLabel() { $("themeBtn").textContent = document.documentElement.dataset.theme === "light" ? "🌙 Dark" : "☀️ Light"; }
+$("themeBtn").onclick = () => {
+  const light = document.documentElement.dataset.theme !== "light";
+  if (light) document.documentElement.dataset.theme = "light"; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("dropTheme", light ? "light" : "dark"); } catch {}
+  themeLabel();
 };
+themeLabel();
 
-// ---------- step 2 ----------
+// ---------- step 1 ----------
+function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
+
+let loginSig = "";
+function renderLoginState() {
+  const sig = [shopState, loggedIn, passwordSaved].join("|");
+  if (sig === loginSig) return; // only redraw when something changed (keeps the button clickable)
+  loginSig = sig;
+  const el = $("loginState");
+  const msg = {
+    ok: ["good", "🔓 Behind the password: drop mode can see the locked shop."],
+    open: ["info", passwordSaved ? "Shop is open, so no password is needed. Yours is saved and will be used if it locks." : "Shop is open, so no password is needed."],
+    locked: ["warn", "🔒 The shop is locked. Enter the password to see behind the lock."],
+    bad: ["warn", "That password didn't work. Check it and try again."],
+  }[shopState] || ["", "Not loaded yet."];
+  el.className = "loginState" + (msg[0] ? " " + msg[0] : "");
+  el.innerHTML = `<span>${esc(msg[1])}</span>` + (loggedIn || passwordSaved ? '<button class="secondary" id="logoutBtn">Log out</button>' : "");
+  const lo = $("logoutBtn");
+  if (lo) lo.onclick = async () => { await api("/api/logout", {}); $("pw").value = ""; await poll(); loadList(); renderWatches(); };
+}
+
+$("loginBtn").onclick = async () => {
+  $("loginBtn").disabled = true; $("loginBtn").textContent = "Loading…";
+  const r = await api("/api/login", { password: $("pw").value });
+  $("loginBtn").disabled = false; $("loginBtn").textContent = "Load shop";
+  lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
+  await poll(); loadList(); renderWatches();
+};
+$("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
+
+// ---------- step 2: keyword watches ----------
+function renderWatches() {
+  $("watches").innerHTML = watches.map((w, i) => `
+    <div class="watch" data-i="${i}">
+      <div class="row">
+        <input type="text" class="kw" value="${esc(w.text)}" placeholder="Keywords, e.g. Delta Reign, Elite Trainer Box">
+        <span class="lbl">Qty</span><input type="number" class="qty" min="1" value="${w.qty}">
+        <button class="rm" title="Remove">×</button>
+      </div>
+      <div class="m"></div>
+    </div>`).join("");
+  $("watches").querySelectorAll(".watch").forEach((row) => {
+    const i = +row.dataset.i, kw = row.querySelector(".kw"), qty = row.querySelector(".qty");
+    let timer;
+    kw.oninput = () => { watches[i].text = kw.value; clearTimeout(timer); timer = setTimeout(() => { preview(row, kw.value); changed(); }, 350); };
+    qty.onchange = () => { watches[i].qty = Math.max(1, +qty.value || 1); qty.value = watches[i].qty; changed(); };
+    row.querySelector(".rm").onclick = () => { watches.splice(i, 1); if (!watches.length) watches.push({ text: "", qty: 1 }); renderWatches(); changed(); };
+    preview(row, watches[i].text);
+  });
+}
+
+// What each watch matches in the shop right now
+async function preview(row, text) {
+  const el = row.querySelector(".m");
+  if (!text.trim()) { el.innerHTML = ""; return; }
+  if (!lastProducts) { el.textContent = "Load the shop to see what this matches."; return; }
+  const r = await api("/api/match?k=" + encodeURIComponent(text));
+  el.innerHTML = r.total
+    ? `Matches now (${r.total}):` + r.items.map((it) => `<span class="hit">${badgeHtml[it.state]}${esc(it.title)}</span>`).join("") + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
+    : `<span class="none">No product matches yet. That's fine if it isn't listed yet; it'll be caught the moment it appears.</span>`;
+}
+$("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatches(); $("watches").lastElementChild.querySelector(".kw").focus(); };
+
+// ---------- step 2: shop list ----------
 async function loadList() {
   const r = await api("/api/products?filter=" + encodeURIComponent($("filter").value));
   const el = $("list");
   if (!r.items.length) { el.innerHTML = '<div class="empty">Nothing matched (old sold-out stock is hidden).</div>'; return; }
-  const badge = { buyable: '<span class="badge b-buyable">✅ buyable</span>', soldout: '<span class="badge b-soldout">❌ sold out</span>', soon: '<span class="badge b-soon">🔜 not on sale yet</span>' };
   el.innerHTML = r.items.map((it) => `
     <div class="item ${picks.has(it.id) ? "picked" : ""}" data-id="${it.id}">
       <input type="checkbox" ${picks.has(it.id) ? "checked" : ""} aria-label="Pick">
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <div class="meta">${badge[it.state]}${it.price ? "$" + esc(it.price) : ""}</div></div>
+        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div></div>
       <input type="number" min="1" value="${picks.has(it.id) ? picks.get(it.id).qty : 1}" title="Quantity">
     </div>`).join("");
   el.querySelectorAll(".item").forEach((row) => {
@@ -197,46 +322,9 @@ async function loadList() {
 $("filterBtn").onclick = loadList;
 $("filter").onkeydown = (e) => { if (e.key === "Enter") loadList(); };
 
-// ---------- keyword watches ----------
-const badgeHtml = { buyable: '<span class="badge b-buyable">✅ buyable</span>', soldout: '<span class="badge b-soldout">❌ sold out</span>', soon: '<span class="badge b-soon">🔜 not on sale yet</span>' };
-
-function renderWatches() {
-  $("watches").innerHTML = watches.map((w, i) => `
-    <div class="watch" data-i="${i}">
-      <div class="row">
-        <input type="text" class="kw" value="${esc(w.text)}" placeholder="Keywords, e.g. Delta Reign, Elite Trainer Box">
-        <span class="lbl">Qty</span><input type="number" class="qty" min="1" value="${w.qty}">
-        <button class="rm" title="Remove this product">×</button>
-      </div>
-      <div class="m"></div>
-    </div>`).join("");
-  $("watches").querySelectorAll(".watch").forEach((row) => {
-    const i = +row.dataset.i, kw = row.querySelector(".kw"), qty = row.querySelector(".qty");
-    let timer;
-    kw.oninput = () => { watches[i].text = kw.value; clearTimeout(timer); timer = setTimeout(() => { preview(row, kw.value); changed(); }, 350); };
-    qty.onchange = () => { watches[i].qty = Math.max(1, +qty.value || 1); qty.value = watches[i].qty; changed(); };
-    row.querySelector(".rm").onclick = () => { watches.splice(i, 1); if (!watches.length) watches.push({ text: "", qty: 1 }); renderWatches(); changed(); };
-    preview(row, w(i));
-  });
-  function w(i) { return watches[i].text; }
-}
-
-// Show what each watch matches in the shop right now
-async function preview(row, text) {
-  const el = row.querySelector(".m");
-  if (!text.trim()) { el.innerHTML = ""; return; }
-  if (!loggedIn && !lastProducts) { el.textContent = "Log in to see what this matches."; return; }
-  const r = await api("/api/match?k=" + encodeURIComponent(text));
-  el.innerHTML = r.total
-    ? `Matches now (${r.total}):` + r.items.map((it) => `<span class="hit">${badgeHtml[it.state]}${esc(it.title)}</span>`).join("") + (r.total > r.items.length ? `<span class="hit">…and ${r.total - r.items.length} more</span>` : "")
-    : `<span class="none">No product matches yet.</span> That's fine if it isn't listed yet: it'll be caught the moment it appears.`;
-}
-
-$("addWatch").onclick = () => { watches.push({ text: "", qty: 1 }); renderWatches(); $("watches").lastElementChild.querySelector(".kw").focus(); };
-
 function renderPicks() {
-  const parts = watches.filter((w) => w.text.trim()).map((w) => `<span class="chip">🔑 ${esc(w.text.trim())} <b>x${w.qty}</b></span>`)
-    .concat([...picks].map(([id, p]) => `<span class="chip">${esc(p.title.slice(0, 50))} <b>x${p.qty}</b><button data-id="${id}" title="Remove">×</button></span>`));
+  const parts = watches.filter((w) => w.text.trim()).map((w) => `<span class="chip">${esc(w.text.trim())} <b>×${w.qty}</b></span>`)
+    .concat([...picks].map(([id, p]) => `<span class="chip">${esc(p.title.slice(0, 50))} <b>×${p.qty}</b><button data-id="${id}" title="Remove">×</button></span>`));
   $("picks").innerHTML = parts.length ? `<span class="chips">${parts.join("")}</span>` : "nothing yet.";
   $("picks").querySelectorAll("button").forEach((b) => b.onclick = () => { picks.delete(b.dataset.id); loadList(); changed(); });
 }
@@ -255,6 +343,7 @@ $("startBtn").onclick = async () => {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   await sendPicks();
 };
+$("interval").onchange = () => { if (running) sendPicks(); };
 $("stopBtn").onclick = () => api("/api/stop", {});
 
 function beep() {
@@ -269,49 +358,50 @@ function beep() {
 
 function openCheckout(ev) {
   beep();
-  if (ev.openedByProgram) {                            // already opened in your default browser
-    $("alertText").textContent = ev.text.replace(/^⚡ Opening checkout: /, "") + " (already opened in your browser)";
-    $("alertGo").href = ev.url;
-    $("alert").classList.add("show");
-    return;
-  }
-  const win = window.open(ev.url, "_blank");          // works once pop-ups are allowed for this page
-  $("alertText").textContent = ev.text.replace(/^⚡ Opening checkout: /, "");
+  const what = ev.text.replace(/^⚡ Opening checkout: /, "");
   $("alertGo").href = ev.url;
-  $("alert").classList.toggle("show", !win);            // blocked? show the big button instead
+  if (ev.openedByProgram) { // already opened in your default browser
+    $("alertText").textContent = what + " (already opened in your browser)";
+    $("alert").classList.add("show");
+  } else {
+    const win = window.open(ev.url, "_blank");       // works once pop-ups are allowed for this page
+    $("alertText").textContent = what;
+    $("alert").classList.toggle("show", !win);        // blocked? show the button instead
+  }
   let n = 0; const orig = document.title;
-  const flash = setInterval(() => { document.title = n++ % 2 ? orig : "🎯 YOUR PICK IS LIVE"; if (n > 20) { clearInterval(flash); document.title = orig; } }, 600);
+  const flash = setInterval(() => { document.title = n++ % 2 ? orig : "🎯 Your pick is live"; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
   if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-    const note = new Notification("🎯 Your pick is live!", { body: ev.text });
+    const note = new Notification("🎯 Your pick is live", { body: what });
     note.onclick = () => { window.open(ev.url, "_blank"); note.close(); };
   }
 }
 $("alertClose").onclick = () => $("alert").classList.remove("show");
 $("alertGo").onclick = () => setTimeout(() => $("alert").classList.remove("show"), 200);
 
-// ---------- live feed ----------
+// ---------- activity feed + status ----------
 async function poll() {
   try {
     const r = await api("/api/events?since=" + lastId);
     for (const ev of r.events) {
+      if (!lastId) $("feed").innerHTML = "";
       lastId = ev.id;
       const line = document.createElement("div");
       line.className = "ev " + ev.kind;
-      line.innerHTML = `<span class="tm">${ev.t}</span>${esc(ev.text)}${ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener">open</a>` : ""}`;
+      line.innerHTML = `<span class="tm">${ev.t}</span><i class="k"></i><span>${esc(ev.text.replace(/^⚡ /, ""))}${ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener">open</a>` : ""}</span>`;
       $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
       if (ev.kind === "checkout" && Date.now() - pageStart > 3000) openCheckout(ev);
     }
-    running = r.running; loggedIn = r.loggedIn || loggedIn; lastProducts = r.products;
-    $("pLogin").textContent = r.loggedIn ? "🔓 Behind the password" : (r.products ? "Shop loaded" : "Not logged in");
-    $("pLogin").className = "pill" + (r.loggedIn || r.products ? " on" : "");
-    $("pRun").textContent = r.running ? `👀 Watching every ${r.interval}s` : "Not watching";
-    $("pRun").className = "pill" + (r.running ? " on" : "");
-    $("pCheck").textContent = "Last check: " + (r.lastCheck || "–");
-    $("startBtn").textContent = r.running ? "Update picks" : "Start watching";
+    running = r.running; lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn; passwordSaved = r.passwordSaved;
+    const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"] }[shopState];
+    setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"), shopText ? shopText[1] : "");
+    setChip("sRun", r.running ? `Watching every ${r.interval}s` : "Not watching", r.running ? "good" : "");
+    setChip("sCheck", "Last check " + (r.lastCheck || "–"), r.lastCheck ? "info" : "");
+    $("startBtn").textContent = r.running ? "Update" : "Start watching";
     $("startBtn").disabled = !r.products;
     $("stopBtn").disabled = !r.running;
+    renderLoginState();
   } catch {
-    $("pRun").textContent = "⚠ Drop mode program isn't running"; $("pRun").className = "pill warn";
+    setChip("sRun", "Drop mode program isn't running", "warn");
   }
 }
 const pageStart = Date.now();
