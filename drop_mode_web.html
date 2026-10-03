@@ -91,14 +91,30 @@ h1 span{color:var(--accent)}
   .player{flex:1;aspect-ratio:auto;max-height:none}
   .chat{flex:none;width:340px}
 }
-@media (max-width:1099px){
+@media (max-width:1099px){ /* phones and narrow windows: watching first, then set up, then the stream */
   .cols{grid-template-columns:1fr;grid-template-areas:none}
   .cols>header,.cols>.col{grid-area:auto}
+  .col-watch{order:1} .col-setup{order:2} .col-stream{order:3}
   .col-stream,.cols.both-folded .col-stream{position:static;height:auto}
   .player{max-height:none}
   .chat{flex:none;height:420px}
 }
 .stack{display:grid;gap:20px}
+#phoneModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:58;place-items:center;padding:16px}
+#phoneModal.show{display:grid}
+#phoneModal .box{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--c-watch);border-radius:16px;padding:24px;max-width:540px;width:100%;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+#phoneModal h3{font-size:19px;font-weight:600;margin:0 0 6px}
+#phoneModal h4{font-size:15px;font-weight:600;margin:22px 0 2px}
+#phoneModal .hint{margin:6px 0 0}
+.switchrow{display:flex;gap:10px;align-items:center;margin-top:12px;font-size:15px;cursor:pointer}
+.switchrow input{width:20px;height:20px;accent-color:var(--accent)}
+.qr{display:grid;place-items:center;width:max-content;margin:14px auto 4px;padding:10px;background:#fff;border-radius:12px}
+.qr img{display:block;width:210px;height:210px;image-rendering:pixelated}
+.linkrow{display:flex;gap:8px;align-items:center;margin-top:10px}
+.linkrow code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;background:var(--field);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.saved{font-size:13.5px;color:var(--muted);margin-top:8px}
+.saved b{color:var(--ok);font-weight:600}
+.loadstream{position:absolute;inset:0;margin:auto;width:max-content;height:max-content;background:var(--c-stream);color:var(--tab-ink);border:0}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
 .card h2{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:0 0 4px}
 .step{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:600}
@@ -284,6 +300,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
           <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
         </div>
       </div>
+      <button class="theme" id="phoneBtn" title="Use drop mode from your phone">📱 Phone</button>
       <button class="theme" id="themeBtn">☀️ Light</button>
     </div>
   </header>
@@ -369,6 +386,38 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
  </div>
 </div>
 
+<div id="phoneModal"><div class="box" role="dialog" aria-labelledby="phoneTitle">
+  <h3 id="phoneTitle">📱 Drop mode on your phone</h3>
+  <p class="hint" style="margin-top:0">For when you're not at the PC. Drop mode keeps doing the checking here, so leave the PC on with drop mode running.</p>
+  <div id="phoneLocal">
+    <h4>Open drop mode on your phone</h4>
+    <label class="switchrow"><input type="checkbox" id="phoneOn"> Let my phone open drop mode</label>
+    <p class="hint" id="phoneErr" style="color:var(--bad)"></p>
+    <div id="phoneLink" hidden>
+      <div class="qr" id="phoneQr"></div>
+      <p class="hint">Scan it with your phone's camera. The phone has to be on the <b>same Wi-Fi</b> as this PC (VPN off). The first time, Windows asks whether Python can use the network: tick <b>Private networks</b> and press <b>Allow</b>. The link has a secret key in it, so only you can use it.</p>
+      <div class="linkrow"><code id="phoneUrl"></code><button class="secondary" id="phoneCopy">Copy</button></div>
+      <p class="hint" id="phoneOther"></p>
+      <button class="linkish" id="phoneNewKey">Make a new link (the old one stops working)</button>
+    </div>
+  </div>
+  <p class="hint" id="phoneRemoteNote" hidden>You're using drop mode from your phone. Keep this page open with the screen on and the checkout button pops up here (with a sound). For when your phone's locked, set up notifications below.</p>
+  <h4>Notifications on your phone</h4>
+  <p class="hint">The moment a pick goes live (or the shop locks), get a notification with the checkout link, even with your phone locked or when you're out. Paste a <b>Discord webhook</b> link, or an <b>ntfy</b> link if you use the free ntfy app.</p>
+  <div class="row" style="margin-top:10px">
+    <input type="password" id="notifyUrl" placeholder="https://discord.com/api/webhooks/… or https://ntfy.sh/your-topic" autocomplete="off">
+    <button class="primary" id="notifySave">Save</button>
+  </div>
+  <div class="saved" id="notifySaved"></div>
+  <label class="hint" id="mentionRow" style="display:flex;gap:8px;align-items:center">Ping this Discord ID <input type="text" id="notifyMention" style="flex:1;min-width:0" inputmode="numeric"></label>
+  <div class="row" style="margin-top:12px">
+    <button class="secondary" id="notifyTest">Send a test</button>
+    <button class="linkish" id="notifyRemove">Remove</button>
+    <span class="hint" id="notifyMsg" style="margin:0"></span>
+  </div>
+  <div style="text-align:right;margin-top:14px"><button class="secondary" id="phoneClose">Close</button></div>
+</div></div>
+
 <div id="lockAlert"><div class="box">
   <h3>🔒 Mr Tofu just locked the shop</h3>
   <p>That usually means a drop is coming. Enter the shop password to keep watching behind the lock. Drop mode keeps checking in the meantime.</p>
@@ -390,10 +439,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-// The watchlist: products picked from the search, and "anything matching" searches.
+// The watchlist: products picked from the search, and keyword watches.
 // [{kind: "product", id, title, image, qty} | {kind: "words", text, qty}]
-let watchlist = [];
-try { watchlist = JSON.parse(localStorage.getItem("dropWatchlist") || "[]"); } catch {}
+// It's kept in drop mode (not this browser), so the PC and your phone share it.
+let watchlist = [], wlVersion = 0;
 let info = { picks: {}, words: {} }; // how each entry stands in the shop right now
 let lastId = 0, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
 let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
@@ -479,11 +528,115 @@ function chatSrc() {
   return `https://www.twitch.tv/embed/${CHANNEL}/chat?parent=${location.hostname}`
     + (document.documentElement.dataset.theme === "light" ? "" : "&darkpopout");
 }
+// Is this page open on a phone (through the phone link)?
+const REMOTE = !!window.DROP_REMOTE;
+let streamWanted = !REMOTE; // on a phone the stream waits for a tap (it uses a lot of data)
 function streamOn() {
+  if (!streamWanted) {
+    $("player").innerHTML = '<button class="loadstream" id="loadStream">▶ Watch the stream and chat here</button>';
+    $("loadStream").onclick = () => { streamWanted = true; $("player").innerHTML = ""; streamOn(); };
+    return;
+  }
   if (!$("player").firstChild) $("player").innerHTML = `<iframe src="https://player.twitch.tv/?channel=${CHANNEL}&parent=${location.hostname}&muted=false&autoplay=true" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Mr Tofu's live stream"></iframe>`;
   if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
 }
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
+
+// ---------- 📱 phone: the phone link and notifications ----------
+let qrLib;
+function loadQrLib() {
+  return qrLib = qrLib || new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js";
+    s.onload = () => ok(window.qrcode);
+    s.onerror = fail;
+    document.head.appendChild(s);
+  });
+}
+async function drawQr(text) {
+  try {
+    const qr = (await loadQrLib())(0, "M");
+    qr.addData(text);
+    qr.make();
+    $("phoneQr").innerHTML = `<img alt="QR code for the phone link" src="${qr.createDataURL(6, 2)}">`;
+  } catch {
+    $("phoneQr").innerHTML = '<span class="hint" style="color:#333">Type the link below into your phone instead.</span>';
+  }
+}
+async function loadPhone() {
+  const r = await api("/api/phone");
+  $("phoneLocal").hidden = r.remote;
+  $("phoneRemoteNote").hidden = !r.remote;
+  if (!r.remote) {
+    $("phoneOn").checked = r.enabled;
+    $("phoneErr").textContent = r.error || "";
+    $("phoneLink").hidden = !(r.enabled && r.running);
+    const main = r.links[0];
+    if (main) {
+      $("phoneUrl").textContent = main.url;
+      drawQr(main.url);
+    } else {
+      $("phoneUrl").textContent = "Couldn't find this PC's Wi-Fi address.";
+      $("phoneQr").innerHTML = "";
+    }
+    $("phoneOther").innerHTML = r.links.slice(1).map((l) => `${esc(l.label)}: <code>${esc(l.url)}</code>`).join("<br>");
+  }
+  $("notifySaved").innerHTML = r.notifyKind
+    ? `<b>✓ Saved</b>: ${r.notifyKind === "discord" ? "Discord webhook" : "ntfy link"} ending ${esc(r.notifyHint)}`
+    : "Not set up yet.";
+  $("notifyMention").value = r.mention || "";
+  $("mentionRow").hidden = r.notifyKind === "ntfy";
+  $("notifyTest").disabled = !r.notifyKind;
+  $("notifyRemove").hidden = !r.notifyKind;
+}
+$("phoneBtn").onclick = () => { $("notifyMsg").textContent = ""; $("phoneModal").classList.add("show"); loadPhone(); };
+$("phoneClose").onclick = () => $("phoneModal").classList.remove("show");
+$("phoneOn").onchange = async () => { await api("/api/phone", { enabled: $("phoneOn").checked }); loadPhone(); };
+$("phoneNewKey").onclick = async () => {
+  if (!confirm("Make a new phone link? Phones using the old one will need to scan the new QR code.")) return;
+  await api("/api/phone", { newKey: true });
+  loadPhone();
+};
+$("phoneCopy").onclick = () => { try { navigator.clipboard.writeText($("phoneUrl").textContent); $("phoneCopy").textContent = "Copied"; } catch {} };
+$("notifySave").onclick = async () => {
+  const url = $("notifyUrl").value.trim();
+  if (!url) { $("notifyMsg").textContent = "Paste the link first."; return; }
+  const r = await api("/api/phone", { notify: url, mention: $("notifyMention").value });
+  if (r.error) { $("notifyMsg").textContent = r.error; return; }
+  $("notifyUrl").value = "";
+  $("notifyMsg").textContent = "Saved. Press Send a test to check it.";
+  loadPhone();
+};
+$("notifyMention").onchange = () => api("/api/phone", { mention: $("notifyMention").value });
+$("notifyRemove").onclick = async () => { await api("/api/phone", { notify: "" }); $("notifyMsg").textContent = ""; loadPhone(); };
+$("notifyTest").onclick = async () => {
+  $("notifyMsg").textContent = "Sending…";
+  const r = await api("/api/phone/test", {});
+  $("notifyMsg").textContent = r.ok ? "Sent! Check your phone." : `That didn't work (${r.message}). Check the link.`;
+};
+
+// On a phone, the page plays the alert itself (the PC's speakers are no use
+// there) and vibrates. Phones only allow sound after a tap, so get it ready
+// on the first one.
+let phoneAudio = null, phoneSound = null;
+async function readyPhoneSound() {
+  try {
+    phoneAudio = phoneAudio || new (window.AudioContext || window.webkitAudioContext)();
+    await phoneAudio.resume();
+    phoneSound = await phoneAudio.decodeAudioData(await (await fetch("/alert.wav")).arrayBuffer());
+  } catch {}
+}
+if (REMOTE) document.addEventListener("pointerdown", readyPhoneSound, { once: true });
+function phoneAlert() {
+  if (!REMOTE) return;
+  try { if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 800]); } catch {}
+  if (phoneAudio && phoneSound) {
+    const src = phoneAudio.createBufferSource();
+    src.buffer = phoneSound;
+    src.connect(phoneAudio.destination);
+    src.start();
+  }
+}
 
 // ---------- small pop-up menus (🔔 alert sound, chat help) ----------
 // Open on click; close on a click anywhere else, or Esc.
@@ -792,10 +945,25 @@ function watchlistBody() {
   };
 }
 // Saved in this browser, and handed to the program straight away if it's watching
+// Save it in drop mode (which watches for the new list straight away if it's watching)
 function watchlistChanged(redraw = true) {
-  try { localStorage.setItem("dropWatchlist", JSON.stringify(watchlist)); } catch {}
+  api("/api/watchlist", { items: watchlist }).then((r) => { if (r && r.version) wlVersion = r.version; }).catch(() => {});
   if (redraw) { refreshInfo(); search(); renderKwActs(); }
-  if (running) api("/api/start", watchlistBody());
+}
+async function loadWatchlist() {
+  const r = await api("/api/watchlist");
+  let items = r.items, version = r.version;
+  // First run with the shared list: bring over the one this browser had saved
+  try {
+    const old = JSON.parse(localStorage.getItem("dropWatchlist") || "[]");
+    if (!items.length && old.length && !localStorage.getItem("dropWatchlistMoved")) {
+      const saved = await api("/api/watchlist", { items: old });
+      items = saved.items; version = saved.version;
+    }
+    localStorage.setItem("dropWatchlistMoved", "1");
+  } catch {}
+  watchlist = items; wlVersion = version;
+  refreshInfo(); search(); renderKwActs();
 }
 $("startBtn").onclick = async () => {
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
@@ -829,6 +997,7 @@ async function loadSound() {
 $("sound").onchange = async () => {
   await api("/api/sound", { sound: $("sound").value, play: true }); // play it so you hear what you picked
   loadSound();
+  if (REMOTE && phoneAudio) readyPhoneSound();
 };
 $("volume").oninput = () => { $("volVal").textContent = $("volume").value + "%"; };
 $("volume").onchange = async () => { await api("/api/sound", { volume: +$("volume").value, play: true }); loadSound(); };
@@ -876,6 +1045,7 @@ async function toWav(bytes) {
 }
 
 function openCheckout(ev) {
+  phoneAlert();
   const what = ev.text.replace(/^⚡ Opening checkout: /, "");
   $("alertGo").href = ev.url;
   if (ev.openedByProgram) { // already opened in your default browser
@@ -895,6 +1065,7 @@ function openCheckout(ev) {
 }
 // ---------- the shop got locked while watching ----------
 function showLockAlert() {
+  phoneAlert();
   $("lockErr").textContent = "";
   $("lockPw").value = $("pw").value;
   $("lockAlert").classList.add("show");
@@ -959,6 +1130,7 @@ async function poll() {
     $("startBtn").disabled = !r.products || r.running;
     $("stopBtn").disabled = !r.running;
     if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); } // the program already had the shop loaded
+    if (r.wlVersion && wlVersion && r.wlVersion !== wlVersion) { wlVersion = r.wlVersion; loadWatchlist(); } // changed on another device
     renderLoginState();
   } catch {
     setChip("sRun", "Drop mode program isn't running", "warn");
@@ -966,7 +1138,7 @@ async function poll() {
 }
 const pageStart = Date.now();
 let hadProducts = false;
-layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
+layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadWatchlist().catch(() => {}); loadSound().catch(() => {}); poll(); setInterval(poll, 1000);
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
 </script>
 </body>
