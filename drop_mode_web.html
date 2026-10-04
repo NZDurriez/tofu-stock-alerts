@@ -228,7 +228,9 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 .thumb{width:52px;height:52px;flex:none;border-radius:10px;object-fit:contain;background:#fff;border:1px solid var(--line)}
 .thumb.none{display:grid;place-items:center;background:var(--surface2);color:var(--faint);font-size:20px}
 .thumbwrap{position:relative;flex:none;line-height:0}
-.thumbwrap .kwmark{position:absolute;right:-5px;bottom:-5px;width:20px;height:20px;display:grid;place-items:center;font-size:11px;line-height:1;background:var(--surface);border:1px solid var(--line);border-radius:50%}
+.thumbwrap .kwmark{position:absolute;right:-5px;bottom:-5px;width:20px;height:20px;display:grid;place-items:center;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.thumbwrap .kwmark svg{width:11px;height:11px;display:block}
+.thumb.none svg{width:22px;height:22px;display:block}
 input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 14px 13px 40px;outline:none;transition:border-color .15s;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='m13 13 4 4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:14px center}
 input[type=search]:focus{border-color:var(--accent)}
@@ -323,7 +325,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
 .controls label{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:8px}
 /* ⓘ help: a small round "i" that shows its explanation on hover, tap or keyboard focus */
-.tipicon{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:auto;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;font-style:italic;cursor:help;vertical-align:middle;outline:none}
+.tipicon{position:relative;flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:auto;border-radius:50%;border:1.5px solid var(--faint);color:var(--muted);font:700 11px/1 Inter,sans-serif;cursor:help;vertical-align:middle;outline:none}
 .tipicon:hover,.tipicon:focus-visible{border-color:var(--accent);color:var(--accent)}
 .tiptext{display:none;position:absolute;top:calc(100% + 8px);right:-8px;z-index:60;width:max-content;max-width:min(320px,80vw);padding:10px 12px;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font:400 13px/1.5 Inter,sans-serif;font-style:normal;text-align:left;text-transform:none;letter-spacing:normal;white-space:normal}
 .tiptext b{font-weight:600}
@@ -1170,9 +1172,10 @@ function kwTagsHtml(text) {
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
 // (or, when nothing matches yet, a listing its minus words leave out, e.g. the 30th bundle with tins)
+const MAGNIFIER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.3"/><path d="m10.2 10.2 3.6 3.6"/></svg>';
 function keywordThumb(w) {
   const m = info.words[w.text], pic = m && ([...m.items, ...m.unavailable].find((it) => it.image) || (m.similar && m.similar.image ? m.similar : null));
-  return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch">🔎</span></span>` : '<span class="thumb none">🔎</span>';
+  return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch: the picture is a product it matches">${MAGNIFIER}</span></span>` : `<span class="thumb none" title="Keyword watch">${MAGNIFIER}</span>`;
 }
 let wlRedrawLater = false; // (don't redraw while you're typing a max price)
 let wlHtml = "";           // (nor when nothing changed, so a details box you're reading doesn't flicker)
