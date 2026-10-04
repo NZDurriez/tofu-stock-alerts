@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 import traceback
@@ -40,6 +41,10 @@ def price_cap(value):
 
 WATCHLIST_FILE = os.path.join(dm.SOUND_DIR, "watchlist.json")  # Mr Tofu's watchlist (kept here, not in the browser)
 STORES_FILE = os.path.join(dm.SOUND_DIR, "stores.json")        # other shops you've added as tabs
+DISCORD_FILE = os.path.join(dm.SOUND_DIR, "discord.json")      # your Discord ping (the webhook link stays on this PC)
+WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+(?:\?[\w=&-]*)?$")
+if os.environ.get("DROP_DISCORD_TEST") == "1":  # tests only: a pretend Discord on this PC
+    WEBHOOK = re.compile(r"^http://127\.0\.0\.1:\d+/api/webhooks/\d+/[\w-]+$")
 # The page's background picture (yours, kept in the settings folder, not the code)
 BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
 
@@ -299,6 +304,14 @@ class Watcher:
         if by_program:
             webbrowser.open(url)
         play_alert()
+        if DISCORD.webhook and DISCORD.on_checkout:
+            lines, picture = [], None
+            for vid, q, t in items:
+                it = next((p for p in self.products.values() if vid in p["variants"]), None)
+                price = it["variants"][vid][2] if it else None
+                lines.append(f"x{q} {t[:120]}" + (f" · ${price}" if price else ""))
+                picture = picture or (it or {}).get("image")
+            DISCORD.send(DISCORD.checkout_message(self.name, url, lines, picture), self.log)
 
     def target(self, pid, it, wanted=None, words=None):
         """(how many, max price) if this product is on the watchlist, else None."""
@@ -501,8 +514,9 @@ class Watcher:
                 self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
             current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
             self.etag = etag or None
-            self.checkout(self.went_live(self.products, current))
+            ready = self.went_live(self.products, current)
             self.products = current
+            self.checkout(ready)
             return 0.0  # carry on, comparing against this new version
         if code == 401:
             if self.password and dm.login(self.password, self.site):
@@ -517,6 +531,8 @@ class Watcher:
                 # Ask the page to pop up a password box (and sound the alert here)
                 self.log("lock", f"🔒 {self.name} just locked the shop. Enter the password to keep watching.", None, alert="lock")
                 play_alert()
+                if DISCORD.webhook and DISCORD.on_lock:
+                    DISCORD.send(DISCORD.lock_message(self.name), self.log)
             self.logged_in = False
             if self.shop_state != "bad":  # keep showing "wrong password" until a new try
                 self.shop_state = "locked"
@@ -535,6 +551,111 @@ class Watcher:
             self.trouble = problem
             self.log("warn", f"Checks failing: {problem}. Still trying.")
         return None if code == 0 else (10.0 if code == 403 else 2.0)
+
+
+def my_discord_id():
+    """Your Discord user ID from the stock-alert bot's settings (so a ping @mentions you)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "worker", "wrangler.toml"), encoding="utf-8") as f:
+            m = re.search(r'DISCORD_OWNER_ID\s*=\s*"(\d+)"', f.read())
+        return m.group(1) if m else ""
+    except OSError:
+        return ""
+
+
+class Discord:
+    """Pings you on Discord (through a channel's webhook) when checkout opens,
+    and if you like when a shop locks. The webhook link is a secret (anyone
+    with it can post there), so it's kept in the settings folder and the page
+    only ever gets told whether one is set."""
+
+    def __init__(self):
+        try:
+            with open(DISCORD_FILE, encoding="utf-8") as f:
+                saved = json.load(f)
+        except (OSError, ValueError):
+            saved = {}
+        hook = str(saved.get("webhook") or "")
+        self.webhook = hook if WEBHOOK.match(hook) else ""
+        self.user = re.sub(r"\D", "", str(saved.get("user", my_discord_id())))
+        self.on_checkout = bool(saved.get("checkout", True))
+        self.on_lock = bool(saved.get("lock", False))
+        self.failing = False  # (say so once, not on every ping)
+
+    def info(self):
+        start, _, rest = self.webhook.partition("/api/webhooks/")
+        return {"set": bool(self.webhook), "hint": f"{start}/api/webhooks/{rest.split('/')[0][:6]}…" if self.webhook else "",  # (never the secret part)
+                "user": self.user, "botUser": my_discord_id(), "checkout": self.on_checkout, "lock": self.on_lock}
+
+    def save(self, data):
+        """Returns an error message, or None when saved."""
+        hook = str(data.get("webhook") or "").strip()
+        if data.get("remove"):
+            self.webhook = ""
+        elif hook:
+            if not WEBHOOK.match(hook):
+                return ("That isn't a Discord webhook link. In Discord: the channel's ⚙ settings → Integrations → "
+                        "Webhooks → New Webhook → Copy Webhook URL.")
+            self.webhook = hook
+        self.user = re.sub(r"\D", "", str(data.get("user", self.user)))[:25]
+        self.on_checkout = bool(data.get("checkout", self.on_checkout))
+        self.on_lock = bool(data.get("lock", self.on_lock))
+        self.failing = False
+        os.makedirs(dm.SOUND_DIR, exist_ok=True)
+        with open(DISCORD_FILE, "w", encoding="utf-8") as f:
+            json.dump({"webhook": self.webhook, "user": self.user, "checkout": self.on_checkout, "lock": self.on_lock}, f)
+        return None
+
+    def _message(self, text, embed=None):
+        ping = f"<@{self.user}> " if self.user else ""
+        # parse: [] so a product called "@everyone" can't ping the whole server; only you get mentioned
+        msg = {"content": ping + text, "allowed_mentions": {"parse": [], "users": [self.user] if self.user else []}}
+        if embed:
+            msg["embeds"] = [embed]
+        return msg
+
+    def checkout_message(self, shop, url, lines, picture=None):
+        embed = {"title": (lines[0] if len(lines) == 1 else f"{len(lines)} items")[:256], "url": url, "color": 0xD9A24B,
+                 "description": ("\n".join(lines[:15]) + "\n\n" if len(lines) > 1 else "")
+                 + "It's open in your browser on the PC. Or tap the title to check out on this device."}
+        if picture:
+            embed["thumbnail"] = {"url": picture + ("&" if "?" in picture else "?") + "width=300"}
+        return self._message(f"⚡ Drop mode opened checkout at {shop}", embed)
+
+    def lock_message(self, shop):
+        return self._message(f"🔒 {shop} just locked the shop. Enter the password in drop mode to keep watching.")
+
+    def test_message(self):
+        return self._message("🔔 Drop mode test: checkout pings will show up here.")
+
+    def post(self, msg):
+        """Send it now. Returns (worked, what went wrong). Never repeats the link (it's a secret)."""
+        if not self.webhook:
+            return False, "no webhook set"
+        try:
+            res = subprocess.run(["curl", "-sS", "--max-time", "10", "-X", "POST", "-H", "Content-Type: application/json",
+                                  "--data-binary", "@-", "-o", os.devnull, "-w", "%{http_code}", self.webhook],
+                                 input=json.dumps(msg).encode(), capture_output=True)
+        except Exception as exc:
+            return False, type(exc).__name__
+        code = res.stdout.decode(errors="replace").strip()
+        if res.returncode == 0 and code.startswith("2"):
+            return True, ""
+        return False, f"reply {code}" if res.returncode == 0 else "couldn't reach Discord"
+
+    def send(self, msg, log):
+        """Send it in the background (so the watching carries straight on)."""
+        def go():
+            ok, why = self.post(msg)
+            if ok:
+                self.failing = False
+            elif not self.failing:
+                self.failing = True
+                log("warn", f"Couldn't ping Discord ({why}). Check the webhook in ⚙ Settings.")
+        threading.Thread(target=go, daemon=True).start()
+
+
+DISCORD = Discord()
 
 
 def play_alert():
@@ -797,6 +918,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"items": W.watchlist, "version": W.wl_version})
         elif path == "/api/stores":
             self.send_json({"stores": store_list()})
+        elif path == "/api/discord":
+            self.send_json(DISCORD.info())
         else:
             self.send_json({"error": "not found"}, 404)
 
@@ -868,6 +991,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/sound/test":
             play_alert()
             self.send_json({"ok": True})
+        elif path == "/api/discord":  # your Discord ping settings
+            error = DISCORD.save(data)
+            if error:
+                self.send_json({"error": error}, 400)
+                return
+            self.send_json(DISCORD.info())
+        elif path == "/api/discord/test":
+            ok, why = DISCORD.post(DISCORD.test_message())
+            self.send_json({"ok": ok, "message": why})
         elif path == "/api/stores/add":  # another Shopify shop as its own tab
             w, error = add_store(data.get("link", ""), data.get("name", ""))
             if error:

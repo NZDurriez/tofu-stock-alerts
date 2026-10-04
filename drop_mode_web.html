@@ -66,6 +66,9 @@ h1 span{color:var(--accent)}
 .setrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .themeset button{min-width:86px}
 .setpop .bgprev{height:90px}
+.secret{-webkit-text-security:disc} /* (the webhook link is a secret: shown as dots, without password-manager prompts) */
+.setpop .checkline{margin:8px 0 0}
+.setpop input.dcuser{width:190px;flex:none;min-width:0;padding:6px 10px;font-size:14px}
 /* Shop tabs: Mr Tofu's shop, plus any other Shopify shops added with ＋. Each has
    its own watchlist and activity, and they all keep watching in the background. */
 .stores{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%}
@@ -352,7 +355,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
       <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
       <div class="popwrap">
-        <button class="theme cogbtn" id="setBtn" data-pop="setPop" aria-expanded="false" aria-haspopup="true" title="Alert sound, theme and background"><svg class="cog" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="7.6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3 2.969" transform="rotate(-11.3 12 12)"/></svg>Settings</button>
+        <button class="theme cogbtn" id="setBtn" data-pop="setPop" aria-expanded="false" aria-haspopup="true" title="Alert sound, Discord ping, theme and background"><svg class="cog" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="7.6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3 2.969" transform="rotate(-11.3 12 12)"/></svg>Settings</button>
         <div class="pop setpop" id="setPop" hidden>
           <section class="set">
             <div class="pop-title">🔔 Alert sound</div>
@@ -367,6 +370,28 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             </div>
             <p class="hint" id="soundMsg" style="margin:6px 0 0"></p>
             <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
+          </section>
+          <section class="set">
+            <div class="pop-title">💬 Discord ping</div>
+            <p class="lead">Drop mode posts in a Discord channel when it opens checkout, with the checkout link, so your phone buzzes too.</p>
+            <p class="hint" id="dcState" style="margin:0 0 8px"></p>
+            <div class="row">
+              <input type="text" id="dcHook" class="secret" placeholder="Paste the channel's webhook link" autocomplete="off" spellcheck="false">
+              <button class="secondary" id="dcSave">Save</button>
+            </div>
+            <p class="hint" style="margin:6px 0 0">In Discord: the channel's ⚙ settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. A channel just for you is best. The link stays on this PC.</p>
+            <label class="checkline"><input type="checkbox" id="dcCheckout"><span>When checkout opens</span></label>
+            <label class="checkline"><input type="checkbox" id="dcLock"><span>When a shop locks</span></label>
+            <div class="row" style="margin-top:10px;gap:8px">
+              <span class="hint" style="margin:0">@mention Discord ID</span>
+              <input type="text" id="dcUser" class="dcuser" inputmode="numeric" placeholder="no @mention" autocomplete="off">
+            </div>
+            <p class="hint" id="dcWho" style="margin:4px 0 0"></p>
+            <div class="row" style="margin-top:10px">
+              <button class="secondary" id="dcTest">Send a test</button>
+              <button class="linkish" id="dcRemove" hidden>Remove the webhook</button>
+            </div>
+            <p class="hint" id="dcMsg" style="margin:6px 0 0"></p>
           </section>
           <section class="set setrow">
             <div class="pop-title">Theme</div>
@@ -519,7 +544,7 @@ const cur = () => stores.find((s) => s.id === STORE) || stores[0];
 const storeOf = (sid) => stores.find((s) => s.id === sid) || cur();
 
 // Most requests are about one shop (?store=...); the sound, the background and the list of shops are shared
-const SHARED = /^\/api\/(sound|background|stores)\b/;
+const SHARED = /^\/api\/(sound|background|stores|discord)\b/;
 async function api(path, body, headers = {}, store = STORE) {
   if (!SHARED.test(path)) path += (path.includes("?") ? "&" : "?") + "store=" + encodeURIComponent(store);
   const res = await fetch(path, body
@@ -1153,6 +1178,35 @@ $("panelA").oninput = () => {
   try { localStorage.setItem("dropSeeThrough", see); } catch {}
 };
 
+// ---------- Discord ping (in ⚙ Settings) ----------
+// The webhook link is a secret, so drop mode only says whether one is set.
+async function loadDiscord() {
+  const r = await api("/api/discord");
+  $("dcState").textContent = r.set ? `✅ Set up (${r.hint})` : "Not set up yet.";
+  $("dcHook").value = "";
+  $("dcHook").placeholder = r.set ? "Paste a new link to replace it" : "Paste the channel's webhook link";
+  $("dcRemove").hidden = !r.set;
+  $("dcTest").disabled = !r.set;
+  $("dcCheckout").checked = r.checkout; $("dcLock").checked = r.lock;
+  if (document.activeElement !== $("dcUser")) $("dcUser").value = r.user || "";
+  $("dcWho").textContent = r.user ? (r.user === r.botUser ? "That's you, from your stock-alert bot's settings, so the ping @mentions you." : "The ping @mentions this Discord user.") : "No @mention: it just posts in the channel.";
+}
+async function saveDiscord(extra = {}) {
+  const hook = $("dcHook").value.trim();
+  const r = await api("/api/discord", { webhook: hook, user: $("dcUser").value.trim(), checkout: $("dcCheckout").checked, lock: $("dcLock").checked, ...extra });
+  $("dcMsg").textContent = r.error || (extra.remove ? "Removed." : hook ? "Saved. Press Send a test to check it." : "");
+  if (!r.error) loadDiscord();
+}
+$("dcSave").onclick = () => saveDiscord();
+$("dcHook").onkeydown = (e) => { if (e.key === "Enter") saveDiscord(); };
+$("dcCheckout").onchange = $("dcLock").onchange = $("dcUser").onchange = () => saveDiscord();
+$("dcRemove").onclick = () => { if (confirm("Remove the Discord webhook? Drop mode stops pinging you.")) saveDiscord({ remove: true }); };
+$("dcTest").onclick = async () => {
+  $("dcMsg").textContent = "Sending…";
+  const r = await api("/api/discord/test", {});
+  $("dcMsg").textContent = r.ok ? "Sent! Check Discord." : `Couldn't send (${r.message}). Check the webhook link.`;
+};
+
 // ---------- alert sound ----------
 // Drop mode plays it on this PC the moment something happens, so it works
 // even while this page is in the background. This just picks it.
@@ -1422,7 +1476,7 @@ const poll = () => pollStore(STORE);
 function pollAll() { for (const s of stores) if (!busy[s.id]) pollStore(s.id); }
 
 let hadProducts = false;
-layoutCols(); streamOn(); renderKwActs(); loadSound().catch(() => {}); loadBackground().catch(() => {});
+layoutCols(); streamOn(); renderKwActs(); loadSound().catch(() => {}); loadBackground().catch(() => {}); loadDiscord().catch(() => {});
 loadStores().then(() => {
   if (!stores.some((s) => s.id === STORE)) STORE = "tofu";
   applyStore(); renderWatchlist(); loadWatchlist().catch(() => {});
