@@ -1,5 +1,5 @@
 @echo off
-title Mr Tofu Drop Mode - close this window to stop
+title Drop Mode - close this window to stop
 chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 rem Runs from wherever this folder is, so the folder can be moved anywhere.

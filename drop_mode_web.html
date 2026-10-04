@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tofu Drop Mode</title>
+<title>Drop Mode</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -37,7 +37,8 @@ html.has-bg[data-theme="light"]{--surface:rgba(255,255,255,var(--panel-a)); --su
 html.has-bg body{background:linear-gradient(rgba(12,13,16,.28),rgba(12,13,16,.28)),var(--bg-url) center/cover no-repeat fixed,var(--bg)}
 html.has-bg[data-theme="light"] body{background:linear-gradient(rgba(255,255,255,.18),rgba(255,255,255,.18)),var(--bg-url) center/cover no-repeat fixed,var(--bg)}
 html.has-bg .card,html.has-bg .chip-s,html.has-bg .theme,html.has-bg .chat{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
-html.has-bg .cols>header,html.has-bg .col-head{background:var(--surface);border-radius:12px;padding:6px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+html.has-bg .col-head{background:var(--surface);border-radius:12px;padding:6px 12px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+html.has-bg .appbar{backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 html.has-bg .pop,html.has-bg #alert .box,html.has-bg #lockAlert .box,html.has-bg .selbar{background:var(--solid)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -49,9 +50,14 @@ html{color-scheme:dark}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{padding:16px 20px 40px}
 
-header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
-h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-.01em}
+/* The top bar: Drop Mode, the shop tabs, then how the shop on show is doing */
+.appbar{display:flex;align-items:center;gap:10px 18px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:9px 12px 9px 14px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:9px;flex:none}
+.brand .logo{width:28px;height:28px;display:block}
+h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.015em;white-space:nowrap}
 h1 span{color:var(--accent)}
+.appbar .stores{flex:1 1 auto;width:auto;padding-left:16px;border-left:1px solid var(--line)}
+.appbar .status{margin-left:auto}
 .status{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .chip-s{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
@@ -76,7 +82,7 @@ h1 span{color:var(--accent)}
    its own watchlist and activity, and they all keep watching in the background. */
 .stores{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%}
 #storeTabs{display:contents}
-.store{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:6px 14px;font:600 14px Inter,sans-serif}
+.store{display:inline-flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:5px 13px;font:600 13.5px Inter,sans-serif}
 .store:hover{color:var(--text);border-color:var(--faint)}
 .store.on{color:var(--text);border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}
 .store .sdot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint)}
@@ -93,13 +99,21 @@ h1 span{color:var(--accent)}
 /* Three columns: live stream (always there) | set up | watching. Set up and
    Watching each have a coloured − / + on their header line that folds the
    column to a slim bar, so the others get the room. Narrow windows stack. */
-.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));grid-template-areas:var(--areas,"stream head head" "stream setup watch");grid-template-rows:auto 1fr;gap:16px 20px;align-items:start}
-.cols>header{grid-area:head;min-height:36px;position:relative;z-index:30} /* above the columns, so its menus aren't hidden behind them */
+.cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));gap:16px 20px;align-items:start}
+.cols>header{grid-column:1/-1;position:relative;z-index:30} /* across the top, above the columns (so its menus aren't hidden behind them) */
 .col{min-width:0}
-.col-stream{--c:var(--c-stream);grid-area:stream;position:sticky;top:16px;height:calc(100vh - 32px);display:flex;flex-direction:column;container-type:inline-size}
-.cols.both-folded .col-stream{height:calc(100vh - 100px)}
-.col-setup{--c:var(--c-setup);grid-area:setup}
-.col-watch{--c:var(--c-watch);grid-area:watch}
+.col-stream{--c:var(--c-stream);position:sticky;top:16px;height:calc(100vh - var(--head-h,62px) - 48px);min-height:460px;display:flex;flex-direction:column;container-type:inline-size}
+.col-setup{--c:var(--c-setup)}
+.col-watch{--c:var(--c-watch)}
+/* Moving a column: drag it by its header */
+.col-head{cursor:grab}
+.col-head button,.col-head a{cursor:pointer}
+.grip{color:var(--faint);font-size:15px;line-height:1;margin-right:-2px;opacity:0;transition:opacity .15s;user-select:none}
+.col-head:hover .grip{opacity:1}
+body.dragging iframe{pointer-events:none} /* (so dragging over the stream and chat still works) */
+.col.dragged{opacity:.45}
+.col.drop-before{box-shadow:-6px 0 0 -2px var(--accent)}
+.col.drop-after{box-shadow:6px 0 0 -2px var(--accent)}
 .colbtn{flex:none;width:28px;height:28px;padding:0;border-radius:50%;border:2px solid var(--c);background:transparent;color:var(--c);font:700 17px/24px Inter,sans-serif}
 .colbtn:hover{background:var(--c);color:var(--tab-ink)}
 .col.collapsed .stack{display:none}
@@ -145,9 +159,10 @@ h1 span{color:var(--accent)}
   .chat{flex:none;width:340px}
 }
 @media (max-width:1099px){
-  .cols{grid-template-columns:1fr;grid-template-areas:none}
-  .cols>header,.cols>.col{grid-area:auto}
-  .col-stream,.cols.both-folded .col-stream{position:static;height:auto}
+  .cols{grid-template-columns:1fr}
+  .col-stream{position:static;height:auto;min-height:0}
+  .col.drop-before{box-shadow:0 -6px 0 -2px var(--accent)}
+  .col.drop-after{box-shadow:0 6px 0 -2px var(--accent)}
   .player{max-height:none}
   .chat{flex:none;height:420px}
 }
@@ -352,8 +367,24 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 <body>
 <div class="wrap">
  <div class="cols" id="cols">
-  <header>
-    <h1>Mr Tofu <span>Drop Mode</span></h1>
+  <header class="appbar">
+    <div class="brand"><img class="logo" src="/favicon.svg" alt=""><h1>Drop <span>Mode</span></h1></div>
+    <nav class="stores" aria-label="Shops">
+      <span id="storeTabs" role="tablist"></span>
+      <div class="popwrap">
+        <button class="store add" id="addBtn" data-pop="addPop" aria-expanded="false" title="Watch another Shopify shop in its own tab">＋ Add a shop</button>
+        <div class="pop left" id="addPop" hidden>
+          <div class="pop-title">Watch another shop</div>
+          <p class="lead">Paste a link to a Shopify shop, or to one section of it (like its Pokémon page). It gets its own tab, watchlist and activity, and keeps watching while you're on another tab.</p>
+          <input type="text" id="addLink" placeholder="e.g. animalkingdoms.co.nz/collections/pokemon-tcg" autocomplete="off" style="width:100%">
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="addName" placeholder="Tab name (optional)" autocomplete="off" maxlength="40">
+            <button class="primary" id="addGo">Add shop</button>
+          </div>
+          <p class="hint" id="addMsg" style="margin:8px 0 0"></p>
+        </div>
+      </div>
+    </nav>
     <div class="status">
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
@@ -399,6 +430,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             <p class="hint" id="dcMsg" style="margin:6px 0 0"></p>
           </section>
           <section class="set setrow">
+            <div><div class="pop-title">Layout</div><p class="lead" style="margin:2px 0 0">Drag a column by its header to move it.</p></div>
+            <button class="secondary" id="resetLayout" style="flex:none;padding:7px 12px">Reset columns</button>
+          </section>
+          <section class="set setrow">
             <div class="pop-title">Theme</div>
             <span class="qtyset themeset" id="themeSet" role="group" aria-label="Theme"><button type="button" data-theme="dark">🌙 Dark</button><button type="button" data-theme="light">☀️ Light</button></span>
           </section>
@@ -417,27 +452,11 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         </div>
       </div>
     </div>
-    <nav class="stores" aria-label="Shops">
-      <span id="storeTabs" role="tablist"></span>
-      <div class="popwrap">
-        <button class="store add" id="addBtn" data-pop="addPop" aria-expanded="false" title="Watch another Shopify shop in its own tab">＋ Add a shop</button>
-        <div class="pop left" id="addPop" hidden>
-          <div class="pop-title">Watch another shop</div>
-          <p class="lead">Paste a link to a Shopify shop, or to one section of it (like its Pokémon page). It gets its own tab, watchlist and activity, and keeps watching while you're on another tab.</p>
-          <input type="text" id="addLink" placeholder="e.g. animalkingdoms.co.nz/collections/pokemon-tcg" autocomplete="off" style="width:100%">
-          <div class="row" style="margin-top:8px">
-            <input type="text" id="addName" placeholder="Tab name (optional)" autocomplete="off" maxlength="40">
-            <button class="primary" id="addGo">Add shop</button>
-          </div>
-          <p class="hint" id="addMsg" style="margin:8px 0 0"></p>
-        </div>
-      </div>
-    </nav>
   </header>
 
   <aside class="col col-stream" data-col="stream">
     <div class="col-head">
-      <span class="col-title">Live stream</span><span class="livebadge" id="liveBadge" hidden title="Mr Tofu is live on Twitch">LIVE</span><span class="spacer"></span>
+      <span class="grip" aria-hidden="true">⠿</span><span class="col-title">Live stream</span><span class="livebadge" id="liveBadge" hidden title="Mr Tofu is live on Twitch">LIVE</span><span class="spacer"></span>
       <button class="col-link" id="soundOn" title="Starts the stream with sound (it also switches to sound on your first click anywhere in drop mode). Browsers start it muted until you click, and pause a stream that started by itself when you switch away; with sound it keeps playing. Turn Twitch's volume down rather than muting it.">🔊 Sound on</button>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
     </div>
@@ -448,7 +467,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   </aside>
 
   <section class="col col-setup" data-col="setup">
-    <div class="col-head"><span class="col-title">Set up</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
+    <div class="col-head"><span class="grip" aria-hidden="true">⠿</span><span class="col-title">Set up</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">1</span>Shop password <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Drop mode loads the shop by itself. Enter the password if the shop is locked, or ahead of time if you know it: it's kept and used the moment the shop locks. Log out forgets it.</span></span></h2>
@@ -489,7 +508,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   </section>
 
   <section class="col col-watch" data-col="watch">
-    <div class="col-head"><span class="col-title">Watching</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
+    <div class="col-head"><span class="grip" aria-hidden="true">⠿</span><span class="col-title">Watching</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
         <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on <span class="shopHost">mrtofu.store</span> if the shop is locked. You always press Pay yourself.</span></span></h2>
@@ -579,18 +598,21 @@ $("themeSet").querySelectorAll("button").forEach((b) => b.onclick = () => {
 showTheme();
 
 // ---------- columns ----------
-// Set up and Watching each have a − / + on their header line that folds the
-// column down to a slim bar (click the bar or + to open it again). The stream
-// and chat always stay. Remembered in this browser.
-const COL_W = { setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
-let folded = {};
+// The stream, Set up and Watching, in whatever order you drag them into (drag a column by its
+// header). They're placed by CSS rather than moved, so the stream never reloads. Set up and
+// Watching each have a − / + on their header line that folds the column down to a slim bar
+// (click the bar or + to open it again). Remembered in this browser.
+const COLS = ["stream", "setup", "watch"];
+const COL_W = { stream: "minmax(0,1.1fr)", setup: "minmax(0,1fr)", watch: "minmax(0,.95fr)" };
+let folded = {}, colOrder = COLS.slice();
 try { folded = JSON.parse(localStorage.getItem("dropFolded") || "{}") || {}; } catch {}
+try {
+  const saved = JSON.parse(localStorage.getItem("dropColOrder") || "null");
+  if (Array.isArray(saved) && saved.length === COLS.length && COLS.every((c) => saved.includes(c))) colOrder = saved;
+} catch {}
 function layoutCols() {
-  const both = !!(folded.setup && folded.watch), cols = $("cols");
-  cols.style.setProperty("--cols", ["minmax(0,1.1fr)", folded.setup ? "44px" : COL_W.setup, folded.watch ? "44px" : COL_W.watch].join(" "));
-  // with both folded the header goes across the top (there's no room for it beside the stream)
-  cols.style.setProperty("--areas", both ? `"head head head" "stream setup watch"` : `"stream head head" "stream setup watch"`);
-  cols.classList.toggle("both-folded", both);
+  $("cols").style.setProperty("--cols", colOrder.map((c) => folded[c] ? "44px" : COL_W[c]).join(" "));
+  colOrder.forEach((c, i) => { document.querySelector(`.col[data-col="${c}"]`).style.order = i + 1; });
   for (const c of ["setup", "watch"]) {
     const col = document.querySelector(`.col[data-col="${c}"]`), btn = col.querySelector(".colbtn"), shut = !!folded[c];
     col.classList.toggle("collapsed", shut);
@@ -609,6 +631,52 @@ document.querySelectorAll(".col-setup .col-head, .col-watch .col-head").forEach(
   const c = h.closest(".col").dataset.col;
   if (folded[c]) toggleFold(c); // a folded column's whole bar opens it
 });
+// Dragging a column by its header: a line shows which side of a column it'll go
+let dragCol = null;
+const stacked = () => matchMedia("(max-width:1099px)").matches;
+const dropBefore = (col, e) => { const r = col.getBoundingClientRect(); return stacked() ? e.clientY < r.top + r.height / 2 : e.clientX < r.left + r.width / 2; };
+const clearDrop = () => document.querySelectorAll(".col").forEach((c) => c.classList.remove("drop-before", "drop-after", "dragged"));
+document.querySelectorAll(".col-head").forEach((h) => {
+  h.draggable = true;
+  h.title = "Drag to move this column";
+  h.addEventListener("dragstart", (e) => {
+    dragCol = h.closest(".col").dataset.col;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragCol);
+    document.body.classList.add("dragging");
+    h.closest(".col").classList.add("dragged");
+  });
+  h.addEventListener("dragend", () => { dragCol = null; document.body.classList.remove("dragging"); clearDrop(); });
+});
+document.querySelectorAll(".col").forEach((col) => {
+  col.addEventListener("dragover", (e) => {
+    if (!dragCol || col.dataset.col === dragCol) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const before = dropBefore(col, e);
+    col.classList.toggle("drop-before", before);
+    col.classList.toggle("drop-after", !before);
+  });
+  col.addEventListener("dragleave", (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove("drop-before", "drop-after"); });
+  col.addEventListener("drop", (e) => {
+    if (!dragCol || col.dataset.col === dragCol) return;
+    e.preventDefault();
+    const moving = dragCol, before = dropBefore(col, e);
+    colOrder = colOrder.filter((c) => c !== moving);
+    colOrder.splice(colOrder.indexOf(col.dataset.col) + (before ? 0 : 1), 0, moving);
+    try { localStorage.setItem("dropColOrder", JSON.stringify(colOrder)); } catch {}
+    clearDrop();
+    layoutCols();
+  });
+});
+$("resetLayout").onclick = () => {
+  colOrder = COLS.slice(); folded = {};
+  try { localStorage.removeItem("dropColOrder"); localStorage.removeItem("dropFolded"); } catch {}
+  layoutCols();
+};
+// The stream column fits under the top bar (whose height changes when it wraps onto two lines)
+new ResizeObserver(() => document.documentElement.style.setProperty("--head-h", document.querySelector(".appbar").offsetHeight + "px"))
+  .observe(document.querySelector(".appbar"));
 
 // "Show out of stock": the exact-product list can show sold-out and coming-soon ones too (after
 // what's in stock), so you can watch that exact listing for a restock
@@ -665,11 +733,43 @@ function chatSrc() {
   return `https://www.twitch.tv/embed/${CHANNEL}/chat?parent=${location.hostname}`
     + (document.documentElement.dataset.theme === "light" ? "" : "&darkpopout");
 }
-// (Drop mode itself looks at whether Tofu is live, for the LIVE badge and the heads-up ping.)
-function streamOn() {
-  if (!$("player").firstChild) $("player").innerHTML = `<iframe src="https://player.twitch.tv/?channel=${CHANNEL}&parent=${location.hostname}&muted=false&autoplay=true" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Mr Tofu's live stream"></iframe>`;
-  if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
+// Browsers (Chrome 145 and up, so Brave too) pause a muted stream whenever its tab is hidden, and
+// nothing a page does stops that. So the player is Twitch's interactive one, which drop mode can
+// start again: when you come back, a stream that was paused while you were away plays again
+// straight away (one you paused yourself stays paused). With sound on, it keeps playing anyway.
+// If Twitch's script won't load, it's the plain player. (Drop mode itself looks at whether Tofu
+// is live, for the LIVE badge and the heads-up ping.)
+let player = null, pausedByYou = false;
+function twitchApi() {
+  return new Promise((resolve) => {
+    if (window.Twitch && window.Twitch.Player) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://player.twitch.tv/js/embed/v1.js";
+    s.onload = () => resolve(!!(window.Twitch && window.Twitch.Player));
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+    setTimeout(() => resolve(false), 10000);
+  });
 }
+async function streamOn() {
+  if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
+  if ($("player").firstChild) return;
+  const ok = await twitchApi();
+  if ($("player").firstChild) return;
+  if (!ok) {
+    $("player").innerHTML = `<iframe src="https://player.twitch.tv/?channel=${CHANNEL}&parent=${location.hostname}&muted=false&autoplay=true" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen title="Mr Tofu's live stream"></iframe>`;
+    return;
+  }
+  player = new Twitch.Player("player", { channel: CHANNEL, parent: [location.hostname], autoplay: true, muted: false, width: "100%", height: "100%" });
+  player.addEventListener(Twitch.Player.PAUSE, () => { pausedByYou = !document.hidden; });
+  player.addEventListener(Twitch.Player.PLAY, () => { pausedByYou = false; });
+  const frame = $("player").querySelector("iframe");
+  if (frame) frame.title = "Mr Tofu's live stream";
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !player) return;
+  setTimeout(() => { try { if (!pausedByYou && player.isPaused()) player.play(); } catch {} }, 300);
+});
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
 // The stream with sound. Browsers won't play sound until you've clicked on the page, so it starts
 // muted, and a stream that started by itself gets paused the first time you switch away. So on your
@@ -683,6 +783,7 @@ function soundOn() {
   soundDone = true;
   $("soundOn").hidden = true;
   $("player").innerHTML = "";
+  player = null;
   streamOn();
 }
 $("soundOn").onclick = soundOn;
