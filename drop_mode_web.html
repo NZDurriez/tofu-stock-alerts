@@ -438,7 +438,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   <aside class="col col-stream" data-col="stream">
     <div class="col-head">
       <span class="col-title">Live stream</span><span class="livebadge" id="liveBadge" hidden title="Mr Tofu is live on Twitch">LIVE</span><span class="spacer"></span>
-      <button class="col-link" id="soundOn" title="Starts the stream with sound. Browsers start it muted (no sound until you click), and pause a muted stream when you switch windows; with sound it keeps playing. Turn Twitch's volume down rather than muting it.">🔊 Sound on</button>
+      <button class="col-link" id="soundOn" title="Starts the stream with sound (it also switches to sound on your first click anywhere in drop mode). Browsers start it muted until you click, and pause a stream that started by itself when you switch away; with sound it keeps playing. Turn Twitch's volume down rather than muting it.">🔊 Sound on</button>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
     </div>
     <div class="stream-body">
@@ -671,15 +671,30 @@ function streamOn() {
   if (!$("chat").firstChild) $("chat").innerHTML = `<iframe src="${chatSrc()}" title="Mr Tofu's Twitch chat"></iframe>`;
 }
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
-// Browsers won't start the stream with sound until you've clicked on the page, so it starts muted,
-// and they pause a muted stream as soon as it can't be seen (another window on top, minimised).
-// This click restarts it with sound, which keeps playing whatever window you're in.
-// (Unmuting in the player itself does the same.)
-$("soundOn").onclick = () => {
+// The stream with sound. Browsers won't play sound until you've clicked on the page, so it starts
+// muted, and a stream that started by itself gets paused the first time you switch away. So on your
+// first click (or key press) anywhere in drop mode, or a click in the chat, it restarts with sound,
+// which keeps playing whichever tab or window you're in. 🔊 Sound on does the same. If your first
+// click is in the player itself, it's left alone: you're running it. (Turn Twitch's volume down
+// rather than muting it.)
+let soundDone = false;
+function soundOn() {
+  if (soundDone) return;
+  soundDone = true;
+  $("soundOn").hidden = true;
   $("player").innerHTML = "";
   streamOn();
-  $("soundOn").hidden = true;
-};
+}
+$("soundOn").onclick = soundOn;
+document.addEventListener("pointerdown", soundOn, true);
+document.addEventListener("keydown", soundOn, true);
+// (Clicks inside the player or chat don't reach this page, but they take the focus from it.)
+window.addEventListener("blur", () => setTimeout(() => {
+  const f = document.activeElement;
+  if (soundDone || !f || f.tagName !== "IFRAME") return;
+  if ($("player").contains(f)) { soundDone = true; $("soundOn").hidden = true; } // you're running the player
+  else if ($("chat").contains(f)) soundOn(); // (a click in the chat counts as a click on the page)
+}));
 
 // ---------- small pop-up menus (⚙ settings, ＋ add a shop) ----------
 // Open on click; close on a click anywhere else, or Esc.
