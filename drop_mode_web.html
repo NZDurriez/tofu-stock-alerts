@@ -178,6 +178,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .b-buyable{background:var(--ok-soft);color:var(--ok)}
 .b-soldout{background:var(--bad-soft);color:var(--bad)}
 .b-soon{background:var(--info-soft);color:var(--info)}
+.b-limit{background:var(--accent-soft);color:var(--accent)}
+.limline{width:100%;color:var(--accent)}
 
 h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;place-items:center;padding:16px}
@@ -696,11 +698,13 @@ $("loginBtn").onclick = async () => {
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
 // ---------- quantity buttons (1-5) ----------
-function qtyButtons(selected) {
-  const sel = Math.min(5, Math.max(1, selected || 1));
+// (the ones above a shop's per-customer limit are greyed out)
+function qtyButtons(selected, limit) {
+  const top = Math.min(5, Math.max(1, limit || 5)), sel = Math.min(top, Math.max(1, selected || 1));
   return `<span class="qtyset" role="group" aria-label="Quantity">${[1, 2, 3, 4, 5]
-    .map((n) => `<button type="button" data-q="${n}" class="${n === sel ? "on" : ""}" aria-pressed="${n === sel}">${n}</button>`).join("")}</span>`;
+    .map((n) => `<button type="button" data-q="${n}" class="${n === sel ? "on" : ""}" aria-pressed="${n === sel}"${n > top ? ` disabled title="The shop allows ${top} per customer"` : ""}>${n}</button>`).join("")}</span>`;
 }
+const limitBadge = (it) => it && it.limit ? `<span class="badge b-limit">Limit ${it.limit} per customer</span>` : "";
 function wireQty(row, onPick) {
   const set = row.querySelector(".qtyset");
   set.querySelectorAll("button").forEach((b) => b.onclick = () => {
@@ -726,9 +730,10 @@ const onList = (kind, key) => watchlist.some((w) => w.kind === kind && (kind ===
 const SUGGEST = ["Elite Trainer Box", "Booster Bundle", "Booster Box", "Booster Pack", "Pre-order"];
 let kwQty = 1;
 const cleanKw = (s) => s.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").replace(/\s*,\s*/g, ", ").replace(/(, )+/g, ", ");
-// A product's name as keywords: no price, no "(Pre-order)" tag (that changes), no stray punctuation
+// A product's name as keywords: no price, no "(Pre-order)" or "Limit 2 Per Person" (those change), no stray punctuation
 const nameAsKeywords = (title) => title
   .replace(/\((?:pre[\s-]?order|pre[\s-]?release)\)/gi, " ")
+  .replace(/\(?\blimit(?:ed)?(?:\s+(?:of|to))?\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+per\s+(?:person|customer|order|household))?\)?/gi, " ")
   .replace(/[:·•|—–]/g, " ").replace(/\s+-\s+/g, " ")
   .replace(/\s+/g, " ").trim();
 function renderKwActs() {
@@ -834,8 +839,8 @@ function renderResults() {
       <input type="checkbox" class="pick" ${already ? "disabled" : ""} aria-label="Tick ${esc(it.title)}">
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}</div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
   if (!r.items.length) html += `<div class="empty">Nothing ${q ? "matching that is" : where ? "in this category is" : "is"} in stock right now.</div>`;
@@ -845,7 +850,7 @@ function renderResults() {
   el.querySelectorAll(".item").forEach((row) => {
     const it = byId[row.dataset.id], box = row.querySelector(".pick");
     const entry = (qty) => ({ id: it.id, title: it.title, image: it.image, qty });
-    let qty = ticked.get(it.id)?.qty || 1;
+    let qty = Math.min(ticked.get(it.id)?.qty || 1, it.limit || 5);
     box.onchange = () => { if (box.checked) ticked.set(it.id, entry(qty)); else ticked.delete(it.id); updateTicks(); };
     wireQty(row, (n) => { qty = n; if (!box.disabled) { ticked.set(it.id, entry(qty)); updateTicks(); } }); // picking how many ticks it
     row.querySelector(".watchbtn").onclick = () => addTicked(entry(qty));
@@ -901,9 +906,10 @@ function statusHtml(w) {
     if (!it) return "";
     if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if it gets listed again';
     const over = w.max && it.price && parseFloat(it.price) > w.max;
-    return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "")
+    return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "") + limitBadge(it)
       + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale")
-      + (over ? `<span class="warnline">That's over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>` : "");
+      + (over ? `<span class="warnline">That's over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>` : "")
+      + limitNote(w, [it]);
   }
   const m = info.words[w.text];
   if (!m) return "";
@@ -911,13 +917,22 @@ function statusHtml(w) {
     if (!m.unavailableTotal) return '<span class="badge b-soon">Nothing listed yet</span> Opens the moment a match is added';
     const gone = m.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ")
       + (m.unavailableTotal > m.unavailable.length ? "…" : "");
-    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or a new match is added</span>`;
+    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or a new match is added</span>`
+      + limitNote(w, m.unavailable);
   }
   const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
   const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
   return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
     + (over ? `<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`
-      : m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "");
+      : m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "")
+    + limitNote(w, m.items.concat(m.unavailable));
+}
+// When the shop's per-customer limit is lower than how many you asked for
+function limitNote(w, cards) {
+  const lims = cards.map((c) => c.limit).filter(Boolean);
+  if (!lims.length || w.qty <= Math.min(...lims)) return "";
+  const low = Math.min(...lims);
+  return `<span class="limline">The shop allows ${low} per customer, so checkout won't add more than ${low === 1 ? "one" : low}.</span>`;
 }
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
@@ -939,7 +954,7 @@ function renderWatchlist() {
       <div class="t">
         <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
         <div class="st">${statusHtml(w)}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty)}
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty, w.kind === "product" ? info.picks[w.id]?.limit : 0)}
           <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>
       </div>
       <button class="rm" title="Remove from watchlist">×</button>

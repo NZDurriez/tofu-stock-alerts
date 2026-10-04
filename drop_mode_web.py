@@ -119,6 +119,7 @@ class Watcher:
         self.running = False
         self.opened = set()     # variant ids already sent to checkout
         self.skipped = set()    # variant ids not opened because they cost more than your max (said once)
+        self.capped = set()     # products whose per-customer limit cut the quantity (said once)
         self.events = []        # [{id, t, kind, text, url?}]
         self.last_poll = 0.0    # when the page last asked for events
         self.thread = None
@@ -319,6 +320,14 @@ class Watcher:
                      f"{self.site.shop}/products/{it['handle']}")
         return False
 
+    def limited(self, qty, it):
+        """How many to put in the cart: never more than the shop's per-customer limit."""
+        n = dm.capped(qty, it)
+        if n < qty and it["handle"] not in self.capped:
+            self.capped.add(it["handle"])
+            self.log("info", f"{it['title'][:70]} is limited to {n} per customer, so checkout gets {n} (not {qty}).")
+        return n
+
     def matches(self, text, limit=6):
         """What some keywords match right now, as cards: ones you can buy, then
         ones you can't (coming soon first, then sold out)."""
@@ -352,7 +361,7 @@ class Watcher:
             want = self.target(pid, it, wanted, words)
             live = [vid for vid, v in it["variants"].items() if v[1] and vid not in self.opened]
             if want and live and self.affordable(it, live[0], want[1]):
-                ready.append((live[0], want[0], it["title"]))
+                ready.append((live[0], self.limited(want[0], it), it["title"]))
         return ready
 
     # ---- the watchlist (kept here rather than in the browser) ----
@@ -401,7 +410,7 @@ class Watcher:
             if faster_or_slower:
                 self.renew()
         else:
-            self.opened, self.skipped = set(), set()
+            self.opened, self.skipped, self.capped = set(), set(), set()
             self.running = True
             self.gen += 1
             self.thread = threading.Thread(target=self.loop, args=(self.gen,), daemon=True)
@@ -430,7 +439,7 @@ class Watcher:
                 self.log("pick" if want else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
                          None if want else f"{self.site.shop}/products/{it['handle']}")
             if want and fresh[0][0] not in self.opened and self.affordable(it, fresh[0][0], want[1]):
-                ready.append((fresh[0][0], want[0], it["title"]))
+                ready.append((fresh[0][0], self.limited(want[0], it), it["title"]))
         return ready
 
     def stop(self):
@@ -538,6 +547,7 @@ def card(pid, it, shop=None):
         "id": pid, "title": it["title"], "price": price, "image": img,
         "state": "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon",
         "url": f"{shop or dm.SHOP}/products/{it['handle']}",
+        "limit": it.get("limit"),  # per customer, if the shop has one
     }
 
 

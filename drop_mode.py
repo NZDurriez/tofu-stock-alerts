@@ -5,6 +5,7 @@ browser with a loud alert. You still press Pay yourself.
 Start it with the "Tofu Drop Mode" shortcut on the desktop (or
 `python drop_mode.py`). Close the window or press Ctrl+C to stop.
 """
+import html
 import json
 import os
 import re
@@ -226,6 +227,37 @@ def alarm(times=3):
         print("\a" * times, end="", flush=True)
 
 
+# Per-customer limits that shops write into a product's name, tags or description,
+# e.g. "Limit 1 Per Person" (Mr Tofu), "This product is limited to two per customer"
+# (Animal Kingdoms), "Max 2 per order". "Limited format", "Limit Break" etc. don't count.
+_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_N = r"(\d{1,3}|" + "|".join(_NUMBERS) + r")"
+_PER = r"(?:\s+[a-z]+){0,2}?\s*(?:per|each|/)\s*"
+_WHO = r"(?:person|customer|order|household|account|transaction)"
+_LIMITS = [
+    re.compile(r"\blimit(?:ed)?(?:\s+(?:of|to|is))?[\s:_-]*" + _N + r"\b" + _PER + _WHO, re.I),
+    re.compile(r"\b(?:max(?:imum)?|only|strictly)(?:\s+of)?\s+" + _N + r"\b" + _PER + _WHO, re.I),
+    re.compile(r"\b" + _N + r"\s*(?:per|each|/)\s*(?:person|customer|household)\b", re.I),
+    re.compile(r"\blimit[\s:_-]*(?:of\s+)?" + _N + r"\b(?!\s*(?:%|percent|cop(?:y|ies)|units?|pieces?|made|worldwide))", re.I),
+]
+
+
+def purchase_limit(p):
+    """The most one customer may buy, if the shop says so in the product's text (else None)."""
+    tags = p.get("tags") or []
+    text = " ".join([p.get("title") or "", " ".join(tags) if isinstance(tags, list) else str(tags),
+                     html.unescape(re.sub(r"<[^>]+>", " ", p.get("body_html") or ""))])
+    found = [int(m.group(1)) if m.group(1).isdigit() else _NUMBERS[m.group(1).lower()]
+             for rx in _LIMITS for m in rx.finditer(text)]
+    found = [n for n in found if n > 0]
+    return min(found) if found else None
+
+
+def capped(qty, it):
+    """How many to put in the cart: what you asked for, or the shop's limit if that's lower."""
+    return min(qty, it["limit"]) if it.get("limit") else qty
+
+
 def summarise(p):
     return {
         "title": p["title"],
@@ -233,6 +265,7 @@ def summarise(p):
         "published": p.get("published_at") or "",
         "image": ((p.get("images") or [{}])[0] or {}).get("src"),
         "variants": {str(v["id"]): (v.get("title") or "", bool(v.get("available")), v.get("price")) for v in p.get("variants") or []},
+        "limit": purchase_limit(p),  # per customer, if the shop has one
     }
 
 
@@ -401,7 +434,7 @@ def main():
         live = [vid for vid, v in seen[pid]["variants"].items() if v[1]]
         if live:
             print(f"\n'{seen[pid]['title']}' is already buyable!")
-            ready.append((live[0], q, seen[pid]["title"]))
+            ready.append((live[0], capped(q, seen[pid]), seen[pid]["title"]))
     open_checkout(ready)
 
     wait = interval
@@ -428,7 +461,7 @@ def main():
                     names = ", ".join(v[0] for _, v in fresh if v[0] != "Default Title")
                     print(f"\n[{stamp}] {tag}: {it['title']}" + (f" ({names})" if names else "") + f" ${fresh[0][1][2]}")
                     if q and fresh[0][0] not in opened:
-                        ready.append((fresh[0][0], q, it["title"]))
+                        ready.append((fresh[0][0], capped(q, it), it["title"]))
                     else:
                         print(f"   View: {SHOP}/products/{it['handle']}")
                 open_checkout(ready)
