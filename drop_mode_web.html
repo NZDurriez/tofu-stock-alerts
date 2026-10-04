@@ -251,6 +251,16 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-row{align-items:flex-start}
 .wl-row .rm{background:none;border:0;color:var(--faint);font-size:22px;line-height:1;padding:4px 6px;flex:none}
 .wl-row .rm:hover{color:var(--bad)}
+/* A watchlist row shows the short version; hovering its name shows the details */
+.wl-row .sum{position:relative;outline:none}
+.wl-row .sum.has-more{cursor:help}
+.wl-row .more{display:none;position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:25;padding:10px 12px;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-size:13px;line-height:1.5;pointer-events:none}
+.wl-row .sum:hover .more,.wl-row .sum:focus .more{display:block}
+.wl-row .more ul{margin:2px 0 6px;padding-left:18px}
+.wl-row .more li+li{margin-top:2px}
+.wl-row .more .warnline,.wl-row .more .limline{display:block;margin-top:6px}
+.card:has(.sum:hover),.card:has(.sum:focus){position:relative;z-index:40} /* (above the next panel) */
+.b-warn{background:var(--bad-soft);color:var(--bad)}
 input.maxin{width:120px;padding:7px 10px;font-size:14px;-moz-appearance:textfield;appearance:textfield}
 input.maxin::-webkit-outer-spin-button,input.maxin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0} /* no up/down arrows eating the space */
 input.maxin::placeholder{color:var(--faint)}
@@ -411,9 +421,9 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
           <button class="primary" id="loginBtn">Load shop</button>
         </div>
         <div class="loginState" id="loginState">Not loaded yet.</div>
-        <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer">
-          <input type="checkbox" id="autoUnlock" checked style="accent-color:var(--accent)">
-          Unlock <span class="shopHost">mrtofu.store</span> in this browser automatically when the shop locks (needs pop-ups allowed)
+        <label class="hint" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+          <input type="checkbox" id="autoUnlock" checked style="accent-color:var(--accent);flex:none;margin:4px 0 0">
+          <span>Unlock <span class="shopHost">mrtofu.store</span> in this browser automatically when the shop locks (needs pop-ups allowed)</span>
         </label>
       </section>
 
@@ -899,40 +909,60 @@ let searchTimer;
 $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 250); };
 
 // ---------- step 3: the watchlist ----------
-function statusHtml(w) {
-  if (!lastProducts) return "Load the shop to see if it's in stock.";
+// How an entry stands: a short line that's always shown (in stock or not, plus a
+// warning chip if something needs you), and the details for hovering its name:
+// what it matches, when it opens, and any warning in full.
+function statusParts(w) {
+  if (!lastProducts) return { line: "Load the shop to see if it's in stock.", more: "" };
+  const line = [], more = [];
+  const flag = (text) => line.push(`<span class="badge b-warn">⚠ ${text}</span>`);
+  const list = (cards, total) => "<ul>" + cards.map((c) => `<li>${esc(c.title)}${c.state === "buyable" ? (c.price ? ` · $${esc(c.price)}` : "")
+    : c.state === "soldout" ? " · sold out" : " · not on sale yet"}${c.limit ? ` · limit ${c.limit} per customer` : ""}</li>`).join("") + (total > cards.length ? `<li>…and ${total - cards.length} more</li>` : "") + "</ul>";
+  let cards;
   if (w.kind === "product") {
     const it = info.picks[w.id];
-    if (!it) return "";
-    if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if it gets listed again';
-    const over = w.max && it.price && parseFloat(it.price) > w.max;
-    return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "") + limitBadge(it)
-      + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale")
-      + (over ? `<span class="warnline">That's over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>` : "")
-      + limitNote(w, [it]);
+    if (!it) return { line: "", more: "" };
+    if (it.state === "gone") return { line: '<span class="badge b-soon">Not listed right now</span>', more: "Opens if it gets listed again." };
+    cards = [it];
+    line.push(badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : ""));
+    if (it.state !== "buyable") more.push(it.state === "soldout" ? "Opens when it's restocked." : "Opens when it goes on sale.");
+    if (w.max && it.price && parseFloat(it.price) > w.max) {
+      flag("Over your max");
+      more.push(`<span class="warnline">$${esc(it.price)} is over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>`);
+    }
+  } else {
+    const m = info.words[w.text];
+    if (!m) return { line: "", more: "" };
+    cards = m.items.concat(m.unavailable);
+    if (m.total) {
+      line.push(`<span class="badge b-buyable">${m.total} in stock</span>`);
+      more.push("<b>In stock now:</b>" + list(m.items, m.total));
+      const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
+      if (over) {
+        flag("Over your max");
+        more.push(`<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`);
+      } else if (m.total > 1) {
+        flag(`Adds all ${m.total}`);
+        more.push(`<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>`);
+      }
+    } else if (m.unavailableTotal) {
+      line.push('<span class="badge b-soldout">Not in stock</span>');
+      more.push("<b>Matches:</b>" + list(m.unavailable, m.unavailableTotal) + "Opens when one comes back in stock, or a new match is added.");
+    } else {
+      line.push('<span class="badge b-soon">Nothing listed yet</span>');
+      more.push("Opens the moment a match is added.");
+    }
   }
-  const m = info.words[w.text];
-  if (!m) return "";
-  if (!m.total) {
-    if (!m.unavailableTotal) return '<span class="badge b-soon">Nothing listed yet</span> Opens the moment a match is added';
-    const gone = m.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ")
-      + (m.unavailableTotal > m.unavailable.length ? "…" : "");
-    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or a new match is added</span>`
-      + limitNote(w, m.unavailable);
-  }
-  const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
-  const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
-  return `<span class="badge b-buyable">${m.total} in stock</span> ${names}`
-    + (over ? `<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`
-      : m.total > 1 ? `<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>` : "")
-    + limitNote(w, m.items.concat(m.unavailable));
-}
-// When the shop's per-customer limit is lower than how many you asked for
-function limitNote(w, cards) {
+  // The shop's per-customer limit (a chip too when it's lower than how many you asked for).
+  // With several matches, each one's limit is in the list instead.
   const lims = cards.map((c) => c.limit).filter(Boolean);
-  if (!lims.length || w.qty <= Math.min(...lims)) return "";
-  const low = Math.min(...lims);
-  return `<span class="limline">The shop allows ${low} per customer, so checkout won't add more than ${low === 1 ? "one" : low}.</span>`;
+  if (lims.length) {
+    const low = Math.min(...lims);
+    if (w.qty > low) line.push(`<span class="badge b-limit">Limit ${low}</span>`);
+    if (cards.length === 1) more.push(`<span class="limline">The shop allows ${low} per customer${w.qty > low ? `, so checkout won't add more than ${low === 1 ? "one" : low}` : ""}.</span>`);
+    else if (w.qty > low) more.push(`<span class="limline">Checkout won't add more of each than the shop allows (limits are listed above).</span>`);
+  }
+  return { line: line.join(" "), more: more.join("") };
 }
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
@@ -941,24 +971,30 @@ function keywordThumb(w) {
   return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch">🔎</span></span>` : '<span class="thumb none">🔎</span>';
 }
 let wlRedrawLater = false; // (don't redraw while you're typing a max price)
+let wlHtml = "";           // (nor when nothing changed, so a details box you're reading doesn't flicker)
 function renderWatchlist() {
   if (document.activeElement && document.activeElement.classList.contains("maxin")) { wlRedrawLater = true; return; }
   $("wlCount").textContent = watchlist.length ? `${watchlist.length} item${watchlist.length === 1 ? "" : "s"}` : "";
-  if (!watchlist.length) {
-    $("watchlist").innerHTML = '<div class="wl-empty">Nothing on your watchlist yet. Add keywords or a product in step 2.</div>';
-    return;
-  }
-  $("watchlist").innerHTML = watchlist.map((w, i) => `
+  const html = !watchlist.length ? '<div class="wl-empty">Nothing on your watchlist yet. Add keywords or a product in step 2.</div>' : watchlist.map((w, i) => {
+    const s = statusParts(w);
+    return `
     <div class="wl-row" data-i="${i}">
       ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : keywordThumb(w)}
       <div class="t">
-        <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
-        <div class="st">${statusHtml(w)}</div>
+        <div class="sum${s.more ? " has-more" : ""}"${s.more ? ' tabindex="0"' : ""}>
+          <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
+          <div class="st">${s.line}</div>
+          ${s.more ? `<div class="more" role="tooltip">${s.more}</div>` : ""}
+        </div>
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty, w.kind === "product" ? info.picks[w.id]?.limit : 0)}
           <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>
       </div>
       <button class="rm" title="Remove from watchlist">×</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
+  if (html === wlHtml) return;
+  wlHtml = html;
+  $("watchlist").innerHTML = html;
   $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
     const i = +row.dataset.i;
     wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
