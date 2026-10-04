@@ -415,7 +415,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head"><span class="col-title">Set up</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">1</span>Load the shop <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Only enter a password if the shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</span></span></h2>
+        <h2><span class="step">1</span>Shop password <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Drop mode loads the shop by itself. Enter the password if the shop is locked, or ahead of time if you know it: it's kept and used the moment the shop locks. Log out forgets it.</span></span></h2>
         <div class="row">
           <input type="text" id="pw" placeholder="Shop password (optional)" autocomplete="off">
           <button class="primary" id="loginBtn">Load shop</button>
@@ -673,7 +673,14 @@ function logLocal(kind, text, sid = STORE) {
 }
 
 let loginSig = "";
+// The button says what it'll do: load the shop, check it again, or use the password you typed
+function loginLabel() {
+  if ($("loginBtn").disabled) return; // (busy)
+  const typed = $("pw").value.trim();
+  $("loginBtn").textContent = typed ? (shopState === "open" ? "Save password" : "Log in") : shopState || lastProducts ? "Reload shop" : "Load shop";
+}
 function renderLoginState() {
+  loginLabel();
   const sig = [STORE, shopState, loggedIn, passwordSaved].join("|");
   if (sig === loginSig) return; // only redraw when something changed (keeps the button clickable)
   loginSig = sig;
@@ -698,14 +705,17 @@ $("loginBtn").onclick = async () => {
   const sid = STORE;
   $("loginBtn").disabled = true; $("loginBtn").textContent = "Loading…";
   const r = await api("/api/login", { password: $("pw").value });
-  $("loginBtn").disabled = false; $("loginBtn").textContent = "Load shop";
+  $("loginBtn").disabled = false;
   if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false, sid); // locked shop + right password
   seenStates[sid] = r.shopState;
   if (sid !== STORE) return; // (switched tabs meanwhile)
   lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
+  if (r.shopState === "ok" || r.shopState === "open") $("pw").value = ""; // (it's kept in drop mode now)
+  loginLabel();
   await poll(); search(); refreshInfo(); kwPreview(); loadCats();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
+$("pw").oninput = loginLabel;
 
 // ---------- quantity buttons (1-5) ----------
 // (the ones above a shop's per-customer limit are greyed out)

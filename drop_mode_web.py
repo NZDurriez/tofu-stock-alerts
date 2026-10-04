@@ -161,22 +161,27 @@ class Watcher:
             return self._login(password)
 
     def _login(self, password):
-        password = password.strip()
+        password = password.strip() or self.password  # an empty box keeps the saved password (Log out forgets it)
+        unchanged = (self.shop_state, self.password, len(self.products))
         self.shop_state = dm.login_status(password, self.site)  # open / locked / ok / bad
         self.logged_in = self.shop_state == "ok"
         # Keep a password we couldn't check yet (shop open) so it's tried if the shop locks
         self.password = password if self.shop_state in ("ok", "open") else ""
         before = self.products
         ok, info = self.refresh()
-        self.log(*{
-            "ok": ("ok", "Password accepted: watching behind the lock."),
-            "bad": ("warn", "That password didn't work. Check it and log in again."),
-            "open": ("info", "The shop isn't locked right now, so no password is needed."
-                     + (" I'll try yours automatically if it locks." if password else "")),
-            "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
-        }[self.shop_state])
+        if ok and unchanged == (self.shop_state, self.password, info):  # loaded again: one line, not the lot
+            self.log("info", f"Checked the shop again: still {'open' if self.shop_state == 'open' else 'behind the password'}, {info} products.")
+        else:
+            self.log(*{
+                "ok": ("ok", "Password accepted: watching behind the lock."),
+                "bad": ("warn", "That password didn't work. Check it and log in again."),
+                "open": ("info", "The shop isn't locked right now, so no password is needed."
+                         + (" I'll try yours automatically if it locks." if password else "")),
+                "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
+            }[self.shop_state])
+            if ok:
+                self.log("info", f"Shop has {info} products.")
         if ok:
-            self.log("info", f"Shop has {info} products.")
             if info >= 250:
                 self.log("warn", "That's as many as drop mode can read at once (250), so anything past them isn't watched."
                          + ("" if self.id == "tofu" else " To watch just one section, remove this tab and add the section's link (…/collections/…)."))
