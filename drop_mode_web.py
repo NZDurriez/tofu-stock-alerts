@@ -141,8 +141,7 @@ class Watcher:
                 ev["url"] = url
             self.events.append(ev)
             del self.events[:-500]  # keep the feed bounded
-        shop = "" if self.id == "tofu" else f"[{self.name}] "
-        print(f"[{ev['t']}] {shop}{text}" + (f" {url}" if url else ""))
+        print(f"[{ev['t']}] [{self.name}] {text}" + (f" {url}" if url else ""))
 
     # ---- shop ----
     def refresh(self):
