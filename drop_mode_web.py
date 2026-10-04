@@ -342,12 +342,19 @@ class Watcher:
         hits = [(pid, it) for pid, it in self.products.items() if keyword_match(keys, it["title"])]
         live = sorted([(p, it) for p, it in hits if dm.buyable(it)], key=lambda x: x[1]["title"])
         gone = sorted([(p, it) for p, it in hits if not dm.buyable(it)], key=lambda x: (not dm.upcoming(x[1]), x[1]["title"]))
-        return {
+        out = {
             "items": [card(p, it, self.site.shop) for p, it in live[:limit]],
             "total": len(live),
             "unavailable": [card(p, it, self.site.shop) for p, it in gone[:limit]],
             "unavailableTotal": len(gone),
         }
+        need = [k for k in keys if not k.startswith("-")]
+        if not hits and need != keys:  # nothing yet, but minus words rule some out: one of those, for a picture
+            near = [(p, it) for p, it in self.products.items() if keyword_match(need, it["title"])]
+            near.sort(key=lambda x: (not x[1].get("image"), not dm.buyable(x[1]), x[1]["title"]))
+            if near:
+                out["similar"] = card(*near[0], self.site.shop)
+        return out
 
     def parse_wanted(self, picks, watches):
         """Page data -> ({product id: (qty, max)}, [(keywords, qty, text, max)])."""

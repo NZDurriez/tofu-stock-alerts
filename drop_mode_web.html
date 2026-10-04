@@ -262,7 +262,8 @@ input[type=search]:focus{border-color:var(--accent)}
 .wl-row .sum:hover .more,.wl-row .sum:focus .more{display:block}
 .wl-row .more ul{margin:2px 0 6px;padding-left:18px}
 .wl-row .more li+li{margin-top:2px}
-.wl-row .more .warnline,.wl-row .more .limline{display:block;margin-top:6px}
+.wl-row .more .warnline,.wl-row .more .limline,.wl-row .more .picline{display:block;margin-top:6px}
+.wl-row .more .picline{color:var(--muted)}
 .card:has(.sum:hover),.card:has(.sum:focus){position:relative;z-index:40} /* (above the next panel) */
 .b-warn{background:var(--bad-soft);color:var(--bad)}
 input.maxin{width:120px;padding:7px 10px;font-size:14px;-moz-appearance:textfield;appearance:textfield}
@@ -984,6 +985,7 @@ function statusParts(w) {
     } else {
       line.push('<span class="badge b-soon">Nothing listed yet</span>');
       more.push("Opens the moment a match is added.");
+      if (m.similar && m.similar.image) more.push(`<span class="picline">The picture is from a listing your minus words leave out: ${esc(m.similar.title)}.</span>`);
     }
   }
   // The shop's per-customer limit (a chip too when it's lower than how many you asked for).
@@ -1010,8 +1012,9 @@ function kwTagsHtml(text) {
 }
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
+// (or, when nothing matches yet, a listing its minus words leave out, e.g. the 30th bundle with tins)
 function keywordThumb(w) {
-  const m = info.words[w.text], pic = m && [...m.items, ...m.unavailable].find((it) => it.image);
+  const m = info.words[w.text], pic = m && ([...m.items, ...m.unavailable].find((it) => it.image) || (m.similar && m.similar.image ? m.similar : null));
   return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch">🔎</span></span>` : '<span class="thumb none">🔎</span>';
 }
 let wlRedrawLater = false; // (don't redraw while you're typing a max price)
