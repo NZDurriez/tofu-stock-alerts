@@ -580,12 +580,13 @@ class Discord:
         self.user = re.sub(r"\D", "", str(saved.get("user", my_discord_id())))
         self.on_checkout = bool(saved.get("checkout", True))
         self.on_lock = bool(saved.get("lock", False))
+        self.on_live = bool(saved.get("live", True))  # Tofu goes live on Twitch
         self.failing = False  # (say so once, not on every ping)
 
     def info(self):
         start, _, rest = self.webhook.partition("/api/webhooks/")
         return {"set": bool(self.webhook), "hint": f"{start}/api/webhooks/{rest.split('/')[0][:6]}…" if self.webhook else "",  # (never the secret part)
-                "user": self.user, "botUser": my_discord_id(), "checkout": self.on_checkout, "lock": self.on_lock}
+                "user": self.user, "botUser": my_discord_id(), "checkout": self.on_checkout, "lock": self.on_lock, "live": self.on_live}
 
     def save(self, data):
         """Returns an error message, or None when saved."""
@@ -600,10 +601,12 @@ class Discord:
         self.user = re.sub(r"\D", "", str(data.get("user", self.user)))[:25]
         self.on_checkout = bool(data.get("checkout", self.on_checkout))
         self.on_lock = bool(data.get("lock", self.on_lock))
+        self.on_live = bool(data.get("live", self.on_live))
         self.failing = False
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
         with open(DISCORD_FILE, "w", encoding="utf-8") as f:
-            json.dump({"webhook": self.webhook, "user": self.user, "checkout": self.on_checkout, "lock": self.on_lock}, f)
+            json.dump({"webhook": self.webhook, "user": self.user, "checkout": self.on_checkout, "lock": self.on_lock,
+                       "live": self.on_live}, f)
         return None
 
     def _message(self, text, embed=None):
@@ -627,6 +630,10 @@ class Discord:
 
     def lock_message(self, shop):
         return self._message(f"🔒 {shop} just locked the shop. Enter the password in drop mode to keep watching.")
+
+    def live_message(self):
+        return self._message("📺 Mr Tofu just went live on Twitch. Open the Shop app now, so it's quick if something drops."
+                             f" <https://www.twitch.tv/{TWITCH_CHANNEL}>")
 
     def test_message(self):
         return self._message("🔔 Drop mode test: checkout pings will show up here.")
@@ -659,6 +666,60 @@ class Discord:
 
 
 DISCORD = Discord()
+TWITCH_CHANNEL = "mrtofulive"
+# Twitch's public thumbnail of the stream: there while he's live, otherwise it redirects to a placeholder
+TWITCH_PREVIEW = os.environ.get("DROP_TWITCH_PREVIEW") or f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{TWITCH_CHANNEL}-320x180.jpg"
+TWITCH_EVERY = float(os.environ.get("DROP_TWITCH_EVERY") or 60)  # seconds between looks
+
+
+class Live:
+    """Whether Tofu is live on Twitch (looked at once a minute while drop mode
+    runs). Going live gets you a heads-up ping, so you can open the Shop app on
+    your phone before anything drops: once per stream (a stream that drops and
+    reconnects doesn't ping again)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.on = False
+        self.pinged = 0.0
+
+    @staticmethod
+    def check():
+        """True / False, or None if Twitch didn't answer."""
+        try:
+            res = subprocess.run(["curl", "-sS", "-I", "--max-time", "10", "-o", os.devnull, "-w", "%{http_code}", TWITCH_PREVIEW],
+                                 capture_output=True, text=True)
+        except Exception:
+            return None
+        code = res.stdout.strip()
+        return True if code == "200" else False if code in ("301", "302", "404") else None
+
+    def watch(self):
+        first = True  # (if he's already live when drop mode starts, that's not news: no ping)
+        while True:
+            on = self.check()
+            if on is not None:
+                self.update(on, quiet=first)
+                first = False
+            time.sleep(TWITCH_EVERY)
+
+    def update(self, on, quiet=False):
+        with self.lock:
+            if on == self.on:
+                return
+            self.on = on
+            ping = on and not quiet and time.time() - self.pinged > 30 * 60
+            if ping:
+                self.pinged = time.time()
+        if quiet:
+            return
+        tofu = WATCHERS["tofu"]
+        tofu.log("info", "📺 Mr Tofu just went live on Twitch." if on else "📺 Mr Tofu's stream ended.")
+        if ping and DISCORD.webhook and DISCORD.on_live:
+            DISCORD.send(DISCORD.live_message(), tofu.log)
+
+
+LIVE = Live()
 
 
 def play_alert():
@@ -916,7 +977,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"events": evs, "running": W.running, "loggedIn": W.logged_in,
                             "shopState": W.shop_state, "passwordSaved": bool(W.password),
                             "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval,
-                            "wlVersion": W.wl_version})
+                            "wlVersion": W.wl_version, "live": LIVE.on})
         elif path == "/api/watchlist":
             self.send_json({"items": W.watchlist, "version": W.wl_version})
         elif path == "/api/stores":
@@ -1048,6 +1109,7 @@ def main():
         print("Shops: Mr Tofu, " + ", ".join(others))
     for w in list(WATCHERS.values()):
         w.load_soon()
+    threading.Thread(target=LIVE.watch, daemon=True).start()  # is Tofu live? (for the heads-up ping)
     if os.environ.get("DROP_WEB_NO_BROWSER") != "1":
         webbrowser.open(url)
     try:
