@@ -615,9 +615,12 @@ class Discord:
         return msg
 
     def checkout_message(self, shop, url, lines, picture=None):
-        embed = {"title": (lines[0] if len(lines) == 1 else f"{len(lines)} items")[:256], "url": url, "color": 0xD9A24B,
+        # The link in the ping goes straight to Shop Pay (signed in: pay; not: the Shop Pay sign-in, rather
+        # than the plain checkout form). The checkout drop mode opens on the PC stays as it is.
+        link = url + ("&" if "?" in url else "?") + "payment=shop_pay"
+        embed = {"title": (lines[0] if len(lines) == 1 else f"{len(lines)} items")[:256], "url": link, "color": 0xD9A24B,
                  "description": ("\n".join(lines[:15]) + "\n\n" if len(lines) > 1 else "")
-                 + "It's open in your browser on the PC. Or tap the title to check out on this device."}
+                 + "It's open in your browser on the PC. Or tap the title to pay with Shop Pay on this device."}
         if picture:
             embed["thumbnail"] = {"url": picture + ("&" if "?" in picture else "?") + "width=300"}
         return self._message(f"⚡ Drop mode opened checkout at {shop}", embed)
