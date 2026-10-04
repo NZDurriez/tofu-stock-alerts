@@ -258,6 +258,22 @@ def capped(qty, it):
     return min(qty, it["limit"]) if it.get("limit") else qty
 
 
+# Listings a shop only sells at the counter ("INSTORE ONLY …", "IN STORE …", "… IN-STORE PLAYERS
+# ONLY"): drop mode leaves them out entirely, as they can't be bought online. ("in stores" doesn't count.)
+IN_STORE = re.compile(r"\bin[\s-]?store\b", re.I)
+
+
+def in_store_only(p):
+    return bool(IN_STORE.search(p.get("title") or ""))
+
+
+def summarise_all(body):
+    """A products.json reply -> ({product id: summary}, how many in-store-only ones were left out)."""
+    products = json.loads(body).get("products", [])
+    keep = {str(p["id"]): summarise(p) for p in products if not in_store_only(p)}
+    return keep, len(products) - len(keep)
+
+
 def summarise(p):
     return {
         "title": p["title"],
@@ -393,7 +409,7 @@ def main():
     code, headers, body = fetch()
     if code == 200:
         etag = headers.get("etag")
-        seen = {str(p["id"]): summarise(p) for p in json.loads(body).get("products", [])}
+        seen, _ = summarise_all(body)
         print(f"Shop has {len(seen)} products.")
     else:
         print(f"Couldn't list the shop right now (reply {code}); you can still pick items by words.")
@@ -448,7 +464,7 @@ def main():
                 wait = interval
             elif code == 200:
                 etag = headers.get("etag")
-                current = {str(p["id"]): summarise(p) for p in json.loads(body).get("products", [])}
+                current, _ = summarise_all(body)
                 ready = []
                 for pid, it in current.items():
                     old = seen.get(pid, {"variants": {}})

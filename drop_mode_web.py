@@ -134,6 +134,7 @@ class Watcher:
         self.restart = False    # start a fresh batch of checks (new speed or new login)
         self.slow_downs = 0     # "slow down" replies in a row
         self.trouble = None     # what's going wrong with the checks, if anything
+        self.in_store = 0       # in-store-only listings left out (they can't be bought online)
         self.watchlist = self.load_watchlist()  # what you're watching for (the page's list)
         self.wl_version = 1     # goes up on every change, so other open pages reload it
         self.categories = {}    # category id -> product ids in it (Tofu's menu)
@@ -154,7 +155,7 @@ class Watcher:
         code, headers, body = dm.fetch(site=self.site)
         if code == 200:
             self.etag = headers.get("etag")
-            self.products = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
+            self.products, self.in_store = dm.summarise_all(body)
             return True, len(self.products)
         return False, code
 
@@ -186,9 +187,10 @@ class Watcher:
                 "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
             }[self.shop_state])
             if ok:
-                self.log("info", f"Shop has {info} products.")
+                self.log("info", f"Shop has {info} products"
+                         + (f" (and {self.in_store} in-store only, which drop mode leaves out)." if self.in_store else "."))
         if ok:
-            if info >= 250:
+            if info + self.in_store >= 250:
                 self.log("warn", "That's as many as drop mode can read at once (250), so anything past them isn't watched."
                          + ("" if self.id == "tofu" else " To watch just one section, remove this tab and add the section's link (…/collections/…)."))
             self.load_categories_soon()
@@ -517,7 +519,7 @@ class Watcher:
             if self.shop_state in ("locked", "bad"):  # reopened before a working password was given
                 self.shop_state = "open"
                 self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
-            current = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
+            current, self.in_store = dm.summarise_all(body)
             self.etag = etag or None
             ready = self.went_live(self.products, current)
             self.products = current
