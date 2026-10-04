@@ -263,6 +263,11 @@ input[type=search]:focus{border-color:var(--accent)}
 .kwtag.kwnot{background:var(--bad-soft);color:var(--bad)}
 .checkline{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13.5px;color:var(--muted);cursor:pointer;width:max-content}
 .checkline input{accent-color:var(--accent);margin:0}
+.exactopts{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:0 0 10px}
+.exactopts .checkline{margin:0}
+.sortset{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+.sortset .qtyset button{padding:4px 11px;min-width:0;font-size:13px}
+.listed{font-size:12.5px;color:var(--faint)}
 #exactLead b{color:var(--text);font-weight:600}
 .kwtag{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:7px;padding:1px 8px;margin:2px 4px 2px 0;font-weight:600}
 .resnote{padding:10px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line)}
@@ -499,7 +504,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
         <div id="exactBody" hidden>
           <p class="lead" id="exactLead" style="margin:6px 0 12px"></p>
-          <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
+          <div class="exactopts">
+            <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
+            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button></span></span>
+          </div>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
           <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
@@ -687,7 +695,7 @@ try { showSold = localStorage.getItem("dropShowSold") === "1"; } catch {}
 $("showSold").checked = showSold;
 function exactLead() {
   $("exactLead").innerHTML = showSold
-    ? "Everything in the shop, in stock first. <b>+ Watch</b> on a sold-out one opens checkout if that listing comes back in stock. For something not listed yet, use a keyword watch above."
+    ? "Everything in the shop, sold out too. <b>+ Watch</b> on a sold-out one opens checkout if that listing comes back in stock. For something not listed yet, use a keyword watch above."
     : "What's in stock right now. Press <b>+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above (or tick Show out of stock).";
 }
 exactLead();
@@ -695,6 +703,25 @@ $("showSold").onchange = () => {
   showSold = $("showSold").checked;
   try { localStorage.setItem("dropShowSold", showSold ? "1" : "0"); } catch {}
   exactLead(); loadCats(); search();
+};
+// Sort: newest listings first (with when each went up), or in stock first then A to Z (remembered)
+let sortBy = "new";
+try { if (localStorage.getItem("dropSort") === "az") sortBy = "az"; } catch {}
+function showSort() {
+  $("sortSet").querySelectorAll("button").forEach((b) => { const on = b.dataset.sort === sortBy; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+}
+$("sortSet").querySelectorAll("button").forEach((b) => b.onclick = () => {
+  if (b.dataset.sort === sortBy) return;
+  sortBy = b.dataset.sort;
+  try { localStorage.setItem("dropSort", sortBy); } catch {}
+  showSort(); search();
+});
+showSort();
+// "3 Oct" (with the year if it's not this year)
+const listedDate = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 };
 
 // "Or pick an exact product" starts folded away
@@ -1018,7 +1045,7 @@ let lastResults = { items: [], total: 0 }, lastQuery = "";
 async function search() {
   const q = $("search").value.trim();
   if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game) + (showSold ? "&all=1" : ""));
+  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game) + (showSold ? "&all=1" : "") + "&sort=" + sortBy);
   if (sid !== STORE || q !== $("search").value.trim()) return; // a newer search is on its way (or switched tabs)
   lastResults = r; lastQuery = q;
   renderResults();
@@ -1031,9 +1058,10 @@ function renderResults() {
     html += `<div class="bridge"><span>Sold out or not listed yet? Catch it with keywords:</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
+    const order = sortBy === "new" ? "newest first" : showSold ? "in stock first, then A–Z" : "A–Z";
     html += where
-      ? `<div class="resnote" style="border-top:0">${showSold ? `Everything in ${esc(where)}, in stock first.` : `In stock in ${esc(where)}.`} Tick several to add them together.</div>`
-      : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop, in stock first." : "Everything in stock right now."} Type to search, or tick several to add them together.</div>`;
+      ? `<div class="resnote" style="border-top:0">${showSold ? `Everything in ${esc(where)}` : `In stock in ${esc(where)}`}, ${order}. Tick several to add them together.</div>`
+      : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop" : "Everything in stock right now"}, ${order}. Type to search, or tick several to add them together.</div>`;
   }
   html += r.items.map((it) => {
     const already = onList("product", it.id), sel = ticked.get(it.id);
@@ -1041,7 +1069,7 @@ function renderResults() {
       <input type="checkbox" class="pick" ${already ? "disabled" : ""} aria-label="Tick ${esc(it.title)}">
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}</div>
+        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}${sortBy === "new" && it.listed && listedDate(it.listed) ? `<span class="listed">Listed ${esc(listedDate(it.listed))}</span>` : ""}</div>
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");

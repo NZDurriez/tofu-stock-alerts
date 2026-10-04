@@ -20,6 +20,7 @@ import time
 import traceback
 import webbrowser
 from contextlib import closing
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import drop_mode as dm  # shop access, labels and matching come from drop mode
@@ -260,10 +261,11 @@ class Watcher:
                                for cid, name, _ in self.cat_cfg],
                 "liveGames": [g for g in games if g["count"]]}
 
-    def listing(self, flt, cat="", game="", limit=40, everything=False):
+    def listing(self, flt, cat="", game="", limit=40, everything=False, sort="new"):
         """The exact-product search: what you can buy right now (or with
-        everything, sold-out and coming-soon ones too, after those), optionally
-        in one of Tofu's categories, and one game (for the live stream)."""
+        everything, sold-out and coming-soon ones too), optionally in one of
+        Tofu's categories, and one game (for the live stream). Newest listings
+        first, or (sort "az") in stock first, then A to Z."""
         keys = keywords(flt)
         in_cat = self.categories.get(cat) if cat else None
         out = []
@@ -277,7 +279,10 @@ class Watcher:
             if game and game_of(it["title"]) != game:
                 continue
             out.append(card(pid, it, self.site.shop))
-        out.sort(key=lambda x: ({"buyable": 0, "soon": 1}.get(x["state"], 2), x["title"]))  # in stock first
+        if sort == "az":
+            out.sort(key=lambda x: ({"buyable": 0, "soon": 1}.get(x["state"], 2), x["title"]))  # in stock first
+        else:
+            out.sort(key=lambda x: (-listed_at(x["listed"]), x["title"]))  # newest listings first
         return {"items": out[:limit], "total": len(out)}
 
     def watch_info(self, ids, texts):
@@ -745,7 +750,16 @@ def card(pid, it, shop=None):
         "state": "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon",
         "url": f"{shop or dm.SHOP}/products/{it['handle']}",
         "limit": it.get("limit"),  # per customer, if the shop has one
+        "listed": it.get("published") or "",  # when the shop put it up
     }
+
+
+def listed_at(stamp):
+    """'2026-10-03T12:00:00+13:00' -> seconds, for sorting newest first (0 if there's none)."""
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def norm(text):
@@ -930,7 +944,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/products":
             from urllib.parse import unquote_plus
             self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", ""), params.get("game", ""),
-                                     everything=params.get("all") == "1"))
+                                     everything=params.get("all") == "1", sort=params.get("sort", "new")))
         elif path == "/api/categories":
             self.send_json(W.category_list(everything=params.get("all") == "1"))
         elif path == "/api/password":
