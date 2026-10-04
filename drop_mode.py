@@ -28,6 +28,26 @@ KEYWORDS = [k.strip() for k in (
 DRY_OPEN = os.environ.get("DROP_DRY_OPEN") == "1"  # tests: print instead of opening the browser
 
 COOKIES = os.path.join(tempfile.gettempdir(), "tofu_drop_cookies.txt")
+
+
+class Site:
+    """One shop to watch: its address, optionally just one collection of it
+    (e.g. a store's Pokémon section), and its own cookie jar (for its password)."""
+
+    def __init__(self, shop, collection="", cookies=None):
+        self.shop = shop.rstrip("/")
+        self.collection = collection.strip("/")
+        host = re.sub(r"^https?://", "", self.shop).split("/")[0]
+        self.host = host
+        self.cookies = cookies or os.path.join(tempfile.gettempdir(), "drop_cookies_" + re.sub(r"[^\w.-]", "_", host) + ".txt")
+
+    @property
+    def products(self):
+        """The products.json to read: the whole shop, or just the collection."""
+        return (f"{self.shop}/collections/{self.collection}" if self.collection else self.shop) + "/products.json"
+
+
+DEFAULT = Site(SHOP, os.environ.get("DROP_COLLECTION", ""), COOKIES)  # Mr Tofu's shop, unless told otherwise
 # The alert sound picked in the browser version (made by sounds.py)
 SOUND_DIR = os.environ.get("DROP_SOUND_DIR") or os.path.join(
     os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "TofuDropMode")
@@ -39,13 +59,14 @@ def watched(title):
     return any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", t) for k in KEYWORDS)
 
 
-def curl(args):
+def curl(args, cookies=None):
     """Run curl (built into Windows) and return (status_code, headers, body)."""
+    jar = cookies or COOKIES
     hdr = tempfile.NamedTemporaryFile(delete=False)
     hdr.close()
     try:
         res = subprocess.run(
-            ["curl", "-sS", "--max-time", "10", "-A", UA, "-b", COOKIES, "-c", COOKIES,
+            ["curl", "-sS", "--max-time", "10", "-A", UA, "-b", jar, "-c", jar,
              "-D", hdr.name, "-w", "\n%{http_code}"] + args,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
@@ -63,33 +84,36 @@ def curl(args):
         os.unlink(hdr.name)
 
 
-def login(password):
+def login(password, site=None):
+    site = site or DEFAULT
     curl(["-X", "POST", "--data-urlencode", "form_type=storefront_password", "--data-urlencode", "utf8=✓",
-          "--data-urlencode", f"password={password}", "-o", os.devnull, f"{SHOP}/password"])
-    code, _, _ = curl([f"{SHOP}/products.json?limit=1&_={time.time_ns()}"])
+          "--data-urlencode", f"password={password}", "-o", os.devnull, f"{site.shop}/password"], site.cookies)
+    code, _, _ = curl([f"{site.products}?limit=1&_={time.time_ns()}"], site.cookies)
     return code == 200
 
 
-def login_status(password):
+def login_status(password, site=None):
     """'open' (shop isn't locked, so the password can't be checked), 'locked'
     (no password given), 'ok' (password got us in) or 'bad' (it didn't).
     Checking the lock first matters: an open shop lets anyone in, so a
     login 'working' there proves nothing."""
-    if os.path.exists(COOKIES):
-        os.unlink(COOKIES)
-    code, _, _ = curl([f"{SHOP}/products.json?limit=1&_={time.time_ns()}"])
+    site = site or DEFAULT
+    if os.path.exists(site.cookies):
+        os.unlink(site.cookies)
+    code, _, _ = curl([f"{site.products}?limit=1&_={time.time_ns()}"], site.cookies)
     if code == 200:
         return "open"
     if not password:
         return "locked"
-    return "ok" if login(password) else "bad"
+    return "ok" if login(password, site) else "bad"
 
 
-def fetch(etag=None):
-    args = [f"{SHOP}/products.json?limit=250&_={time.time_ns()}", "-H", "Accept: application/json", "--compressed"]
+def fetch(etag=None, site=None):
+    site = site or DEFAULT
+    args = [f"{site.products}?limit=250&_={time.time_ns()}", "-H", "Accept: application/json", "--compressed"]
     if etag:
         args += ["-H", f"If-None-Match: {etag}"]
-    return curl(args)
+    return curl(args, site.cookies)
 
 
 MARK = "@@drop@@"  # ends each check's output in a Checker batch
@@ -102,7 +126,8 @@ class Checker:
     time) and they start a steady `interval` apart. Falls back to a new curl
     per check if this curl is too old for --rate."""
 
-    def __init__(self):
+    def __init__(self, site=None):
+        self.site = site or DEFAULT
         self.proc = None
         self.keep_open = True
         self.failed = False
@@ -129,13 +154,13 @@ class Checker:
         # -N writes each reply straight through; the line saying how the check went
         # goes via stderr, which curl doesn't hold back (stdout would sit on it
         # until the next check), into the same pipe, so it always follows its reply.
-        args = ["curl", "-s", "-N", "--max-time", "10", "-A", UA, "-b", COOKIES, "--compressed",
+        args = ["curl", "-s", "-N", "--max-time", "10", "-A", UA, "-b", self.site.cookies, "--compressed",
                 "-H", "Accept: application/json", "--rate", rate,
                 "-w", "%{stderr}\n" + MARK + " %{http_code}\t%header{etag}\t%header{retry-after}\n"]
         if etag:
             args += ["-H", f"If-None-Match: {etag}"]
         stamp = time.time_ns()
-        args += [f"{SHOP}/products.json?limit=250&_={stamp}{i}" for i in range(count)]
+        args += [f"{self.site.products}?limit=250&_={stamp}{i}" for i in range(count)]
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace")
         with self.lock:
@@ -165,7 +190,7 @@ class Checker:
         due = time.monotonic()
         for _ in range(count):
             due += interval
-            code, headers, body = fetch(etag)
+            code, headers, body = fetch(etag, self.site)
             yield code, headers.get("etag", ""), body, headers.get("retry-after", "")
             time.sleep(max(0.0, due - time.monotonic()))
 

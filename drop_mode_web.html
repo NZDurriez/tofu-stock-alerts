@@ -55,6 +55,23 @@ h1 span{color:var(--accent)}
 .chip-s.good .dot{background:var(--ok)} .chip-s.warn .dot{background:var(--bad)} .chip-s.info .dot{background:var(--info)}
 .theme{background:none;border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:5px 12px;font:500 13px Inter;cursor:pointer}
 .theme:hover{color:var(--text)}
+/* Shop tabs: Mr Tofu's shop, plus any other Shopify shops added with ＋. Each has
+   its own watchlist and activity, and they all keep watching in the background. */
+.stores{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%}
+#storeTabs{display:contents}
+.store{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:6px 14px;font:600 14px Inter,sans-serif}
+.store:hover{color:var(--text);border-color:var(--faint)}
+.store.on{color:var(--text);border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}
+.store .sdot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.store.watching .sdot{background:var(--ok);color:var(--ok);animation:ping 1.6s ease-out infinite}
+.store.locked .sdot{background:var(--bad)}
+.store .news{min-width:19px;padding:0 6px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:12px;line-height:19px;text-align:center}
+.store .x{margin-right:-6px;padding:0 4px;border-radius:6px;color:var(--faint);font-size:18px;line-height:1}
+.store .x:hover{color:var(--bad);background:var(--bad-soft)}
+.store.add{border-style:dashed;font-weight:500}
+.pop.left{left:0;right:auto}
+.col-shop{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 10px}
+.col.collapsed .col-shop{display:none}
 
 /* Three columns: live stream (always there) | set up | watching. Set up and
    Watching each have a coloured − / + on their header line that folds the
@@ -244,7 +261,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 @keyframes glow{50%{background:var(--ok-soft)}}
 .chip-s.live{color:var(--text);animation:glow 2s ease-in-out infinite}
 .chip-s.live .dot{color:var(--ok);animation:ping 1.6s ease-out infinite}
-@media (prefers-reduced-motion:reduce){.chip-s.live,.chip-s.live .dot{animation:none}}
+@media (prefers-reduced-motion:reduce){.chip-s.live,.chip-s.live .dot,.store.watching .sdot{animation:none}}
 
 .summary{margin-top:18px;font-size:14px;color:var(--muted)}
 .summary b{color:var(--text);font-weight:600}
@@ -340,6 +357,22 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       </div>
       <button class="theme" id="themeBtn">☀️ Light</button>
     </div>
+    <nav class="stores" aria-label="Shops">
+      <span id="storeTabs" role="tablist"></span>
+      <div class="popwrap">
+        <button class="store add" id="addBtn" data-pop="addPop" aria-expanded="false" title="Watch another Shopify shop in its own tab">＋ Add a shop</button>
+        <div class="pop left" id="addPop" hidden>
+          <div class="pop-title">Watch another shop</div>
+          <p class="lead">Paste a link to a Shopify shop, or to one section of it (like its Pokémon page). It gets its own tab, watchlist and activity, and keeps watching while you're on another tab.</p>
+          <input type="text" id="addLink" placeholder="e.g. animalkingdoms.co.nz/collections/pokemon-tcg" autocomplete="off" style="width:100%">
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="addName" placeholder="Tab name (optional)" autocomplete="off" maxlength="40">
+            <button class="primary" id="addGo">Add shop</button>
+          </div>
+          <p class="hint" id="addMsg" style="margin:8px 0 0"></p>
+        </div>
+      </div>
+    </nav>
   </header>
 
   <aside class="col col-stream" data-col="stream">
@@ -354,10 +387,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   </aside>
 
   <section class="col col-setup" data-col="setup">
-    <div class="col-head"><span class="col-title">Set up</span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
+    <div class="col-head"><span class="col-title">Set up</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">1</span>Load the shop <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Only enter the password if Mr Tofu's shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</span></span></h2>
+        <h2><span class="step">1</span>Load the shop <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Only enter a password if the shop is locked. If it isn't, leave it blank (or enter it anyway and it'll be used if the shop locks later).</span></span></h2>
         <div class="row">
           <input type="text" id="pw" placeholder="Shop password (optional)" autocomplete="off">
           <button class="primary" id="loginBtn">Load shop</button>
@@ -365,14 +398,14 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="loginState" id="loginState">Not loaded yet.</div>
         <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer">
           <input type="checkbox" id="autoUnlock" checked style="accent-color:var(--accent)">
-          Unlock mrtofu.store in this browser automatically when the shop locks (needs pop-ups allowed)
+          Unlock <span class="shopHost">mrtofu.store</span> in this browser automatically when the shop locks (needs pop-ups allowed)
         </label>
       </section>
 
       <section class="card">
         <h2><span class="step">2</span>Add to your watchlist</h2>
 
-        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment Tofu adds or restocks them, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</span></span></h3>
+        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</span></span></h3>
         <div class="kwbox">
           <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
           <div class="suggest" id="suggest"></div>
@@ -394,10 +427,10 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   </section>
 
   <section class="col col-watch" data-col="watch">
-    <div class="col-head"><span class="col-title">Watching</span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
+    <div class="col-head"><span class="col-title">Watching</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on mrtofu.store if the shop is locked. You always press Pay yourself.</span></span></h2>
+        <h2><span class="step">3</span>Your watchlist <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on <span class="shopHost">mrtofu.store</span> if the shop is locked. You always press Pay yourself.</span></span></h2>
         <div class="controls watchctl">
           <label>Check every
             <select id="interval"><option value="0.5">½ second (drops)</option><option value="1">1 second</option><option value="2">2 seconds</option><option value="3" selected>3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select>
@@ -418,7 +451,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 </div>
 
 <div id="lockAlert"><div class="box">
-  <h3>🔒 Mr Tofu just locked the shop</h3>
+  <h3 id="lockTitle">🔒 Mr Tofu just locked the shop</h3>
   <p>That usually means a drop is coming. Enter the shop password to keep watching behind the lock. Drop mode keeps checking in the meantime.</p>
   <div class="row">
     <input type="text" id="lockPw" placeholder="Shop password" autocomplete="off">
@@ -429,7 +462,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 </div></div>
 
 <div id="alert"><div class="box">
-  <h3>🎯 Your pick is live</h3>
+  <h3 id="alertTitle">🎯 Your pick is live</h3>
   <p id="alertText"></p>
   <a class="go" id="alertGo" target="_blank" rel="noopener">Open checkout</a>
   <button class="later" id="alertClose">Close</button>
@@ -444,10 +477,20 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",
 let watchlist = [], wlVersion = 0;
 let info = { picks: {}, words: {} }; // how each entry stands in the shop right now
 let lastId = 0, running = false, lastProducts = 0, shopState = null, loggedIn = false, passwordSaved = false;
-let seenState = null; // shop state at the last poll (null until the first one, so reloading never auto-unlocks)
 const badgeHtml = { buyable: '<span class="badge b-buyable">Buyable</span>', soldout: '<span class="badge b-soldout">Sold out</span>', soon: '<span class="badge b-soon">Not on sale yet</span>' };
 
-async function api(path, body, headers = {}) {
+// The shops (tabs): Mr Tofu's, plus any added with ＋. The panels show one shop
+// at a time; every shop keeps watching in the background.
+let stores = [{ id: "tofu", name: "Mr Tofu", host: "mrtofu.store", collection: "", builtin: true, categories: true }];
+let STORE = "tofu"; // the shop on show
+try { STORE = localStorage.getItem("dropStore") || "tofu"; } catch {}
+const cur = () => stores.find((s) => s.id === STORE) || stores[0];
+const storeOf = (sid) => stores.find((s) => s.id === sid) || cur();
+
+// Most requests are about one shop (?store=...); the sound, the background and the list of shops are shared
+const SHARED = /^\/api\/(sound|background|stores)\b/;
+async function api(path, body, headers = {}, store = STORE) {
+  if (!SHARED.test(path)) path += (path.includes("?") ? "&" : "?") + "store=" + encodeURIComponent(store);
   const res = await fetch(path, body
     ? { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) }
     : { headers });
@@ -506,11 +549,13 @@ $("exactToggle").onclick = () => {
   if (open) { loadCats(); search(); $("search").focus(); }
 };
 
-// Tofu's menu headers as filters for the search (same categories as his site)
+// Tofu's menu headers as filters for the search (same categories as his site; other shops don't have them)
 let cat = "", game = "", catNames = {}, gameNames = {}, catTimer;
 async function loadCats() {
-  if (!lastProducts) { $("cats").innerHTML = ""; $("subcats").hidden = true; return; }
+  const sid = STORE;
+  if (!lastProducts || !cur().categories) { $("cats").innerHTML = ""; $("subcats").hidden = true; return; }
   const r = await api("/api/categories");
+  if (sid !== STORE) return; // (switched tabs meanwhile)
   catNames = Object.fromEntries(r.categories.map((c) => [c.id, c.name]));
   const chip = (id, name, n, on) => `<button type="button" class="cat${on ? " on" : ""}" data-id="${id}">${esc(name)}${n === null ? "" : `<span class="n">${n}</span>`}</button>`;
   $("cats").innerHTML = chip("", "All", null, cat === "")
@@ -540,7 +585,7 @@ function streamOn() {
 }
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
 
-// ---------- small pop-up menus (🔔 alert sound, chat help) ----------
+// ---------- small pop-up menus (🔔 alert sound, 🖼 background, ＋ add a shop) ----------
 // Open on click; close on a click anywhere else, or Esc.
 function closePops() {
   document.querySelectorAll(".pop").forEach((p) => { p.hidden = true; });
@@ -558,34 +603,36 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(
 // ---------- step 1 ----------
 function setChip(id, text, tone) { $(id).className = "chip-s" + (tone ? " " + tone : ""); $(id).lastElementChild.textContent = text; }
 
-// Log THIS browser in to the locked shop: submit the password to mrtofu.store/password
-// in a new tab, exactly like typing it on Tofu's password page. Afterwards checkout
-// links open properly in this browser instead of bouncing to the password page.
-async function unlockBrowser(fromClick) {
-  const r = await api("/api/password", null, { "X-Drop-Mode": "1" });
-  const pw = $("pw").value.trim() || r.password;
+// Log THIS browser in to a locked shop: submit the password to the shop's /password
+// page in a new tab, exactly like typing it there. Afterwards checkout links open
+// properly in this browser instead of bouncing to the password page.
+async function unlockBrowser(fromClick, sid = STORE) {
+  const host = storeOf(sid).host;
+  const r = await api("/api/password", null, { "X-Drop-Mode": "1" }, sid);
+  const pw = (sid === STORE && $("pw").value.trim()) || r.password;
   if (!pw) { if (fromClick) alert("Enter the shop password in step 1 first."); return; }
   const form = document.createElement("form");
   form.method = "POST";
   form.action = r.shop + "/password";
-  form.target = "tofu_unlock";
+  form.target = "unlock_" + sid;
   form.acceptCharset = "UTF-8";
   for (const [k, v] of Object.entries({ form_type: "storefront_password", utf8: "✓", password: pw })) {
     const input = document.createElement("input");
     input.type = "hidden"; input.name = k; input.value = v;
     form.appendChild(input);
   }
-  const win = window.open("", "tofu_unlock"); // a named tab for the form to load into
+  const win = window.open("", "unlock_" + sid); // a named tab for the form to load into
   if (!win) {
-    if (!fromClick) logLocal("warn", "Couldn't open a tab to unlock the shop in your browser (pop-ups blocked). Click 🔓 Unlock in step 1.");
+    if (!fromClick) logLocal("warn", `Couldn't open a tab to unlock ${host} in your browser (pop-ups blocked). Click 🔓 Unlock in step 1.`, sid);
     return;
   }
   document.body.appendChild(form); form.submit(); form.remove();
-  logLocal("ok", "Unlocked mrtofu.store in this browser (opened in a new tab).");
+  logLocal("ok", `Unlocked ${host} in this browser (opened in a new tab).`, sid);
 }
 
 // Show a message in the activity feed that only this page knows about
-function logLocal(kind, text) {
+function logLocal(kind, text, sid = STORE) {
+  if (sid !== STORE) text = `${storeOf(sid).name}: ${text}`; // (about a shop on another tab)
   document.querySelector("#feed .empty-ev")?.remove();
   const line = document.createElement("div");
   line.className = "ev " + kind;
@@ -595,7 +642,7 @@ function logLocal(kind, text) {
 
 let loginSig = "";
 function renderLoginState() {
-  const sig = [shopState, loggedIn, passwordSaved].join("|");
+  const sig = [STORE, shopState, loggedIn, passwordSaved].join("|");
   if (sig === loginSig) return; // only redraw when something changed (keeps the button clickable)
   loginSig = sig;
   const el = $("loginState");
@@ -607,7 +654,7 @@ function renderLoginState() {
   }[shopState] || ["", "Not loaded yet."];
   el.className = "loginState" + (msg[0] ? " " + msg[0] : "");
   el.innerHTML = `<span>${esc(msg[1])}</span><span class="row">`
-    + (shopState === "ok" ? '<button class="primary" id="unlockBtn">🔓 Unlock mrtofu.store in this browser</button>' : "")
+    + (shopState === "ok" ? `<button class="primary" id="unlockBtn">🔓 Unlock ${esc(cur().host)} in this browser</button>` : "")
     + (loggedIn || passwordSaved ? '<button class="secondary" id="logoutBtn">Log out</button>' : "") + "</span>";
   const ub = $("unlockBtn");
   if (ub) ub.onclick = () => unlockBrowser(true);
@@ -616,13 +663,15 @@ function renderLoginState() {
 }
 
 $("loginBtn").onclick = async () => {
+  const sid = STORE;
   $("loginBtn").disabled = true; $("loginBtn").textContent = "Loading…";
   const r = await api("/api/login", { password: $("pw").value });
   $("loginBtn").disabled = false; $("loginBtn").textContent = "Load shop";
+  if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false, sid); // locked shop + right password
+  seenStates[sid] = r.shopState;
+  if (sid !== STORE) return; // (switched tabs meanwhile)
   lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn;
-  if (r.shopState === "ok" && $("autoUnlock").checked) unlockBrowser(false); // locked shop + right password
-  seenState = r.shopState;
-  await poll(); search(); refreshInfo(); kwPreview();
+  await poll(); search(); refreshInfo(); kwPreview(); loadCats();
 };
 $("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
 
@@ -686,11 +735,11 @@ async function kwPreview() {
   const text = cleanKw($("kwInput").value), el = $("kwPrev");
   if (!text) { el.innerHTML = ""; kwShowAll = false; return; }
   if (!lastProducts) { el.innerHTML = '<div class="pv-note">Load the shop to see what these keywords match.</div>'; return; }
-  const m = await api("/api/match?limit=50&k=" + encodeURIComponent(text));
-  if (text !== cleanKw($("kwInput").value)) return; // still typing
+  const sid = STORE, m = await api("/api/match?limit=50&k=" + encodeURIComponent(text));
+  if (sid !== STORE || text !== cleanKw($("kwInput").value)) return; // still typing (or switched tabs)
   const rows = m.items.concat(m.unavailable);
   if (!rows.length) {
-    el.innerHTML = '<div class="pv-note">Nothing in the shop matches yet. Checkout opens the moment Tofu adds something that does.</div>';
+    el.innerHTML = '<div class="pv-note">Nothing in the shop matches yet. Checkout opens the moment something that does is added.</div>';
     return;
   }
   const soldOut = m.unavailable.filter((u) => u.state === "soldout").length;
@@ -702,7 +751,7 @@ async function kwPreview() {
   const note = m.total > 1
     ? `<div class="pv-warn">As typed, checkout opens for all ${m.total} in stock ${when}. Click one to watch just that.</div>`
     : m.total === 1 ? `<div class="pv-note" style="margin-bottom:8px">The one in stock goes to checkout ${when}.</div>`
-    : `<div class="pv-note" style="margin-bottom:8px">Checkout opens if ${m.unavailableTotal === 1 ? "it comes" : "one comes"} back in stock, or Tofu adds a new match.</div>`;
+    : `<div class="pv-note" style="margin-bottom:8px">Checkout opens if ${m.unavailableTotal === 1 ? "it comes" : "one comes"} back in stock, or a new match is added.</div>`;
   const shown = kwShowAll ? rows : rows.slice(0, 6);
   el.innerHTML = `<div class="pv-head"><span>Matches right now: ${counts}</span>${rows.length > 1 && m.total < 2 ? "<span>Click one to use its name</span>" : ""}</div>
     ${note}
@@ -742,8 +791,8 @@ let lastResults = { items: [], total: 0 }, lastQuery = "";
 async function search() {
   const q = $("search").value.trim();
   if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game));
-  if (q !== $("search").value.trim()) return; // a newer search is on its way
+  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game));
+  if (sid !== STORE || q !== $("search").value.trim()) return; // a newer search is on its way (or switched tabs)
   lastResults = r; lastQuery = q;
   renderResults();
 }
@@ -830,7 +879,7 @@ function statusHtml(w) {
   if (w.kind === "product") {
     const it = info.picks[w.id];
     if (!it) return "";
-    if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if Tofu lists it again';
+    if (it.state === "gone") return '<span class="badge b-soon">Not listed right now</span> Opens if it gets listed again';
     const over = w.max && it.price && parseFloat(it.price) > w.max;
     return badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : "")
       + (it.state === "buyable" ? "" : it.state === "soldout" ? " · Opens when it's restocked" : " · Opens when it goes on sale")
@@ -839,10 +888,10 @@ function statusHtml(w) {
   const m = info.words[w.text];
   if (!m) return "";
   if (!m.total) {
-    if (!m.unavailableTotal) return '<span class="badge b-soon">Nothing listed yet</span> Opens the moment Tofu adds a match';
+    if (!m.unavailableTotal) return '<span class="badge b-soon">Nothing listed yet</span> Opens the moment a match is added';
     const gone = m.unavailable.map((u) => `${esc(u.title)} (${u.state === "soldout" ? "sold out" : "not on sale yet"})`).join("; ")
       + (m.unavailableTotal > m.unavailable.length ? "…" : "");
-    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or Tofu adds a new match</span>`;
+    return `<span class="badge b-soldout">Not in stock</span> ${gone}<span style="width:100%">Opens when one comes back in stock, or a new match is added</span>`;
   }
   const names = m.items.map((i) => esc(i.title)).join("; ") + (m.total > m.items.length ? "…" : "");
   const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
@@ -891,12 +940,15 @@ function renderWatchlist() {
 }
 // Ask the program how each entry stands (in stock, sold out, what a search matches)
 async function refreshInfo() {
+  const sid = STORE;
   if (lastProducts && watchlist.length) {
     try {
-      info = await api("/api/watchinfo", {
+      const got = await api("/api/watchinfo", {
         ids: watchlist.filter((w) => w.kind === "product").map((w) => w.id),
         texts: watchlist.filter((w) => w.kind === "words").map((w) => w.text),
       });
+      if (sid !== STORE) return; // (switched tabs meanwhile)
+      info = got;
     } catch {}
   }
   renderWatchlist();
@@ -912,21 +964,26 @@ function watchlistBody() {
 // Saved in this browser, and handed to the program straight away if it's watching
 // Save it in drop mode (which watches for the new list straight away if it's watching)
 function watchlistChanged(redraw = true) {
-  api("/api/watchlist", { items: watchlist }).then((r) => { if (r && r.version) wlVersion = r.version; }).catch(() => {});
+  const sid = STORE;
+  api("/api/watchlist", { items: watchlist }).then((r) => { if (sid === STORE && r && r.version) wlVersion = r.version; }).catch(() => {});
   if (redraw) { refreshInfo(); search(); renderKwActs(); }
 }
 async function loadWatchlist() {
-  const r = await api("/api/watchlist");
+  const sid = STORE, r = await api("/api/watchlist");
+  if (sid !== STORE) return; // (switched tabs meanwhile)
   let items = r.items, version = r.version;
-  // First run with the shared list: bring over the one this browser had saved
-  try {
-    const old = JSON.parse(localStorage.getItem("dropWatchlist") || "[]");
-    if (!items.length && old.length && !localStorage.getItem("dropWatchlistMoved")) {
-      const saved = await api("/api/watchlist", { items: old });
-      items = saved.items; version = saved.version;
-    }
-    localStorage.setItem("dropWatchlistMoved", "1");
-  } catch {}
+  // First run with the shared list: bring over the one this browser had saved (Mr Tofu's)
+  if (sid === "tofu") {
+    try {
+      const old = JSON.parse(localStorage.getItem("dropWatchlist") || "[]");
+      if (!items.length && old.length && !localStorage.getItem("dropWatchlistMoved")) {
+        const saved = await api("/api/watchlist", { items: old }, {}, sid);
+        items = saved.items; version = saved.version;
+      }
+      localStorage.setItem("dropWatchlistMoved", "1");
+    } catch {}
+    if (sid !== STORE) return;
+  }
   watchlist = items; wlVersion = version;
   refreshInfo(); search(); renderKwActs();
 }
@@ -1043,8 +1100,10 @@ async function toWav(bytes) {
   return btoa(bin);
 }
 
-function openCheckout(ev) {
+function openCheckout(ev, sid = STORE) {
   const what = ev.text.replace(/^⚡ Opening checkout: /, "");
+  const title = "🎯 Your pick is live" + (stores.length > 1 ? ` at ${storeOf(sid).name}` : "");
+  $("alertTitle").textContent = title;
   $("alertGo").href = ev.url;
   if (ev.openedByProgram) { // already opened in your default browser
     $("alertText").textContent = what + " (already opened in your browser)";
@@ -1055,41 +1114,46 @@ function openCheckout(ev) {
     $("alert").classList.toggle("show", !win);        // blocked? show the button instead
   }
   let n = 0; const orig = document.title;
-  const flash = setInterval(() => { document.title = n++ % 2 ? orig : "🎯 Your pick is live"; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
+  const flash = setInterval(() => { document.title = n++ % 2 ? orig : title; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
   if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-    const note = new Notification("🎯 Your pick is live", { body: what });
+    const note = new Notification(title, { body: what });
     note.onclick = () => { window.open(ev.url, "_blank"); note.close(); };
   }
 }
 // ---------- the shop got locked while watching ----------
-function showLockAlert() {
+let lockStore = null; // the shop the password box is for
+function showLockAlert(sid = STORE) {
+  const name = storeOf(sid).name;
+  lockStore = sid;
+  $("lockTitle").textContent = `🔒 ${name} just locked the shop`;
   $("lockErr").textContent = "";
-  $("lockPw").value = $("pw").value;
+  $("lockPw").value = sid === STORE ? $("pw").value : "";
   $("lockAlert").classList.add("show");
   setTimeout(() => $("lockPw").focus(), 50);
   let n = 0; const orig = document.title;
   const flash = setInterval(() => { document.title = n++ % 2 ? orig : "🔒 Shop locked: password needed"; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
   if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-    new Notification("🔒 Mr Tofu just locked the shop", { body: "Enter the password in drop mode to keep watching." });
+    new Notification(`🔒 ${name} just locked the shop`, { body: "Enter the password in drop mode to keep watching." });
   }
 }
 $("lockGo").onclick = async () => {
-  const pw = $("lockPw").value.trim();
+  const pw = $("lockPw").value.trim(), sid = lockStore || STORE;
   if (!pw) { $("lockErr").textContent = "Enter the password first."; return; }
   $("lockGo").disabled = true; $("lockGo").textContent = "Checking…";
-  const r = await api("/api/login", { password: pw });
+  const r = await api("/api/login", { password: pw }, {}, sid);
   $("lockGo").disabled = false; $("lockGo").textContent = "Continue";
   if (r.shopState === "ok") {
-    $("pw").value = pw;
+    if (sid === STORE) $("pw").value = pw;
     $("lockAlert").classList.remove("show");
-    if ($("autoUnlock").checked) unlockBrowser(true);
+    if ($("autoUnlock").checked) unlockBrowser(true, sid);
   } else if (r.shopState === "open") {
     $("lockAlert").classList.remove("show"); // reopened in the meantime
   } else {
     $("lockErr").textContent = "That password didn't work. Check it and try again.";
   }
-  seenState = r.shopState;
-  await poll(); search(); refreshInfo(); kwPreview();
+  seenStates[sid] = r.shopState;
+  await pollStore(sid);
+  if (sid === STORE) { search(); refreshInfo(); kwPreview(); }
 };
 $("lockPw").onkeydown = (e) => { if (e.key === "Enter") $("lockGo").click(); };
 $("lockLater").onclick = () => $("lockAlert").classList.remove("show");
@@ -1097,26 +1161,123 @@ $("lockLater").onclick = () => $("lockAlert").classList.remove("show");
 $("alertClose").onclick = () => $("alert").classList.remove("show");
 $("alertGo").onclick = () => setTimeout(() => $("alert").classList.remove("show"), 200);
 
-// ---------- activity feed + status ----------
-async function poll() {
+// ---------- shop tabs ----------
+const seen = {}, seenStates = {}, unseen = {}, stat = {}; // per shop: newest event handled, shop state, news while its tab is hidden, status
+let viewGen = 0; // goes up on every tab switch, so a reply about the old tab isn't drawn on the new one
+let storesSig = "";
+function renderStores() {
+  const sig = JSON.stringify([STORE, stores, stat, unseen]);
+  if (sig === storesSig) return; // (only redraw on a change, so the tabs stay clickable)
+  storesSig = sig;
+  $("storeTabs").innerHTML = stores.map((s) => {
+    const st = stat[s.id] || {}, locked = st.shopState === "locked" || st.shopState === "bad", on = s.id === STORE;
+    const where = s.host + (s.collection ? "/collections/" + s.collection : "");
+    const doing = locked ? "shop locked" : st.running ? `watching every ${st.interval}s` : "not watching";
+    return `<button type="button" class="store${on ? " on" : ""}${locked ? " locked" : st.running ? " watching" : ""}" role="tab" aria-selected="${on}" data-id="${esc(s.id)}" title="${esc(where + " · " + doing)}">`
+      + `<i class="sdot"></i><span>${esc(s.name)}</span>`
+      + (unseen[s.id] ? `<span class="news" title="New since you looked">${unseen[s.id]}</span>` : "")
+      + (on && !s.builtin ? `<span class="x" title="Remove this shop" aria-label="Remove ${esc(s.name)}">×</span>` : "")
+      + "</button>";
+  }).join("");
+  $("storeTabs").querySelectorAll(".store").forEach((b) => b.onclick = (e) => {
+    if (e.target.closest(".x")) removeStore(b.dataset.id); else switchStore(b.dataset.id);
+  });
+}
+// The shown shop's name and address, wherever the page mentions them
+function applyStore() {
+  const s = cur();
+  document.querySelectorAll(".shopHost").forEach((el) => { el.textContent = s.host; });
+  document.querySelectorAll(".col-shop").forEach((el) => { el.textContent = s.name; el.hidden = stores.length < 2; });
+  renderStores();
+}
+async function loadStores() {
+  try { const r = await api("/api/stores"); if (r.stores && r.stores.length) stores = r.stores; } catch {}
+}
+const savedInterval = () => { try { const s = localStorage.getItem("dropInterval"); if (s && [...$("interval").options].some((o) => o.value === s)) return s; } catch {} return "3"; };
+function switchStore(sid) {
+  if (sid === STORE || !stores.some((s) => s.id === sid)) return;
+  STORE = sid; viewGen++; unseen[sid] = 0;
+  try { localStorage.setItem("dropStore", sid); } catch {}
+  // Start the panels afresh for this shop
+  watchlist = []; wlVersion = 0; info = { picks: {}, words: {} };
+  lastId = 0; running = false; lastProducts = 0; shopState = null; loggedIn = false; passwordSaved = false;
+  loginSig = ""; hadProducts = false; wlRedrawLater = false;
+  cat = ""; game = ""; ticked.clear(); lastResults = { items: [], total: 0 }; lastQuery = "";
+  $("pw").value = ""; $("search").value = ""; $("kwInput").value = ""; kwQty = 1; kwShowAll = false;
+  $("feed").innerHTML = '<div class="ev empty-ev">Nothing yet.</div>';
+  $("interval").value = savedInterval();
+  applyStore(); renderLoginState(); renderWatchlist(); renderKwActs(); kwPreview(); search(); loadCats();
+  loadWatchlist().catch(() => {});
+  poll();
+}
+async function removeStore(sid) {
+  const s = stores.find((x) => x.id === sid);
+  if (!s || s.builtin || !confirm(`Remove the ${s.name} tab? Drop mode stops watching it.\n(Its watchlist is kept, in case you add the shop again.)`)) return;
+  const r = await api("/api/stores/remove", { id: sid });
+  if (r.stores) stores = r.stores;
+  if (lockStore === sid) $("lockAlert").classList.remove("show");
+  delete seen[sid]; delete seenStates[sid]; delete unseen[sid]; delete stat[sid];
+  if (STORE === sid) switchStore("tofu"); else applyStore();
+}
+// ＋ Add a shop: paste its link (or one section's link)
+$("addBtn").addEventListener("click", () => setTimeout(() => { if (!$("addPop").hidden) $("addLink").focus(); }));
+$("addGo").onclick = async () => {
+  const link = $("addLink").value.trim();
+  if (!link) { $("addMsg").textContent = "Paste the shop's link first."; return; }
+  $("addGo").disabled = true; $("addMsg").textContent = "Checking the shop…";
   try {
-    const r = await api("/api/events?since=" + lastId);
-    for (const ev of r.events) {
-      document.querySelector("#feed .empty-ev")?.remove(); // drop the "Nothing yet" placeholder (keep page-only notes)
-      lastId = ev.id;
-      const line = document.createElement("div");
-      line.className = "ev " + ev.kind;
-      line.innerHTML = `<span class="tm">${ev.t}</span><i class="k"></i><span>${esc(ev.text.replace(/^⚡ /, ""))}${ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener">open</a>` : ""}</span>`;
-      $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
-      if (Date.now() - pageStart > 3000) {
-        if (ev.kind === "checkout") openCheckout(ev);
-        if (ev.alert === "lock") showLockAlert();
-        if (ev.alert === "open") $("lockAlert").classList.remove("show");
-      }
+    const r = await api("/api/stores/add", { link, name: $("addName").value.trim() });
+    if (r.error) { $("addMsg").textContent = r.error; return; }
+    stores = r.stores;
+    $("addLink").value = ""; $("addName").value = ""; $("addMsg").textContent = "";
+    closePops();
+    switchStore(r.id);
+  } catch {
+    $("addMsg").textContent = "Couldn't reach drop mode.";
+  } finally {
+    $("addGo").disabled = false;
+  }
+};
+$("addLink").onkeydown = $("addName").onkeydown = (e) => { if (e.key === "Enter") $("addGo").click(); };
+
+// ---------- activity feed + status ----------
+// Every second, each shop's news. The shown shop's goes in the feed and the
+// status; a checkout or lock pops up whichever tab is on show.
+function alertFor(ev, sid) {
+  if (ev.kind === "checkout") openCheckout(ev, sid);
+  if (ev.alert === "lock") showLockAlert(sid);
+  if (ev.alert === "open" && lockStore === sid) $("lockAlert").classList.remove("show");
+  if (sid !== STORE && (ev.kind === "checkout" || ev.alert === "lock")) unseen[sid] = (unseen[sid] || 0) + 1; // a number on its tab
+}
+async function pollOnce(sid) {
+  const gen = viewGen;
+  try {
+    const r = await api("/api/events?since=" + (sid === STORE ? lastId : (seen[sid] || 0)), null, {}, sid);
+    if (r.error === "no such shop") { // removed in another window
+      await loadStores();
+      if (!stores.some((s) => s.id === STORE)) switchStore("tofu"); else applyStore();
+      return;
     }
+    const draw = sid === STORE && gen === viewGen; // still the tab on show?
+    const first = seen[sid] === undefined, before = seen[sid] || 0; // first look since the page opened: old news, no pop-ups
+    for (const ev of r.events) {
+      if (draw) {
+        document.querySelector("#feed .empty-ev")?.remove(); // drop the "Nothing yet" placeholder (keep page-only notes)
+        lastId = ev.id;
+        const line = document.createElement("div");
+        line.className = "ev " + ev.kind;
+        line.innerHTML = `<span class="tm">${ev.t}</span><i class="k"></i><span>${esc(ev.text.replace(/^⚡ /, ""))}${ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener">open</a>` : ""}</span>`;
+        $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
+      }
+      if (!first && ev.id > before) alertFor(ev, sid);
+    }
+    seen[sid] = r.events.length ? Math.max(before, r.events[r.events.length - 1].id) : before;
     // The shop just locked and drop mode got in with the password: log this browser in too
-    if (r.shopState === "ok" && seenState !== null && seenState !== "ok" && $("autoUnlock").checked) unlockBrowser(false);
-    seenState = r.shopState;
+    if (r.shopState === "ok" && seenStates[sid] !== undefined && seenStates[sid] !== "ok" && $("autoUnlock").checked) unlockBrowser(false, sid);
+    seenStates[sid] = r.shopState;
+    stat[sid] = { running: r.running, shopState: r.shopState, interval: r.interval };
+    renderStores();
+    if (!draw) return;
     running = r.running; lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn; passwordSaved = r.passwordSaved;
     const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"] }[shopState];
     setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"),
@@ -1126,17 +1287,36 @@ async function poll() {
     $("startBtn").textContent = r.running ? "✓ Watching" : "Start watching";
     $("startBtn").disabled = !r.products || r.running;
     $("stopBtn").disabled = !r.running;
-    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); } // the program already had the shop loaded
-    if (r.wlVersion && wlVersion && r.wlVersion !== wlVersion) { wlVersion = r.wlVersion; loadWatchlist(); } // changed on another device
+    const speed = [...$("interval").options].find((o) => +o.value === r.interval);
+    if (r.running && speed && document.activeElement !== $("interval")) $("interval").value = speed.value; // (each shop has its own speed)
+    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); loadCats(); } // the shop is loaded
+    if (r.wlVersion && wlVersion && r.wlVersion !== wlVersion) { wlVersion = r.wlVersion; loadWatchlist(); } // changed in another window
     renderLoginState();
   } catch {
-    setChip("sRun", "Drop mode program isn't running", "warn");
+    if (sid === STORE) setChip("sRun", "Drop mode program isn't running", "warn");
   }
 }
-const pageStart = Date.now();
+const busy = {};
+async function pollStore(sid) { // one at a time per shop (two at once would show events twice)
+  while (busy[sid]) await busy[sid];
+  const p = busy[sid] = pollOnce(sid);
+  try { await p; } finally { if (busy[sid] === p) busy[sid] = null; }
+}
+const poll = () => pollStore(STORE);
+function pollAll() { for (const s of stores) if (!busy[s.id]) pollStore(s.id); }
+
 let hadProducts = false;
-layoutCols(); streamOn(); renderWatchlist(); renderKwActs(); loadWatchlist().catch(() => {}); loadSound().catch(() => {}); loadBackground().catch(() => {}); poll(); setInterval(poll, 1000);
+layoutCols(); streamOn(); renderKwActs(); loadSound().catch(() => {}); loadBackground().catch(() => {});
+loadStores().then(() => {
+  if (!stores.some((s) => s.id === STORE)) STORE = "tofu";
+  applyStore(); renderWatchlist(); loadWatchlist().catch(() => {});
+  pollAll(); setInterval(pollAll, 1000);
+});
 setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
+setInterval(async () => { // shops added or removed in another window
+  await loadStores();
+  if (!stores.some((s) => s.id === STORE)) switchStore("tofu"); else applyStore();
+}, 10000);
 </script>
 </body>
 </html>

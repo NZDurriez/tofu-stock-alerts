@@ -5,9 +5,10 @@ same job as drop_mode.py: log in behind the shop password, pick products and
 quantities, then watch every few seconds and open ⚡ checkout the moment a pick
 can be bought. You still press Pay yourself. The alert sound (picked in the
 page) plays from this program, so it works even when the page is in the
-background.
+background. Mr Tofu's shop is built in; other Shopify shops can be added as
+extra tabs, each watched separately.
 
-Start it with the "Tofu Drop Mode (Browser)" shortcut on the desktop.
+Start it with the "Tofu Drop Mode" shortcut on the desktop.
 """
 import base64
 import json
@@ -35,7 +36,10 @@ def price_cap(value):
     except (TypeError, ValueError):
         return None
     return value if value > 0 else None
-WATCHLIST_FILE = os.path.join(dm.SOUND_DIR, "watchlist.json")  # the watchlist (kept here, not in the browser)
+
+
+WATCHLIST_FILE = os.path.join(dm.SOUND_DIR, "watchlist.json")  # Mr Tofu's watchlist (kept here, not in the browser)
+STORES_FILE = os.path.join(dm.SOUND_DIR, "stores.json")        # other shops you've added as tabs
 # The page's background picture (yours, kept in the settings folder, not the code)
 BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
 
@@ -92,10 +96,18 @@ def game_of(title):
 
 
 class Watcher:
-    """Everything the page sees, shared between the web requests and the watch thread."""
+    """One shop's watching: everything its tab sees, shared between the web
+    requests and the watch thread."""
 
-    def __init__(self):
+    def __init__(self, sid="tofu", name="Mr Tofu", site=None, categories=CATEGORIES, watchlist_file=WATCHLIST_FILE):
+        self.id, self.name = sid, name
+        self.site = site or dm.DEFAULT
+        self.cat_cfg = categories        # menu headers to filter by (Mr Tofu's; none for other shops)
+        self.watchlist_file = watchlist_file
+        self.last_check = None
         self.lock = threading.Lock()
+        self.login_lock = threading.Lock()  # one login at a time (the start-up look and a Load shop click)
+        self.ev_seq = 0         # numbers the events; the page asks for the ones after the last it saw
         self.password = ""
         self.logged_in = False
         self.shop_state = None   # open / locked / ok / bad (from the last login)
@@ -110,7 +122,7 @@ class Watcher:
         self.events = []        # [{id, t, kind, text, url?}]
         self.last_poll = 0.0    # when the page last asked for events
         self.thread = None
-        self.checker = dm.Checker()  # keeps one connection to the shop open while watching
+        self.checker = dm.Checker(self.site)  # keeps one connection to the shop open while watching
         self.gen = 0            # bumped on start/stop, so an old watch thread knows to quit
         self.restart = False    # start a fresh batch of checks (new speed or new login)
         self.slow_downs = 0     # "slow down" replies in a row
@@ -122,25 +134,35 @@ class Watcher:
 
     def log(self, kind, text, url=None, **extra):
         with self.lock:
-            ev = {"id": len(self.events) + 1, "t": time.strftime("%H:%M:%S"), "kind": kind, "text": text, **extra}
+            self.ev_seq += 1
+            ev = {"id": self.ev_seq, "t": time.strftime("%H:%M:%S"), "kind": kind, "text": text, **extra}
             if url:
                 ev["url"] = url
             self.events.append(ev)
             del self.events[:-500]  # keep the feed bounded
-        print(f"[{ev['t']}] {text}" + (f" {url}" if url else ""))
+        shop = "" if self.id == "tofu" else f"[{self.name}] "
+        print(f"[{ev['t']}] {shop}{text}" + (f" {url}" if url else ""))
 
     # ---- shop ----
     def refresh(self):
-        code, headers, body = dm.fetch()
+        code, headers, body = dm.fetch(site=self.site)
         if code == 200:
             self.etag = headers.get("etag")
             self.products = {str(p["id"]): dm.summarise(p) for p in json.loads(body).get("products", [])}
             return True, len(self.products)
         return False, code
 
+    def load_soon(self):
+        """Look at the shop in the background (when drop mode starts, or the shop is added)."""
+        threading.Thread(target=self.login, args=(self.password,), daemon=True).start()
+
     def login(self, password):
+        with self.login_lock:
+            return self._login(password)
+
+    def _login(self, password):
         password = password.strip()
-        self.shop_state = dm.login_status(password)  # open / locked / ok / bad
+        self.shop_state = dm.login_status(password, self.site)  # open / locked / ok / bad
         self.logged_in = self.shop_state == "ok"
         # Keep a password we couldn't check yet (shop open) so it's tried if the shop locks
         self.password = password if self.shop_state in ("ok", "open") else ""
@@ -155,6 +177,9 @@ class Watcher:
         }[self.shop_state])
         if ok:
             self.log("info", f"Shop has {info} products.")
+            if info >= 250:
+                self.log("warn", "That's as many as drop mode can read at once (250), so anything past them isn't watched."
+                         + ("" if self.id == "tofu" else " To watch just one section, remove this tab and add the section's link (…/collections/…)."))
             self.load_categories_soon()
             if self.running:  # logged in mid-watch (e.g. after a lock): catch anything that went live meanwhile
                 self.checkout(self.went_live(before, self.products, quiet=True))
@@ -165,9 +190,13 @@ class Watcher:
         return ok
 
     def logout(self):
+        with self.login_lock:
+            self._logout()
+
+    def _logout(self):
         self.password, self.logged_in = "", False
-        if os.path.exists(dm.COOKIES):
-            os.unlink(dm.COOKIES)
+        if os.path.exists(self.site.cookies):
+            os.unlink(self.site.cookies)
         self.etag = None
         ok, info = self.refresh()
         self.shop_state = "open" if ok else "locked"
@@ -187,17 +216,17 @@ class Watcher:
         threading.Thread(target=self.load_categories, daemon=True).start()
 
     def load_categories(self):
-        """Which products are in each of Tofu's menu headers (a few requests,
-        done in the background after the shop loads)."""
+        """Which products are in each of the shop's menu headers (a few requests,
+        done in the background after the shop loads). Only Mr Tofu's has them."""
         self.cats_at = 0.0
         found = {}
-        for cid, _, handles in CATEGORIES:
+        for cid, _, handles in self.cat_cfg:
             ids = set()
             for handle in handles:
                 for page in range(1, 5):
                     try:
-                        code, _, body = dm.curl([f"{dm.SHOP}/collections/{handle}/products.json?limit=250&page={page}",
-                                                 "-H", "Accept: application/json", "--compressed"])
+                        code, _, body = dm.curl([f"{self.site.shop}/collections/{handle}/products.json?limit=250&page={page}",
+                                                 "-H", "Accept: application/json", "--compressed"], self.site.cookies)
                         batch = json.loads(body).get("products", []) if code == 200 else []
                     except Exception:
                         batch = []
@@ -208,6 +237,8 @@ class Watcher:
         self.categories, self.cats_at = found, time.time()
 
     def category_list(self):
+        if not self.cat_cfg:
+            return {"loading": False, "categories": [], "liveGames": []}
         if self.products and time.time() - self.cats_at > 600 and self.cats_at:  # refresh every 10 minutes
             self.load_categories_soon()
         in_stock = {pid for pid, it in self.products.items() if dm.buyable(it)}
@@ -215,7 +246,7 @@ class Watcher:
         games = [{"id": gid, "name": name, "count": live.count(gid)} for gid, name, _ in GAMES + [("other", "Other", [])]]
         return {"loading": not self.cats_at and bool(self.products),
                 "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & in_stock)}
-                               for cid, name, _ in CATEGORIES],
+                               for cid, name, _ in self.cat_cfg],
                 "liveGames": [g for g in games if g["count"]]}
 
     def listing(self, flt, cat="", game="", limit=40):
@@ -234,14 +265,14 @@ class Watcher:
                 continue
             if game and game_of(it["title"]) != game:
                 continue
-            out.append(card(pid, it))
+            out.append(card(pid, it, self.site.shop))
         out.sort(key=lambda x: x["title"])
         return {"items": out[:limit], "total": len(out)}
 
     def watch_info(self, ids, texts):
         """How each watchlist entry stands right now (for the watchlist panel)."""
         return {
-            "picks": {pid: card(pid, self.products[pid]) if pid in self.products else {"state": "gone"} for pid in ids},
+            "picks": {pid: card(pid, self.products[pid], self.site.shop) if pid in self.products else {"state": "gone"} for pid in ids},
             "words": {text: self.matches(text, limit=3) for text in texts},
         }
 
@@ -251,7 +282,7 @@ class Watcher:
             return
         for vid, _, _ in items:
             self.opened.add(vid)
-        url = f"{dm.SHOP}/cart/" + ",".join(f"{vid}:{q}" for vid, q, _ in items)
+        url = f"{self.site.shop}/cart/" + ",".join(f"{vid}:{q}" for vid, q, _ in items)
         names = "; ".join(f"x{q} {t[:60]}" for _, q, t in items)
         # The page normally opens it (in the browser with Shop Pay). If the page
         # hasn't checked in for a few seconds (closed, or a background tab the
@@ -285,7 +316,7 @@ class Watcher:
         if vid not in self.skipped:
             self.skipped.add(vid)
             self.log("warn", f"⛔ Skipped {it['title'][:70]}: ${price:.2f} is over your max of ${cap:.2f}.",
-                     f"{dm.SHOP}/products/{it['handle']}")
+                     f"{self.site.shop}/products/{it['handle']}")
         return False
 
     def matches(self, text, limit=6):
@@ -298,9 +329,9 @@ class Watcher:
         live = sorted([(p, it) for p, it in hits if dm.buyable(it)], key=lambda x: x[1]["title"])
         gone = sorted([(p, it) for p, it in hits if not dm.buyable(it)], key=lambda x: (not dm.upcoming(x[1]), x[1]["title"]))
         return {
-            "items": [card(p, it) for p, it in live[:limit]],
+            "items": [card(p, it, self.site.shop) for p, it in live[:limit]],
             "total": len(live),
-            "unavailable": [card(p, it) for p, it in gone[:limit]],
+            "unavailable": [card(p, it, self.site.shop) for p, it in gone[:limit]],
             "unavailableTotal": len(gone),
         }
 
@@ -325,10 +356,9 @@ class Watcher:
         return ready
 
     # ---- the watchlist (kept here rather than in the browser) ----
-    @staticmethod
-    def load_watchlist():
+    def load_watchlist(self):
         try:
-            with open(WATCHLIST_FILE, encoding="utf-8") as f:
+            with open(self.watchlist_file, encoding="utf-8") as f:
                 items = json.load(f)
             return items if isinstance(items, list) else []
         except (OSError, ValueError):
@@ -352,7 +382,7 @@ class Watcher:
         self.watchlist = clean
         self.wl_version += 1
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
-        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+        with open(self.watchlist_file, "w", encoding="utf-8") as f:
             json.dump(clean, f)
         if self.running:
             self.start([{"id": w["id"], "qty": w["qty"], "max": w.get("max")} for w in clean if w["kind"] == "product"],
@@ -398,7 +428,7 @@ class Watcher:
             if not quiet:
                 tag = "🎯 YOUR PICK" if want else ("🚨 hot item" if dm.watched(it["title"]) else "new/restock")
                 self.log("pick" if want else "change", f"{tag}: {it['title']} ${fresh[0][1][2]}",
-                         None if want else f"{dm.SHOP}/products/{it['handle']}")
+                         None if want else f"{self.site.shop}/products/{it['handle']}")
             if want and fresh[0][0] not in self.opened and self.affordable(it, fresh[0][0], want[1]):
                 ready.append((fresh[0][0], want[0], it["title"]))
         return ready
@@ -454,7 +484,7 @@ class Watcher:
             self.products = current
             return 0.0  # carry on, comparing against this new version
         if code == 401:
-            if self.password and dm.login(self.password):
+            if self.password and dm.login(self.password, self.site):
                 self.logged_in, self.shop_state = True, "ok"
                 self.log("ok", "🔒 The shop locked. Logged in with your password: watching behind the lock.")
                 self.etag = None
@@ -464,7 +494,7 @@ class Watcher:
                 self.password = ""
             if self.shop_state not in ("locked", "bad"):  # once per lock, not after each wrong try
                 # Ask the page to pop up a password box (and sound the alert here)
-                self.log("lock", "🔒 Mr Tofu just locked the shop. Enter the password to keep watching.", None, alert="lock")
+                self.log("lock", f"🔒 {self.name} just locked the shop. Enter the password to keep watching.", None, alert="lock")
                 play_alert()
             self.logged_in = False
             if self.shop_state != "bad":  # keep showing "wrong password" until a new try
@@ -497,7 +527,7 @@ def sound_info():
             "files": [{"id": k, "name": v} for k, v in sounds.library().items()]}
 
 
-def card(pid, it):
+def card(pid, it, shop=None):
     """What the page needs to show one product."""
     vs = list(it["variants"].values())
     price = next((v[2] for v in vs if v[1]), vs[0][2] if vs else None)
@@ -507,7 +537,7 @@ def card(pid, it):
     return {
         "id": pid, "title": it["title"], "price": price, "image": img,
         "state": "buyable" if dm.buyable(it) else "soldout" if dm.sold_out(it) else "soon",
-        "url": f"{dm.SHOP}/products/{it['handle']}",
+        "url": f"{shop or dm.SHOP}/products/{it['handle']}",
     }
 
 
@@ -534,8 +564,82 @@ def keyword_match(keys, title):
     return all(re.search(r"(?<!\w)" + re.escape(k), t) or re.search(r"(?<!\w)" + re.escape(k), squashed) for k in keys)
 
 
-W = Watcher()
-W.last_check = None
+def link_to_site(link):
+    """'animalkingdoms.co.nz/collections/pokemon-tcg' -> ('https://animalkingdoms.co.nz', 'pokemon-tcg')."""
+    link = link.strip()
+    if not re.match(r"^https?://", link, re.I):
+        link = "https://" + link
+    m = re.match(r"^(https?://[^/?#\s]+)(?:/collections/([^/?#\s]+))?", link, re.I)
+    if not m:
+        return None, None
+    return m.group(1).lower(), (m.group(2) or "").lower()
+
+
+def load_stores():
+    try:
+        with open(STORES_FILE, encoding="utf-8") as f:
+            stores = json.load(f)
+        return [s for s in stores if isinstance(s, dict) and s.get("id") and s.get("shop")]
+    except (OSError, ValueError):
+        return []
+
+
+def save_stores():
+    os.makedirs(dm.SOUND_DIR, exist_ok=True)
+    with open(STORES_FILE, "w", encoding="utf-8") as f:
+        json.dump([{"id": w.id, "name": w.name, "shop": w.site.shop, "collection": w.site.collection}
+                   for w in list(WATCHERS.values()) if w.id != "tofu"], f, indent=1)
+
+
+def make_watcher(s):
+    return Watcher(s["id"], s.get("name") or s["id"], dm.Site(s["shop"], s.get("collection", "")), [],
+                   os.path.join(dm.SOUND_DIR, f"watchlist-{s['id']}.json"))
+
+
+def add_store(link, name):
+    """Add another Shopify shop as a tab. Returns (watcher, error)."""
+    shop, collection = link_to_site(link or "")
+    if not shop:
+        return None, "Paste the shop's link, e.g. https://animalkingdoms.co.nz/collections/pokemon-tcg"
+    same = next((w for w in list(WATCHERS.values()) if (w.site.shop, w.site.collection) == (shop, collection)), None)
+    if same:  # two tabs watching the same thing would open two checkouts
+        return None, f"That's already the {same.name} tab."
+    site = dm.Site(shop, collection)
+    try:
+        code, _, body = dm.fetch(site=site)
+        ok = code == 401 or (code == 200 and "products" in json.loads(body))
+    except Exception:
+        code, ok = "no reply", False
+    if not ok:
+        return None, f"That doesn't look like a Shopify shop drop mode can read (reply {code})."
+    labels = site.host.split(":")[0].split(".")  # shop.example.co.nz -> "example"
+    while len(labels) > 2 and labels[0] in ("www", "shop", "store", "m"):
+        labels = labels[1:]
+    base = labels[0]
+    sid = re.sub(r"[^a-z0-9]+", "-", f"{base}-{collection}" if collection else base).strip("-") or "shop"
+    while sid in WATCHERS:
+        sid += "-2"
+    name = re.sub(r"[^\w &'.-]", "", (name or "").strip())[:40] or base.replace("-", " ").title()
+    w = make_watcher({"id": sid, "name": name, "shop": shop, "collection": collection})
+    WATCHERS[sid] = w
+    save_stores()
+    w.log("info", f"Added {name} ({site.host}{'/collections/' + collection if collection else ''}).")
+    w.load_soon()
+    return w, None
+
+
+def store_list():
+    return [{"id": w.id, "name": w.name, "host": w.site.host, "shop": w.site.shop, "collection": w.site.collection,
+             "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running}
+            for w in list(WATCHERS.values())]
+
+
+WATCHERS = {"tofu": Watcher()}   # Mr Tofu's shop first, then the ones you've added
+for _s in load_stores():
+    WATCHERS[_s["id"]] = make_watcher(_s)
+# What each tab asks about (?store=...). The rest (sound, background, the list of shops) is shared.
+STORE_PATHS = {"/api/products", "/api/categories", "/api/password", "/api/match", "/api/events", "/api/watchlist",
+               "/api/watchinfo", "/api/start", "/api/logout", "/api/stop", "/api/login"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -562,7 +666,8 @@ class Handler(BaseHTTPRequestHandler):
         """Something went wrong answering a page: show it (instead of an empty
         reply) and log it, so it can be fixed."""
         traceback.print_exc()
-        W.log("warn", f"Drop mode couldn't answer {self.path.split('?')[0]}: {exc}")
+        sid = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p).get("store", "tofu")
+        (WATCHERS.get(sid) or WATCHERS["tofu"]).log("warn", f"Drop mode couldn't answer {self.path.split('?')[0]}: {exc}")
         try:
             self.send_response(500)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -583,9 +688,20 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.oops(exc)
 
+    def shop_for(self, path, query):
+        """The shop a request is about (its tab), from ?store=...; Mr Tofu's if none
+        is named. None (and a 404 sent) if that shop isn't here (removed meanwhile)."""
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        W = WATCHERS.get(params.get("store", "tofu"))
+        if W is None and path in STORE_PATHS:
+            self.send_json({"error": "no such shop"}, 404)
+        return params, W
+
     def get(self):
         path, _, query = self.path.partition("?")
-        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        params, W = self.shop_for(path, query)
+        if W is None and path in STORE_PATHS:
+            return
         if path == "/":
             with open(PAGE, "rb") as f:
                 body = f.read()
@@ -606,7 +722,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("X-Drop-Mode") != "1":
                 self.send_json({"error": "forbidden"}, 403)
             else:
-                self.send_json({"password": W.password, "shop": dm.SHOP})
+                self.send_json({"password": W.password, "shop": W.site.shop})
         elif path == "/api/match":
             from urllib.parse import unquote_plus
             limit = max(1, min(50, int(params.get("limit", "6") or 6)))
@@ -646,6 +762,8 @@ class Handler(BaseHTTPRequestHandler):
                             "wlVersion": W.wl_version})
         elif path == "/api/watchlist":
             self.send_json({"items": W.watchlist, "version": W.wl_version})
+        elif path == "/api/stores":
+            self.send_json({"stores": store_list()})
         else:
             self.send_json({"error": "not found"}, 404)
 
@@ -654,24 +772,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         n = int(self.headers.get("Content-Length", "0") or 0)
         data = json.loads(self.rfile.read(n) or b"{}")
-        if self.path == "/api/login":
+        path, _, query = self.path.partition("?")
+        _, W = self.shop_for(path, query)
+        if W is None and path in STORE_PATHS:
+            return
+        if path == "/api/login":
             ok = W.login(data.get("password", ""))
             self.send_json({"ok": ok, "loggedIn": W.logged_in, "shopState": W.shop_state, "products": len(W.products)})
-        elif self.path == "/api/watchlist":
+        elif path == "/api/watchlist":
             W.set_watchlist(data.get("items", []))
             self.send_json({"items": W.watchlist, "version": W.wl_version})
-        elif self.path == "/api/watchinfo":
+        elif path == "/api/watchinfo":
             self.send_json(W.watch_info([str(i) for i in data.get("ids", [])], data.get("texts", [])))
-        elif self.path == "/api/start":
+        elif path == "/api/start":
             W.start(data.get("picks", []), data.get("watches", []), data.get("interval", 3), bool(data.get("openNow", True)))
             self.send_json({"ok": True})
-        elif self.path == "/api/logout":
+        elif path == "/api/logout":
             W.logout()
             self.send_json({"ok": True})
-        elif self.path == "/api/stop":
+        elif path == "/api/stop":
             W.stop()
             self.send_json({"ok": True})
-        elif self.path == "/api/sound":  # pick a built-in sound and/or the volume
+        elif path == "/api/sound":  # pick a built-in sound and/or the volume
             s = sounds.load()
             if sounds.valid(data.get("sound")):
                 s["sound"] = data["sound"]
@@ -681,7 +803,7 @@ class Handler(BaseHTTPRequestHandler):
             if data.get("play"):
                 play_alert()
             self.send_json(sound_info())
-        elif self.path == "/api/sound/custom":  # a sound file of your own (the page sends it as WAV)
+        elif path == "/api/sound/custom":  # a sound file of your own (the page sends it as WAV)
             try:
                 sounds.save_custom(base64.b64decode(data.get("wav", "")), data.get("name", ""))
             except Exception as exc:
@@ -689,7 +811,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             play_alert()
             self.send_json(sound_info())
-        elif self.path == "/api/background":  # a new background picture (the page sends the file)
+        elif path == "/api/background":  # a new background picture (the page sends the file)
             data = base64.b64decode(data.get("data", ""))
             ext = picture_type(data)
             if not ext or len(data) > 25 * 1024 * 1024:
@@ -702,17 +824,30 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(dm.SOUND_DIR, "background" + ext), "wb") as f:
                 f.write(data)
             self.send_json(background_info())
-        elif self.path == "/api/background/remove":
+        elif path == "/api/background/remove":
             old = background_file()
             if old:
                 os.remove(old)
             self.send_json(background_info())
-        elif self.path == "/api/sound/delete":  # remove one of your sound files
+        elif path == "/api/sound/delete":  # remove one of your sound files
             sounds.delete_file(data.get("id", ""))
             self.send_json(sound_info())
-        elif self.path == "/api/sound/test":
+        elif path == "/api/sound/test":
             play_alert()
             self.send_json({"ok": True})
+        elif path == "/api/stores/add":  # another Shopify shop as its own tab
+            w, error = add_store(data.get("link", ""), data.get("name", ""))
+            if error:
+                self.send_json({"error": error}, 400)
+                return
+            self.send_json({"stores": store_list(), "id": w.id})
+        elif path == "/api/stores/remove":
+            gone = WATCHERS.pop(data.get("id", ""), None) if data.get("id") != "tofu" else None
+            if gone:
+                if gone.running:
+                    gone.stop()
+                save_stores()  # (its watchlist file stays, in case you add the shop again)
+            self.send_json({"stores": store_list()})
         else:
             self.send_json({"error": "not found"}, 404)
 
@@ -739,7 +874,12 @@ def main():
             webbrowser.open(url)
         time.sleep(8)
         return
-    print(f"Mr Tofu Drop Mode is running at {url}  (close this window to stop)")
+    print(f"Drop mode is running at {url}  (close this window to stop)")
+    others = [w.name for w in WATCHERS.values() if w.id != "tofu"]
+    if others:
+        print("Shops: Mr Tofu, " + ", ".join(others))
+    for w in list(WATCHERS.values()):
+        w.load_soon()
     if os.environ.get("DROP_WEB_NO_BROWSER") != "1":
         webbrowser.open(url)
     try:
