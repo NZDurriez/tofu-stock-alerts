@@ -41,6 +41,9 @@ html.has-bg .cols>header,html.has-bg .col-head{background:var(--surface);border-
 html.has-bg .pop,html.has-bg #alert .box,html.has-bg #lockAlert .box,html.has-bg .selbar{background:var(--solid)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
+/* No scroll bars anywhere: the page, lists and menus still scroll with the wheel, trackpad or keys */
+*{scrollbar-width:none}
+*::-webkit-scrollbar{display:none}
 html{color-scheme:dark}
 :root[data-theme="light"]{color-scheme:light}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
@@ -147,7 +150,7 @@ h1 span{color:var(--accent)}
   .player{max-height:none}
   .chat{flex:none;height:420px}
 }
-.stack{display:grid;gap:20px}
+.stack{display:grid;gap:20px;grid-template-columns:minmax(0,1fr)} /* (nothing inside can make a column wider than it is) */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow)}
 .card h2{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:0 0 14px}
 .step{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:600}
@@ -314,7 +317,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .card:has(.tipicon:hover),.card:has(.tipicon:focus){position:relative;z-index:40} /* keep an open tip above the next panel */
 
 .feed{height:380px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--field);padding:6px 0}
-.ev{display:grid;grid-template-columns:auto auto 1fr;gap:10px;align-items:start;padding:7px 14px;font-size:14px;color:var(--text)}
+.ev{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:10px;align-items:start;padding:7px 14px;font-size:14px;color:var(--text)}
 .ev+.ev{border-top:1px solid var(--line)}
 .ev .tm{color:var(--faint);font-size:12.5px;font-variant-numeric:tabular-nums;padding-top:1px}
 .ev .k{width:8px;height:8px;border-radius:50%;margin-top:7px;background:var(--faint)}
