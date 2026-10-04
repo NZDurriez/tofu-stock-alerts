@@ -241,28 +241,29 @@ class Watcher:
             found[cid] = ids
         self.categories, self.cats_at = found, time.time()
 
-    def category_list(self):
+    def category_list(self, everything=False):
         if not self.cat_cfg:
             return {"loading": False, "categories": [], "liveGames": []}
         if self.products and time.time() - self.cats_at > 600 and self.cats_at:  # refresh every 10 minutes
             self.load_categories_soon()
         in_stock = {pid for pid, it in self.products.items() if dm.buyable(it)}
-        live = [game_of(self.products[pid]["title"]) for pid in self.categories.get("live", set()) & in_stock]
+        pool = set(self.products) if everything else in_stock  # what the counts count
+        live = [game_of(self.products[pid]["title"]) for pid in self.categories.get("live", set()) & pool]
         games = [{"id": gid, "name": name, "count": live.count(gid)} for gid, name, _ in GAMES + [("other", "Other", [])]]
         return {"loading": not self.cats_at and bool(self.products),
-                "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & in_stock)}
+                "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & pool)}
                                for cid, name, _ in self.cat_cfg],
                 "liveGames": [g for g in games if g["count"]]}
 
-    def listing(self, flt, cat="", game="", limit=40):
-        """The exact-product search: only what you can buy right now (sold out
-        or unlisted things are for keyword watches), optionally in one of
-        Tofu's categories, and one game (for the live stream)."""
+    def listing(self, flt, cat="", game="", limit=40, everything=False):
+        """The exact-product search: what you can buy right now (or with
+        everything, sold-out and coming-soon ones too, after those), optionally
+        in one of Tofu's categories, and one game (for the live stream)."""
         keys = keywords(flt)
         in_cat = self.categories.get(cat) if cat else None
         out = []
         for pid, it in self.products.items():
-            if not dm.buyable(it):
+            if not everything and not dm.buyable(it):
                 continue
             if in_cat is not None and pid not in in_cat:
                 continue
@@ -271,7 +272,7 @@ class Watcher:
             if game and game_of(it["title"]) != game:
                 continue
             out.append(card(pid, it, self.site.shop))
-        out.sort(key=lambda x: x["title"])
+        out.sort(key=lambda x: ({"buyable": 0, "soon": 1}.get(x["state"], 2), x["title"]))  # in stock first
         return {"items": out[:limit], "total": len(out)}
 
     def watch_info(self, ids, texts):
@@ -564,18 +565,28 @@ def norm(text):
 
 def keywords(text):
     """'Delta Reign, Elite Trainer Box' -> ['delta', 'reign', 'elite', 'trainer', 'box'].
-    Punctuation around words doesn't count ('TCG:' -> 'tcg', '(Pre-order)' -> 'pre-order')."""
-    words = re.split(r"[\s,:;|/·•—–]+", norm(text))
-    return [w for w in (re.sub(r"^\W+|\W+$", "", w) for w in words) if w]
+    Punctuation around words doesn't count ('TCG:' -> 'tcg', '(Pre-order)' -> 'pre-order'),
+    except a minus in front, which means "leave out products with this word" ('-tin')."""
+    out = []
+    for w in re.split(r"[\s,:;|/·•—–]+", norm(text)):
+        minus = re.match(r"-+\w", w)  # (a lone "-" between words is just punctuation)
+        w = re.sub(r"^\W+|\W+$", "", w)
+        if w:
+            out.append("-" + w if minus else w)
+    return out
 
 
 def keyword_match(keys, title):
     """Every word must start a word in the product name, in any order (the
     search box works the same, so what you see is what's watched). 'box'
-    finds 'Boxes' but 'ex' doesn't find 'Next'; 'preorder' finds 'Pre-order'."""
+    finds 'Boxes' but 'ex' doesn't find 'Next'; 'preorder' finds 'Pre-order'.
+    A '-word' must NOT be in the name: '-tin' leaves out '... + 2 Mini Tin'
+    (but not 'Destined', since words count from their start)."""
     t = norm(title)
     squashed = re.sub(r"[^\w\s]", "", t)
-    return all(re.search(r"(?<!\w)" + re.escape(k), t) or re.search(r"(?<!\w)" + re.escape(k), squashed) for k in keys)
+    has = lambda k: re.search(r"(?<!\w)" + re.escape(k), t) or re.search(r"(?<!\w)" + re.escape(k), squashed)
+    need = [k for k in keys if not k.startswith("-")]
+    return bool(need) and all(has(k) for k in need) and not any(has(k[1:]) for k in keys if k.startswith("-"))
 
 
 def link_to_site(link):
@@ -726,9 +737,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif path == "/api/products":
             from urllib.parse import unquote_plus
-            self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", ""), params.get("game", "")))
+            self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", ""), params.get("game", ""),
+                                     everything=params.get("all") == "1"))
         elif path == "/api/categories":
-            self.send_json(W.category_list())
+            self.send_json(W.category_list(everything=params.get("all") == "1"))
         elif path == "/api/password":
             # Lets the page unlock mrtofu.store in your browser with the saved password.
             # The custom header can't be sent by other websites without a CORS

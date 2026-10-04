@@ -236,6 +236,10 @@ input[type=search]:focus{border-color:var(--accent)}
 .divider{border-top:1px solid var(--line);margin:22px 0 16px}
 .bridge{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 14px;font-size:13.5px;color:var(--muted);background:var(--accent-soft)}
 .bridge button{padding:6px 12px}
+.kwtag.kwnot{background:var(--bad-soft);color:var(--bad)}
+.checkline{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13.5px;color:var(--muted);cursor:pointer;width:max-content}
+.checkline input{accent-color:var(--accent);margin:0}
+#exactLead b{color:var(--text);font-weight:600}
 .kwtag{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:7px;padding:1px 8px;margin:2px 4px 2px 0;font-weight:600}
 .resnote{padding:10px 14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line)}
 .wl{display:grid;gap:10px}
@@ -430,7 +434,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <section class="card">
         <h2><span class="step">2</span>Add to your watchlist</h2>
 
-        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.</span></span></h3>
+        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.<br><br>Put a <b>minus</b> before a word to leave out products that have it: <i>30th Booster Bundle -tin</i> skips the bundle that comes with mini tins.</span></span></h3>
         <div class="kwbox">
           <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
           <div class="suggest" id="suggest"></div>
@@ -441,7 +445,8 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div class="divider"></div>
         <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
         <div id="exactBody" hidden>
-          <p class="lead" style="margin:6px 0 12px">What's in stock right now. Press <b style="color:var(--text);font-weight:600">+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above.</p>
+          <p class="lead" id="exactLead" style="margin:6px 0 12px"></p>
+          <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
           <input type="search" id="search" placeholder="Search, e.g. symphonia booster pack" autocomplete="off">
@@ -573,6 +578,23 @@ document.querySelectorAll(".col-setup .col-head, .col-watch .col-head").forEach(
   if (folded[c]) toggleFold(c); // a folded column's whole bar opens it
 });
 
+// "Show out of stock": the exact-product list can show sold-out and coming-soon ones too (after
+// what's in stock), so you can watch that exact listing for a restock
+let showSold = false;
+try { showSold = localStorage.getItem("dropShowSold") === "1"; } catch {}
+$("showSold").checked = showSold;
+function exactLead() {
+  $("exactLead").innerHTML = showSold
+    ? "Everything in the shop, in stock first. <b>+ Watch</b> on a sold-out one opens checkout if that listing comes back in stock. For something not listed yet, use a keyword watch above."
+    : "What's in stock right now. Press <b>+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above (or tick Show out of stock).";
+}
+exactLead();
+$("showSold").onchange = () => {
+  showSold = $("showSold").checked;
+  try { localStorage.setItem("dropShowSold", showSold ? "1" : "0"); } catch {}
+  exactLead(); loadCats(); search();
+};
+
 // "Or pick an exact product" starts folded away
 $("exactToggle").onclick = () => {
   const open = $("exactBody").hidden;
@@ -586,7 +608,7 @@ let cat = "", game = "", catNames = {}, gameNames = {}, catTimer;
 async function loadCats() {
   const sid = STORE;
   if (!lastProducts || !cur().categories) { $("cats").innerHTML = ""; $("subcats").hidden = true; return; }
-  const r = await api("/api/categories");
+  const r = await api("/api/categories" + (showSold ? "?all=1" : ""));
   if (sid !== STORE) return; // (switched tabs meanwhile)
   catNames = Object.fromEntries(r.categories.map((c) => [c.id, c.name]));
   const chip = (id, name, n, on) => `<button type="button" class="cat${on ? " on" : ""}" data-id="${id}">${esc(name)}${n === null ? "" : `<span class="n">${n}</span>`}</button>`;
@@ -742,7 +764,7 @@ function thumb(it, icon = "📦") {
 }
 // Same words in any order = the same keyword watch (punctuation and accents don't count)
 const kwWords = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  .split(/[\s,:;|/·•—–]+/).map((w) => w.replace(/^\W+|\W+$/g, "")).filter(Boolean);
+  .split(/[\s,:;|/·•—–]+/).map((w) => (/^-+\w/.test(w) ? "-" : "") + w.replace(/^\W+|\W+$/g, "")).filter((w) => w && w !== "-");
 const wordsKey = (s) => kwWords(s).sort().join(" ");
 const onList = (kind, key) => watchlist.some((w) => w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
 
@@ -836,7 +858,7 @@ let lastResults = { items: [], total: 0 }, lastQuery = "";
 async function search() {
   const q = $("search").value.trim();
   if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game));
+  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game) + (showSold ? "&all=1" : ""));
   if (sid !== STORE || q !== $("search").value.trim()) return; // a newer search is on its way (or switched tabs)
   lastResults = r; lastQuery = q;
   renderResults();
@@ -850,8 +872,8 @@ function renderResults() {
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
     html += where
-      ? `<div class="resnote" style="border-top:0">In stock in ${esc(where)}. Tick several to add them together.</div>`
-      : '<div class="resnote" style="border-top:0">Everything in stock right now. Type to search, or tick several to add them together.</div>';
+      ? `<div class="resnote" style="border-top:0">${showSold ? `Everything in ${esc(where)}, in stock first.` : `In stock in ${esc(where)}.`} Tick several to add them together.</div>`
+      : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop, in stock first." : "Everything in stock right now."} Type to search, or tick several to add them together.</div>`;
   }
   html += r.items.map((it) => {
     const already = onList("product", it.id), sel = ticked.get(it.id);
@@ -863,7 +885,8 @@ function renderResults() {
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
-  if (!r.items.length) html += `<div class="empty">Nothing ${q ? "matching that is" : where ? "in this category is" : "is"} in stock right now.</div>`;
+  if (!r.items.length) html += showSold ? `<div class="empty">Nothing ${q ? "matches that" : where ? "is in this category" : "is in the shop"}.</div>`
+    : `<div class="empty">Nothing ${q ? "matching that is" : where ? "in this category is" : "is"} in stock right now.</div>`;
   if (r.total > r.items.length) html += `<div class="resnote">Showing ${r.items.length} of ${r.total}. Type more to narrow it down.</div>`;
   el.innerHTML = html;
   const byId = Object.fromEntries(r.items.map((it) => [it.id, it]));
@@ -953,7 +976,7 @@ function statusParts(w) {
         more.push(`<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`);
       } else if (m.total > 1) {
         flag(`Adds all ${m.total}`);
-        more.push(`<span class="warnline">Checkout would add all ${m.total}. Add more keywords, or watch the exact product instead.</span>`);
+        more.push(`<span class="warnline">Checkout would add all ${m.total}. Add more keywords, leave words out with a minus (like -tin), or watch the exact product instead.</span>`);
       }
     } else if (m.unavailableTotal) {
       line.push('<span class="badge b-soldout">Not in stock</span>');
@@ -974,6 +997,17 @@ function statusParts(w) {
   }
   return { line: line.join(" "), more: more.join("") };
 }
+// "Delta Reign, 30th Booster Bundle -tin" -> tags for what it needs, and red "not tin" tags for what it leaves out
+function kwTagsHtml(text) {
+  const need = [], not = [];
+  for (const chunk of text.split(",").map((k) => k.trim()).filter(Boolean)) {
+    const words = chunk.split(/\s+/), minus = (w) => /^-+\w/.test(w);
+    if (words.some((w) => !minus(w))) need.push(words.filter((w) => !minus(w)).join(" "));
+    not.push(...words.filter(minus).map((w) => w.replace(/^-+/, "")));
+  }
+  return need.map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")
+    + not.map((k) => `<span class="kwtag kwnot" title="Leaves out products with this word">not ${esc(k)}</span>`).join("");
+}
 // A keyword watch shows the picture of what it matches (in stock first, else
 // the sold-out one), with a little 🔎 so it's clearly a keyword watch
 function keywordThumb(w) {
@@ -992,7 +1026,7 @@ function renderWatchlist() {
       ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : keywordThumb(w)}
       <div class="t">
         <div class="sum${s.more ? " has-more" : ""}"${s.more ? ' tabindex="0"' : ""}>
-          <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + w.text.split(",").map((k) => k.trim()).filter(Boolean).map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")}</div>
+          <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + kwTagsHtml(w.text)}</div>
           <div class="st">${s.line}</div>
           ${s.more ? `<div class="more" role="tooltip">${s.more}</div>` : ""}
         </div>
