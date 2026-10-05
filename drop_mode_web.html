@@ -273,6 +273,10 @@ select.whosel option{font-weight:500}
 .friend:first-child{border-top:0}
 .friend .id{color:var(--faint);font-size:12.5px;font-variant-numeric:tabular-nums}
 .friend .linkish{margin-left:auto;padding:2px 4px}
+/* Someone's list from Discord: shown, but they change it themselves (so no adding to it here) */
+.wl-row .acts.ro{gap:6px;font-size:13px;color:var(--muted)}
+.wl-row .acts.ro b{color:var(--text);font-weight:600}
+.card.addoff .watchbtn,.card.addoff .pick{pointer-events:none;opacity:.35}
 .checkline{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13.5px;color:var(--muted);cursor:pointer;width:max-content}
 .checkline input{accent-color:var(--accent);margin:0}
 .exactopts{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:0 0 10px}
@@ -463,6 +467,16 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             </div>
             <button class="linkish" id="dcFriendsRemove" hidden>Use my channel for friends' pings again</button>
             <p class="hint" id="frMsg" style="margin:6px 0 0"></p>
+            <div class="pop-title" style="font-size:14px;margin-top:16px">🤖 Wishlists people keep in Discord</div>
+            <p class="lead" style="margin:2px 0 8px">People in your server can keep their own wishlist with <b>/wishlist</b> (the PokeStock bot). Each gets a private channel, and drop mode pings them there when something on their list comes in stock at a shop it's watching. Nothing opens on this PC.</p>
+            <p class="hint" id="dlState" style="margin:0 0 6px"></p>
+            <div class="row">
+              <input type="text" id="dlKey" class="secret" placeholder="Paste the key you gave the bot" autocomplete="off" spellcheck="false">
+              <button class="secondary" id="dlSave">Connect</button>
+            </div>
+            <p class="hint" style="margin:6px 0 0">The same key as the bot's DROP_MODE_KEY. It stays on this PC.</p>
+            <button class="linkish" id="dlRemove" hidden>Disconnect</button>
+            <p class="hint" id="dlMsg" style="margin:6px 0 0"></p>
           </section>
           <section class="set setrow">
             <div><div class="pop-title">Layout</div><p class="lead" style="margin:2px 0 0">Drag a column by its header to move it.</p></div>
@@ -517,8 +531,9 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         </label>
       </section>
 
-      <section class="card">
+      <section class="card" id="addCard">
         <h2><span class="step">2</span>Add to <select class="whosel" id="addWho" aria-label="Whose list to add to"></select></h2>
+        <p class="hint friendnote" id="addNote" hidden></p>
 
         <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.<br><br>Put a <b>minus</b> before a word to leave out products that have it: <i>30th Booster Bundle -tin</i> skips the bundle that comes with mini tins.</span></span></h3>
         <div class="kwbox">
@@ -996,10 +1011,13 @@ const kwWords = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]
   .split(/[\s,:;|/·•—–]+/).map((w) => (/^-+\w/.test(w) ? "-" : "") + w.replace(/^\W+|\W+$/g, "")).filter((w) => w && w !== "-");
 const wordsKey = (s) => kwWords(s).sort().join(" ");
 // Whose list is on show: yours (""), or a friend's (their id). Step 2 adds to it; step 3 shows it.
-let friends = [], listFor = "";
+// Someone's list from Discord (they keep it with /wishlist) can be shown, but not changed here.
+let friends = [], discordPeople = [], listsSeq = 0, listFor = "";
 try { listFor = localStorage.getItem("dropListFor") || ""; } catch {}
 const ownedNow = (w) => (w.who || "") === listFor;
-const listName = () => (friends.find((f) => f.id === listFor) || {}).name || "";
+const isDiscordList = () => listFor.startsWith("discord:");
+const discordPerson = () => (isDiscordList() ? discordPeople.find((p) => p.id === listFor) : null);
+const listName = () => (discordPerson() || friends.find((f) => f.id === listFor) || {}).name || "";
 const onList = (kind, key) => watchlist.some((w) => ownedNow(w) && w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
 
 // ---- keywords ----
@@ -1074,6 +1092,7 @@ async function kwPreview() {
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
 function addKeywords() {
+  if (isDiscordList()) return; // (they keep that list themselves)
   const text = cleanKw($("kwInput").value);
   if (!text || onList("words", wordsKey(text))) return;
   watchlist.push({ kind: "words", text, qty: kwQty, ...(listFor ? { who: listFor } : {}) });
@@ -1165,6 +1184,7 @@ function updateTicks() {
 }
 // Add everything ticked (and the one whose + Watch was pressed) to the watchlist
 function addTicked(extra) {
+  if (isDiscordList()) return; // (they keep that list themselves)
   const items = [...ticked.values()];
   if (extra && !ticked.has(extra.id)) items.push(extra);
   for (const it of items) {
@@ -1184,19 +1204,22 @@ function statusParts(w) {
   if (!lastProducts) return { line: "Load the shop to see if it's in stock.", more: "" };
   const line = [], more = [];
   const flag = (text) => line.push(`<span class="badge b-warn">⚠ ${text}</span>`);
+  // Your list opens checkout; someone else's pings them on Discord
+  const yours = !listFor, opens = yours ? "Opens" : "Pings them", maxOf = yours ? "your max" : "their max";
+  const wont = (n) => (yours ? "checkout won't open for " : "they won't be pinged about ") + (n === 1 ? "it" : "those");
   const list = (cards, total) => "<ul>" + cards.map((c) => `<li>${esc(c.title)}${c.state === "buyable" ? (c.price ? ` · $${esc(c.price)}` : "")
     : c.state === "soldout" ? " · sold out" : " · not on sale yet"}${c.limit ? ` · limit ${c.limit} per customer` : ""}</li>`).join("") + (total > cards.length ? `<li>…and ${total - cards.length} more</li>` : "") + "</ul>";
   let cards;
   if (w.kind === "product") {
     const it = info.picks[w.id];
     if (!it) return { line: "", more: "" };
-    if (it.state === "gone") return { line: '<span class="badge b-soon">Not listed right now</span>', more: "Opens if it gets listed again." };
+    if (it.state === "gone") return { line: '<span class="badge b-soon">Not listed right now</span>', more: `${opens} if it gets listed again.` };
     cards = [it];
     line.push(badgeHtml[it.state] + (it.price ? ` $${esc(it.price)}` : ""));
-    if (it.state !== "buyable") more.push(it.state === "soldout" ? "Opens when it's restocked." : "Opens when it goes on sale.");
+    if (it.state !== "buyable") more.push(it.state === "soldout" ? `${opens} when it's restocked.` : `${opens} when it goes on sale.`);
     if (w.max && it.price && parseFloat(it.price) > w.max) {
-      flag("Over your max");
-      more.push(`<span class="warnline">$${esc(it.price)} is over your max of $${w.max.toFixed(2)}, so checkout won't open for it.</span>`);
+      flag(`Over ${maxOf}`);
+      more.push(`<span class="warnline">$${esc(it.price)} is over ${maxOf} of $${w.max.toFixed(2)}, so ${wont(1)}.</span>`);
     }
   } else {
     const m = info.words[w.text];
@@ -1207,18 +1230,20 @@ function statusParts(w) {
       more.push("<b>In stock now:</b>" + list(m.items, m.total));
       const over = w.max ? m.items.filter((i) => i.price && parseFloat(i.price) > w.max).length : 0;
       if (over) {
-        flag("Over your max");
-        more.push(`<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over your max of $${w.max.toFixed(2)}, so checkout won't open for ${over === 1 ? "it" : "those"}.</span>`);
+        flag(`Over ${maxOf}`);
+        more.push(`<span class="warnline">${over === m.total ? (m.total === 1 ? "It's" : "They're all") : `${over} of them ${over === 1 ? "is" : "are"}`} over ${maxOf} of $${w.max.toFixed(2)}, so ${wont(over)}.</span>`);
+      } else if (m.total > 1 && !yours) {
+        more.push('<span class="limline">Each one is a ping of its own for them.</span>');
       } else if (m.total > 1) {
         flag(`Adds all ${m.total}`);
         more.push(`<span class="warnline">Checkout would add all ${m.total}. Add more keywords, leave words out with a minus (like -tin), or watch the exact product instead.</span>`);
       }
     } else if (m.unavailableTotal) {
       line.push('<span class="badge b-soldout">Not in stock</span>');
-      more.push("<b>Matches:</b>" + list(m.unavailable, m.unavailableTotal) + "Opens when one comes back in stock, or a new match is added.");
+      more.push("<b>Matches:</b>" + list(m.unavailable, m.unavailableTotal) + `${opens} when one comes back in stock, or a new match is added.`);
     } else {
       line.push('<span class="badge b-soon">Nothing listed yet</span>');
-      more.push("Opens the moment a match is added.");
+      more.push(`${opens} the moment a match is added.`);
       if (m.similar && m.similar.image) more.push(`<span class="picline">The picture is from a listing your minus words leave out: ${esc(m.similar.title)}.</span>`);
     }
   }
@@ -1228,8 +1253,8 @@ function statusParts(w) {
   if (lims.length) {
     const low = Math.min(...lims);
     if (w.qty > low) line.push(`<span class="badge b-limit">Limit ${low}</span>`);
-    if (cards.length === 1) more.push(`<span class="limline">The shop allows ${low} per customer${w.qty > low ? `, so checkout won't add more than ${low === 1 ? "one" : low}` : ""}.</span>`);
-    else if (w.qty > low) more.push(`<span class="limline">Checkout won't add more of each than the shop allows (limits are listed above).</span>`);
+    if (cards.length === 1) more.push(`<span class="limline">The shop allows ${low} per customer${w.qty > low ? `, so ${yours ? "checkout won't add" : "their checkout link won't have"} more than ${low === 1 ? "one" : low}` : ""}.</span>`);
+    else if (w.qty > low) more.push(`<span class="limline">${yours ? "Checkout won't add" : "Their checkout links won't have"} more of each than the shop allows (limits are listed above).</span>`);
   }
   return { line: line.join(" "), more: more.join("") };
 }
@@ -1256,10 +1281,10 @@ let wlRedrawLater = false; // (don't redraw while you're typing a max price)
 let wlHtml = "";           // (nor when nothing changed, so a details box you're reading doesn't flicker)
 function renderWatchlist() {
   if (document.activeElement && document.activeElement.classList.contains("maxin")) { wlRedrawLater = true; return; }
-  const shown = watchlist.filter(ownedNow).length;
-  $("wlCount").textContent = shown ? `${shown} item${shown === 1 ? "" : "s"}` : "";
-  const html = !shown ? `<div class="wl-empty">Nothing on ${listFor ? esc(listName()) + "'s wishlist" : "your watchlist"} yet. Add keywords or a product in step 2.</div>` : watchlist.map((w, i) => {
-    if (!ownedNow(w)) return "";
+  const dc = discordPerson(); // (their entries have no index: read only)
+  const rows = dc ? dc.items.map((it) => ({ w: { kind: "words", ...it }, i: -1 })) : watchlist.map((w, i) => ({ w, i })).filter((r) => ownedNow(r.w));
+  $("wlCount").textContent = rows.length ? `${rows.length} item${rows.length === 1 ? "" : "s"}` : "";
+  const html = !rows.length ? `<div class="wl-empty">Nothing on ${listFor ? esc(listName()) + "'s wishlist" : "your watchlist"} yet. Add keywords or a product in step 2.</div>` : rows.map(({ w, i }) => {
     const s = statusParts(w);
     return `
     <div class="wl-row" data-i="${i}">
@@ -1270,10 +1295,11 @@ function renderWatchlist() {
           <div class="st">${s.line}</div>
           ${s.more ? `<div class="more" role="tooltip">${s.more}</div>` : ""}
         </div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty, w.kind === "product" ? info.picks[w.id]?.limit : 0)}
-          <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>
+        ${i < 0 ? `<div class="acts ro">Buy <b>${w.qty}</b> · ${w.max ? `max <b>$${w.max.toFixed(2)}</b> each` : "no max price"}</div>`
+          : `<div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty, w.kind === "product" ? info.picks[w.id]?.limit : 0)}
+          <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>`}
       </div>
-      <button class="rm" title="Remove from watchlist">×</button>
+      ${i < 0 ? "" : '<button class="rm" title="Remove from watchlist">×</button>'}
     </div>`;
   }).join("");
   if (html === wlHtml) return;
@@ -1281,6 +1307,7 @@ function renderWatchlist() {
   $("watchlist").innerHTML = html;
   $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
     const i = +row.dataset.i;
+    if (i < 0) return; // (someone's list from Discord: read only)
     wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
     const maxin = row.querySelector(".maxin");
     maxin.onchange = () => { // the most you'll pay for each (empty = no limit)
@@ -1295,13 +1322,12 @@ function renderWatchlist() {
 }
 // Ask the program how each entry stands (in stock, sold out, what a search matches)
 async function refreshInfo() {
-  const sid = STORE;
-  if (lastProducts && watchlist.length) {
+  const sid = STORE, dc = discordPerson();
+  const ids = dc ? [] : watchlist.filter((w) => ownedNow(w) && w.kind === "product").map((w) => w.id);
+  const texts = dc ? dc.items.map((it) => it.text) : watchlist.filter((w) => ownedNow(w) && w.kind === "words").map((w) => w.text);
+  if (lastProducts && (ids.length || texts.length)) {
     try {
-      const got = await api("/api/watchinfo", {
-        ids: watchlist.filter((w) => ownedNow(w) && w.kind === "product").map((w) => w.id),
-        texts: watchlist.filter((w) => ownedNow(w) && w.kind === "words").map((w) => w.text),
-      });
+      const got = await api("/api/watchinfo", { ids, texts });
       if (sid !== STORE) return; // (switched tabs meanwhile)
       info = got;
     } catch {}
@@ -1398,17 +1424,25 @@ $("panelA").oninput = () => {
 // nickname and Discord ID.
 const forWho = () => (listName() ? ` for ${listName()}` : ""); // (on the add buttons)
 function showListFor() {
-  if (listFor && !friends.some((f) => f.id === listFor)) listFor = "";
-  const opts = '<option value="">My watchlist</option>'
-    + friends.map((f) => `<option value="${esc(f.id)}">${esc(f.name)}'s wishlist</option>`).join("")
-    + '<option value="__add">＋ Add someone…</option>';
-  for (const id of ["addWho", "wlWho"]) { $(id).innerHTML = opts; $(id).value = listFor; }
-  const who = friends.find((f) => f.id === listFor);
-  $("friendNote").hidden = !who;
+  if (listFor && !friends.some((f) => f.id === listFor) && !discordPeople.some((p) => p.id === listFor)) listFor = "";
+  const opt = (id, text, off) => `<option value="${esc(id)}"${off ? " disabled" : ""}>${esc(text)}</option>`;
+  const opts = (off) => opt("", "My watchlist") + friends.map((f) => opt(f.id, `${f.name}'s wishlist`)).join("")
+    + (discordPeople.length ? `<optgroup label="Kept in Discord (/wishlist)">${discordPeople.map((p) => opt(p.id, `${p.name}'s wishlist`, off)).join("")}</optgroup>` : "")
+    + opt("__add", "＋ Add someone…");
+  $("wlWho").innerHTML = opts(false);
+  $("addWho").innerHTML = opts(true); // (nothing can be added to a Discord list here: they keep it themselves)
+  for (const id of ["addWho", "wlWho"]) $(id).value = listFor;
+  const who = friends.find((f) => f.id === listFor), dc = discordPerson();
+  $("friendNote").hidden = !who && !dc;
   if (who) {
     $("friendNote").innerHTML = `When something here comes in stock, ${esc(who.name)} gets a Discord ping with links to check out or add it to their cart, while this shop is being watched. Nothing opens on this PC.<button class="linkish" id="rmPerson">Remove ${esc(who.name)}</button>`;
     $("rmPerson").onclick = () => { if (confirm(`Remove ${who.name}? Their wishlists go too.`)) saveFriends(friends.filter((f) => f !== who)); };
+  } else if (dc) {
+    $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, so it's changed there, not here. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping in their own channel with links to check out. Nothing opens on this PC.`;
   }
+  $("addCard").classList.toggle("addoff", !!dc);
+  $("addNote").hidden = !dc;
+  if (dc) $("addNote").textContent = `${dc.name} keeps their wishlist in Discord, so nothing can be added to it here. Pick My watchlist (or someone else) to add things.`;
 }
 function pickList(sel) {
   if (sel.value === "__add") { // (open the form; the dropdown stays on the list you were on)
@@ -1450,14 +1484,14 @@ function showFriends() {
 }
 async function loadFriends() {
   const r = await api("/api/friends");
-  friends = r.friends || [];
-  showFriends(); showListFor(); renderWatchlist();
+  friends = r.friends || []; discordPeople = r.discord || []; listsSeq = r.lists || 0;
+  showFriends(); showListFor(); renderKwActs(); refreshInfo();
 }
 async function saveFriends(list) {
   const r = await api("/api/friends", { friends: list });
   $("frMsg").textContent = r.error || "";
   if (r.error) return false;
-  friends = r.friends;
+  friends = r.friends; discordPeople = r.discord || discordPeople;
   showFriends(); showListFor(); loadWatchlist().catch(() => {});
   return true;
 }
@@ -1486,7 +1520,36 @@ async function loadDiscord() {
   $("dcFriendsState").textContent = r.friendsSet ? `Friends' pings go to their own channel (${r.friendsHint}).` : r.set ? "Friends' pings go to the same channel as yours. To use a different one, paste its webhook:" : "Friends' pings need a webhook too (yours above, or one just for them):";
   $("dcFriendsHook").value = "";
   $("dcFriendsRemove").hidden = !r.friendsSet;
+  showLists(r);
 }
+// The wishlists people keep in Discord: drop mode reads them from the bot with a key (the
+// bot's DROP_MODE_KEY). The key is a secret too, so drop mode only says whether it's set.
+function showLists(r) {
+  const l = r.lists || {}, n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+  $("dlState").textContent = !r.botKeySet ? "Not connected." : {
+    ok: "✅ Connected. " + (l.people ? `${n(l.people, "person keeps", "people keep")} a wishlist (${n(l.items, "thing", "things")} to look for).` : "Nobody has a wishlist yet."),
+    badkey: "❌ The bot didn't accept that key. Paste the same one you gave the bot.",
+    nokey: "The bot hasn't been given its key yet (DROP_MODE_KEY).",
+    down: "⚠ Couldn't reach the bot just now. Drop mode tries again every minute.",
+  }[l.state] || "Connecting…";
+  $("dlKey").value = "";
+  $("dlKey").placeholder = r.botKeySet ? "Paste a new key to replace it" : "Paste the key you gave the bot";
+  $("dlRemove").hidden = !r.botKeySet;
+}
+async function saveListsKey(body) {
+  $("dlMsg").textContent = body.botKey ? "Connecting…" : "";
+  const r = await api("/api/discord", body);
+  $("dlMsg").textContent = r.error || (body.removeBotKey ? "Disconnected." : "");
+  if (r.error) return;
+  showLists(r); loadFriends().catch(() => {});
+}
+$("dlSave").onclick = () => {
+  const key = $("dlKey").value.trim();
+  if (!key) { $("dlMsg").textContent = "Paste the key first."; return; }
+  saveListsKey({ botKey: key });
+};
+$("dlKey").onkeydown = (e) => { if (e.key === "Enter") $("dlSave").click(); };
+$("dlRemove").onclick = () => { if (confirm("Disconnect? Drop mode stops watching the wishlists people keep in Discord.")) saveListsKey({ removeBotKey: true }); };
 async function saveDiscord(extra = {}) {
   const hook = $("dcHook").value.trim();
   const r = await api("/api/discord", { webhook: hook, user: $("dcUser").value.trim(), checkout: $("dcCheckout").checked, lock: $("dcLock").checked, live: $("dcLive").checked, ...extra });
@@ -1758,6 +1821,7 @@ async function pollOnce(sid) {
     if (r.running && speed && document.activeElement !== $("interval")) $("interval").value = speed.value; // (each shop has its own speed)
     if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); loadCats(); } // the shop is loaded
     if (r.wlVersion && wlVersion && r.wlVersion !== wlVersion) { wlVersion = r.wlVersion; loadWatchlist(); } // changed in another window
+    if (r.lists !== undefined && r.lists !== listsSeq) { listsSeq = r.lists; loadFriends().catch(() => {}); loadDiscord().catch(() => {}); } // someone changed their list in Discord
     renderLoginState();
   } catch {
     if (sid === STORE) setChip("sRun", "Drop mode program isn't running", "warn");
@@ -1779,7 +1843,7 @@ loadStores().then(() => {
   applyStore(); renderWatchlist(); loadWatchlist().catch(() => {});
   pollAll(); setInterval(pollAll, 1000);
 });
-setInterval(() => { if (watchlist.length) refreshInfo(); }, 10000); // keep stock levels fresh
+setInterval(() => { if (watchlist.length || discordPerson()) refreshInfo(); }, 10000); // keep stock levels fresh
 setInterval(async () => { // shops added or removed in another window
   await loadStores();
   if (!stores.some((s) => s.id === STORE)) switchStore("tofu"); else applyStore();
