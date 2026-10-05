@@ -60,6 +60,27 @@ PICTURES_DIR = os.path.join(dm.SOUND_DIR, "pictures")
 PICTURE_NAME = re.compile(r"^[0-9a-f]{12}\.(?:webp|jpg|png|gif)$")
 
 
+def download_picture(url):
+    """A picture from a link: (its bytes, or None and what went wrong). Web links only, up to 10 MB.
+    Drop mode keeps its own copy, so the link breaking later doesn't matter."""
+    if not re.match(r"^https?://\S+$", url, re.I):
+        return None, "Paste a link that starts with http:// or https://."
+    try:
+        res = subprocess.run(["curl", "-sS", "-L", "--max-time", "20", "--max-filesize", str(10 * 1024 * 1024),
+                              "--proto", "=http,https", "--proto-redir", "=http,https", "-A", dm.UA,
+                              "-H", "Accept: image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5",
+                              "-w", "\n%{http_code}", url], capture_output=True)
+    except Exception:
+        return None, "Couldn't get that link."
+    body, _, code = res.stdout.rpartition(b"\n")
+    code = code.decode(errors="replace").strip()
+    if res.returncode == 63:
+        return None, "That picture's too big (over 10 MB)."
+    if res.returncode != 0 or not code.startswith("2"):
+        return None, "Couldn't get that link" + (f" (the site said {code})." if res.returncode == 0 else ".")
+    return body, None
+
+
 def prune_pictures():
     """Delete pictures no watchlist uses any more (not brand-new ones: one may be about to go on a list)."""
     used = {w.get("picture") for W in list(WATCHERS.values()) for w in W.watchlist}
@@ -1555,16 +1576,20 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(dm.SOUND_DIR, "background" + ext), "wb") as f:
                 f.write(data)
             self.send_json(background_info())
-        elif path == "/api/picture":  # a picture for a watch the shop has none for (the page makes it small first)
-            data = base64.b64decode(data.get("data", ""))
-            ext = picture_type(data)
-            if not ext or len(data) > 5 * 1024 * 1024:
-                self.send_json({"error": "Pick a JPG, PNG, WebP or GIF picture (up to 5 MB)."}, 400)
+        elif path == "/api/picture":  # a picture for a watch the shop has none for: uploaded (the page makes
+            # it small first) or from a link (downloaded here; the page then makes it small too)
+            link = str(data.get("url") or "").strip()
+            raw, problem = download_picture(link) if link else (base64.b64decode(data.get("data", "")), None)
+            ext = picture_type(raw) if raw else None
+            if problem or not ext or len(raw) > 10 * 1024 * 1024:
+                self.send_json({"error": problem or (
+                    "That link isn't a picture (a JPG, PNG, WebP or GIF). Right-click the picture, choose "
+                    "Copy image address, and paste that." if link else "Pick a JPG, PNG, WebP or GIF picture (up to 10 MB).")}, 400)
                 return
             name = secrets.token_hex(6) + ext
             os.makedirs(PICTURES_DIR, exist_ok=True)
             with open(os.path.join(PICTURES_DIR, name), "wb") as f:
-                f.write(data)
+                f.write(raw)
             self.send_json({"picture": name})
         elif path == "/api/background/remove":
             old = background_file()
