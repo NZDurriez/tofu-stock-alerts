@@ -358,8 +358,8 @@ class Watcher:
     # ---- friends' wishlists: they get a Discord ping with checkout links; nothing opens here ----
     def friend_items(self):
         """[(friend, kind, product id or keywords, qty, max, item)]: friends' wishlists for this shop,
-        then the ones people keep in Discord (keywords, watched on every shop; item is the bot's name
-        for it, for the button on the ping that takes it off their list)."""
+        then the ones people keep in Discord (keywords, watched on every shop; item is the entry from
+        the bot: its key, for the button on the ping that takes it off their list, and when it was added)."""
         friends, out = {f["id"]: f for f in FRIENDS}, []
         for w in self.watchlist:
             f = friends.get(w.get("who"))
@@ -367,7 +367,7 @@ class Watcher:
             if key:
                 out.append((f, w["kind"], key, w["qty"], w.get("max"), None))
         for person in LISTS.people:
-            out += [(person, "words", keywords(it["text"]), it["qty"], it.get("max"), it.get("key")) for it in person["items"]]
+            out += [(person, "words", keywords(it["text"]), it["qty"], it.get("max"), it) for it in person["items"]]
         return out
 
     def ping_friends(self, old, current, first=False):
@@ -387,8 +387,10 @@ class Watcher:
                     continue
                 vid = live[0]
                 for friend, kind, key, qty, cap, item in items:
-                    seen = (friend["id"], vid)
-                    if seen in done or (first and seen in self.friend_pinged):
+                    seen = (friend["id"], vid)  # (one ping per person per product, each time)
+                    # Told about it already, for this entry (one taken off the list and added again is new)
+                    told = (f"{friend['id']}@{item.get('added') or 0}" if item else friend["id"], vid)
+                    if seen in done or (first and told in self.friend_pinged):
                         continue
                     if not (key == pid if kind == "product" else keyword_match(key, it["title"])):
                         continue
@@ -409,8 +411,8 @@ class Watcher:
                             self.log("warn", f"{it['title'][:60]} is on {friend['name']}'s wishlist, but drop mode can't ping them "
                                              "until a Discord webhook is set up in ⚙ Settings.")
                         continue
-                    self.friend_pinged.add(seen)
-                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item))
+                    self.friend_pinged.add(told)
+                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item and item.get("key")))
             for friend, pings in todo.values():
                 where = " in their channel" if friend.get("hook") else ""
                 for it, vid, q, price, _ in pings:
@@ -1028,7 +1030,8 @@ class DiscordLists:
                 except (TypeError, ValueError):
                     qty = 1
                 items.append({"text": text, "qty": qty, "max": price_cap(it.get("max")),
-                              "key": it["key"] if re.fullmatch(r"[0-9a-f]{8}", str(it.get("key") or "")) else None})
+                              "key": it["key"] if re.fullmatch(r"[0-9a-f]{8}", str(it.get("key") or "")) else None,
+                              "added": it["added"] if isinstance(it.get("added"), int) else 0})
             if items:
                 name = re.sub(r"[^\w &'.-]", "", str(p.get("name") or "")).strip()[:30] or "Someone"
                 out.append({"id": "discord:" + discord, "name": name, "discord": discord, "hook": hook, "items": items[:15]})

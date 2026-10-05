@@ -758,7 +758,7 @@ async function addItem(env, i, user, data, person, keywords, qty, max) {
     if (made() !== before) await savePerson(env, data, user, person); // (keep what was made on the way)
     return { content: problem };
   }
-  const item = { text, qty };
+  const item = { text, qty, added: Date.now() }; // (when: so drop mode treats it as new, even if it was on the list before)
   if (max) item.max = max;
   person.items.push(item);
   await savePerson(env, data, user, person);
