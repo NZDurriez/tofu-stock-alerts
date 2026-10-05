@@ -1530,7 +1530,7 @@ function showLists(r) {
     ok: "✅ Connected. " + (l.people ? `${n(l.people, "person keeps", "people keep")} a wishlist (${n(l.items, "thing", "things")} to look for).` : "Nobody has a wishlist yet."),
     badkey: "❌ The bot didn't accept that key. Paste the same one you gave the bot.",
     nokey: "The bot hasn't been given its key yet (DROP_MODE_KEY).",
-    down: "⚠ Couldn't reach the bot just now. Drop mode tries again every minute.",
+    down: "⚠ Couldn't reach the bot just now. Drop mode keeps trying.",
   }[l.state] || "Connecting…";
   $("dlKey").value = "";
   $("dlKey").placeholder = r.botKeySet ? "Paste a new key to replace it" : "Paste the key you gave the bot";

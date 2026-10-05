@@ -47,7 +47,7 @@ FRIENDS_FILE = os.path.join(dm.SOUND_DIR, "friends.json")      # friends with th
 PINGED_FILE = os.path.join(dm.SOUND_DIR, "pinged.json")        # what friends were pinged about (so a restart doesn't ping again)
 # The stock-alert bot, where people keep wishlists of their own with /wishlist (drop mode reads them with your key)
 BOT_URL = (os.environ.get("DROP_BOT_URL") or "https://tofu-stock-watch.alex-mangin35.workers.dev").rstrip("/")
-LISTS_EVERY = float(os.environ.get("DROP_LISTS_EVERY") or 60)  # seconds between looks at them
+LISTS_EVERY = float(os.environ.get("DROP_LISTS_EVERY") or 5)  # seconds between looks at them (so a new item pings within seconds)
 PING_CARDS = 5  # pings with buttons for one person at once; any more go in one message
 WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+(?:\?[\w=&-]*)?$")
 if os.environ.get("DROP_DISCORD_TEST") == "1":  # tests only: a pretend Discord on this PC
@@ -975,7 +975,7 @@ def save_friends(items):
 
 class DiscordLists:
     """Wishlists people keep themselves in Discord (/wishlist, with the stock-alert bot). Drop mode
-    reads them from the bot once a minute, with the key in ⚙ Settings, and watches them on every
+    reads them from the bot every few seconds, with the key in ⚙ Settings, and watches them on every
     shop: each person is pinged in their own private channel (the bot made it, and tells drop mode
     its webhook). Nothing opens on this PC, and they can't be changed here."""
 
@@ -1046,7 +1046,7 @@ class DiscordLists:
             time.sleep(LISTS_EVERY)
 
     def update(self):
-        """Look at the lists now (once a minute, and straight away when the key changes)."""
+        """Look at the lists now (every few seconds, and straight away when the key changes)."""
         with self.lock:
             state, data = self.fetch()
             old, said = self.people, self.said
@@ -1057,7 +1057,7 @@ class DiscordLists:
             else:
                 self.people = []
             self.state = state
-            self.said = state if state != "down" or self.fails >= 3 else said  # (a minute without the bot isn't news)
+            self.said = state if state != "down" or self.fails * LISTS_EVERY >= 60 else said  # (under a minute without the bot isn't news)
             changed = self.people != old
             if changed:
                 self.seq += 1
@@ -1077,7 +1077,7 @@ class DiscordLists:
                              f"{'person' if len(self.people) == 1 else 'people'}, {n} thing{'' if n == 1 else 's'}"
                              + (f" ({', '.join(p['name'] for p in self.people[:8])})" if self.people else "")
                              + ". Watched on every shop; each person is pinged in their own channel."),
-                "down": ("warn", "🤖 Can't reach the bot for the Discord wishlists. Still watching the last ones, and trying again every minute."),
+                "down": ("warn", "🤖 Can't reach the bot for the Discord wishlists. Still watching the last ones, and still trying."),
                 "badkey": ("warn", "🤖 The bot didn't accept drop mode's key, so the Discord wishlists aren't being watched (⚙ Settings → Discord)."),
                 "nokey": ("warn", "🤖 The bot hasn't been given drop mode's key yet, so it can't share the Discord wishlists."),
                 "off": ("info", "🤖 Stopped watching the Discord wishlists."),
