@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -54,6 +55,25 @@ if os.environ.get("DROP_DISCORD_TEST") == "1":  # tests only: a pretend Discord 
     WEBHOOK = re.compile(r"^http://127\.0\.0\.1:\d+/api/webhooks/\d+/[\w-]+$")
 # The page's background picture (yours, kept in the settings folder, not the code)
 BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
+# Pictures you've given watches the shop has no picture for (kept in the settings folder, not the code)
+PICTURES_DIR = os.path.join(dm.SOUND_DIR, "pictures")
+PICTURE_NAME = re.compile(r"^[0-9a-f]{12}\.(?:webp|jpg|png|gif)$")
+
+
+def prune_pictures():
+    """Delete pictures no watchlist uses any more (not brand-new ones: one may be about to go on a list)."""
+    used = {w.get("picture") for W in list(WATCHERS.values()) for w in W.watchlist}
+    try:
+        names = os.listdir(PICTURES_DIR)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(PICTURES_DIR, name)
+        try:
+            if PICTURE_NAME.match(name) and name not in used and time.time() - os.path.getmtime(path) > 600:
+                os.remove(path)
+        except OSError:
+            pass
 
 
 def background_file():
@@ -533,11 +553,15 @@ class Watcher:
                 clean[-1]["max"] = cap
             if isinstance(w, dict) and w.get("who") in friend_ids:
                 clean[-1]["who"] = w["who"]  # on a friend's wishlist: pings them, never opens checkout here
+            pic = str(w.get("picture") or "")
+            if PICTURE_NAME.match(pic) and os.path.exists(os.path.join(PICTURES_DIR, pic)):
+                clean[-1]["picture"] = pic  # your own picture (shown while the shop has none)
         self.watchlist = clean
         self.wl_version += 1
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
         with open(self.watchlist_file, "w", encoding="utf-8") as f:
             json.dump(clean, f)
+        prune_pictures()
         if self.running:
             mine = [w for w in clean if not w.get("who")]
             self.start([{"id": w["id"], "qty": w["qty"], "max": w.get("max")} for w in mine if w["kind"] == "product"],
@@ -1452,6 +1476,19 @@ class Handler(BaseHTTPRequestHandler):
                             "wlVersion": W.wl_version, "live": LIVE.on, "lists": LISTS.seq})
         elif path == "/api/watchlist":
             self.send_json({"items": W.watchlist, "version": W.wl_version})
+        elif path.startswith("/picture/"):  # a picture you gave a watch
+            name = path[len("/picture/"):]
+            pic = os.path.join(PICTURES_DIR, name)
+            if not PICTURE_NAME.match(name) or not os.path.exists(pic):
+                self.send_json({"error": "no such picture"}, 404)
+                return
+            with open(pic, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", BG_TYPES[os.path.splitext(name)[1]])
+            self.send_header("Cache-Control", "max-age=31536000, immutable")  # (a new picture gets a new name)
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/stores":
             self.send_json({"stores": store_list()})
         elif path == "/api/discord":
@@ -1518,6 +1555,17 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(dm.SOUND_DIR, "background" + ext), "wb") as f:
                 f.write(data)
             self.send_json(background_info())
+        elif path == "/api/picture":  # a picture for a watch the shop has none for (the page makes it small first)
+            data = base64.b64decode(data.get("data", ""))
+            ext = picture_type(data)
+            if not ext or len(data) > 5 * 1024 * 1024:
+                self.send_json({"error": "Pick a JPG, PNG, WebP or GIF picture (up to 5 MB)."}, 400)
+                return
+            name = secrets.token_hex(6) + ext
+            os.makedirs(PICTURES_DIR, exist_ok=True)
+            with open(os.path.join(PICTURES_DIR, name), "wb") as f:
+                f.write(data)
+            self.send_json({"picture": name})
         elif path == "/api/background/remove":
             old = background_file()
             if old:

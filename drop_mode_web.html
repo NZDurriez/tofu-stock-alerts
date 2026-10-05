@@ -231,6 +231,14 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 .thumbwrap .kwmark{position:absolute;right:-5px;bottom:-5px;width:20px;height:20px;display:grid;place-items:center;background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.35)}
 .thumbwrap .kwmark svg{width:11px;height:11px;display:block}
 .thumb.none svg{width:22px;height:22px;display:block}
+/* A watch with no picture from the shop: click it to give it one of yours (the shop's is used once there is one) */
+.thumbbtn{position:relative;display:block;padding:0;border:0;background:none;border-radius:10px;cursor:pointer;line-height:0}
+.thumbbtn .add{position:absolute;inset:0;display:grid;place-items:center;border-radius:10px;background:rgba(0,0,0,.55);color:#fff;font:600 11px/1.2 Inter,sans-serif;text-align:center;opacity:0;transition:opacity .15s}
+.thumbbtn:hover .add,.thumbbtn:focus-visible .add{opacity:1}
+.thumbbtn:hover .thumb,.thumbbtn:focus-visible .thumb{border-color:var(--accent)}
+.picwrap .unpic{position:absolute;left:-6px;top:-6px;width:19px;height:19px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--solid);color:var(--muted);font:600 13px/17px Inter,sans-serif;opacity:0;transition:opacity .15s}
+.picwrap:hover .unpic,.picwrap .unpic:focus-visible{opacity:1}
+.picwrap .unpic:hover{color:var(--bad);border-color:var(--bad)}
 input[type=search]{width:100%;font:400 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:12px;padding:13px 14px 13px 40px;outline:none;transition:border-color .15s;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6'/%3E%3Cpath d='m13 13 4 4'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:14px center}
 input[type=search]:focus{border-color:var(--accent)}
@@ -591,6 +599,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
           <button class="danger" id="stopBtn" disabled>Stop</button>
         </div>
         <div class="wl" id="watchlist"></div>
+        <input type="file" id="picFile" accept="image/*" hidden>
       </section>
 
       <section class="card">
@@ -640,7 +649,7 @@ const cur = () => stores.find((s) => s.id === STORE) || stores[0];
 const storeOf = (sid) => stores.find((s) => s.id === sid) || cur();
 
 // Most requests are about one shop (?store=...); the sound, the background and the list of shops are shared
-const SHARED = /^\/api\/(sound|background|stores|discord|friends)\b/;
+const SHARED = /^\/api\/(sound|background|stores|discord|friends|picture)\b/;
 async function api(path, body, headers = {}, store = STORE) {
   if (!SHARED.test(path)) path += (path.includes("?") ? "&" : "?") + "store=" + encodeURIComponent(store);
   const res = await fetch(path, body
@@ -1287,14 +1296,47 @@ function kwTagsHtml(text) {
   return need.map((k) => `<span class="kwtag">${esc(k)}</span>`).join("")
     + not.map((k) => `<span class="kwtag kwnot" title="Leaves out products with this word">not ${esc(k)}</span>`).join("");
 }
-// A keyword watch shows the picture of what it matches (in stock first, else
-// the sold-out one), with a little 🔎 so it's clearly a keyword watch
-// (or, when nothing matches yet, a listing its minus words leave out, e.g. the 30th bundle with tins)
+// An entry's picture is the shop's when it has one: for a keyword watch, what it matches (in stock first,
+// else the sold-out one, else a listing its minus words leave out, e.g. the 30th bundle with tins), with a
+// little 🔎 so it's clearly a keyword watch. Otherwise it's one you've given it (click the empty picture;
+// × takes yours off). Yours stays saved, for whenever the shop has none.
 const MAGNIFIER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.3"/><path d="m10.2 10.2 3.6 3.6"/></svg>';
-function keywordThumb(w) {
-  const m = info.words[w.text], pic = m && ([...m.items, ...m.unavailable].find((it) => it.image) || (m.similar && m.similar.image ? m.similar : null));
-  return pic ? `<span class="thumbwrap">${thumb(pic)}<span class="kwmark" title="Keyword watch: the picture is a product it matches">${MAGNIFIER}</span></span>` : `<span class="thumb none" title="Keyword watch">${MAGNIFIER}</span>`;
+function entryThumb(w, i) {
+  const kw = w.kind !== "product", m = kw && info.words[w.text];
+  const shop = kw ? m && ([...m.items, ...m.unavailable].find((it) => it.image) || (m.similar && m.similar.image ? m.similar : null))
+    : (info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w.image ? w : null);
+  const mark = (title) => (kw ? `<span class="kwmark" title="${title}">${MAGNIFIER}</span>` : "");
+  if (shop) return `<span class="thumbwrap">${thumb(shop)}${mark("Keyword watch: the picture is a product it matches")}</span>`;
+  if (i < 0) return kw ? `<span class="thumb none" title="Keyword watch">${MAGNIFIER}</span>` : thumb(null); // (someone's Discord list)
+  if (w.picture) return `<span class="thumbwrap picwrap"><button class="thumbbtn" data-pic title="Your picture (the shop's is used once it has one). Click to change it.">`
+    + `<img class="thumb" src="/picture/${esc(w.picture)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb none',textContent:'🖼️'}))"></button>`
+    + `${mark("Keyword watch")}<button class="unpic" title="Take your picture off">×</button></span>`;
+  return `<span class="thumbwrap picwrap"><button class="thumbbtn" data-pic title="Add a picture for this watch (until the shop has one)">`
+    + `<span class="thumb none">${kw ? MAGNIFIER : "📦"}</span><span class="add">＋<br>picture</span></button></span>`;
 }
+// Your picture for an entry: made small here (it's only ever shown small), then kept by drop mode
+let picFor = null;
+function choosePicture(w) { picFor = w; $("picFile").value = ""; $("picFile").click(); }
+async function smallPicture(file) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 320 / Math.max(img.width, img.height));
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(img.width * scale)); c.height = Math.max(1, Math.round(img.height * scale));
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  const blob = await new Promise((resolve) => c.toBlob(resolve, "image/webp", 0.88));
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+  return btoa(bin);
+}
+$("picFile").onchange = async () => {
+  const file = $("picFile").files[0], w = picFor;
+  if (!file || !w) return;
+  let r;
+  try { r = await api("/api/picture", { data: await smallPicture(file) }); } catch { r = { error: "Couldn't use that picture. Try a JPG or PNG." }; }
+  if (r.error) { alert(r.error); return; }
+  if (watchlist.includes(w)) { w.picture = r.picture; watchlistChanged(); }
+};
 let wlRedrawLater = false; // (don't redraw while you're typing a max price)
 let wlHtml = "";           // (nor when nothing changed, so a details box you're reading doesn't flicker)
 function renderWatchlist() {
@@ -1306,7 +1348,7 @@ function renderWatchlist() {
     const s = statusParts(w);
     return `
     <div class="wl-row" data-i="${i}">
-      ${w.kind === "product" ? thumb(info.picks[w.id] && info.picks[w.id].image ? info.picks[w.id] : w) : keywordThumb(w)}
+      ${entryThumb(w, i)}
       <div class="t">
         <div class="sum${s.more ? " has-more" : ""}"${s.more ? ' tabindex="0"' : ""}>
           <div class="name">${w.kind === "product" ? esc(w.title) : "Keywords: " + kwTagsHtml(w.text)}</div>
@@ -1336,6 +1378,9 @@ function renderWatchlist() {
     maxin.onkeydown = (e) => { if (e.key === "Enter") maxin.blur(); };
     maxin.onblur = () => { if (wlRedrawLater) { wlRedrawLater = false; renderWatchlist(); } };
     row.querySelector(".rm").onclick = () => { watchlist.splice(i, 1); watchlistChanged(); };
+    const pic = row.querySelector("[data-pic]"), unpic = row.querySelector(".unpic");
+    if (pic) pic.onclick = () => choosePicture(watchlist[i]);
+    if (unpic) unpic.onclick = () => { delete watchlist[i].picture; watchlistChanged(); };
   });
 }
 // Ask the program how each entry stands (in stock, sold out, what a search matches)
