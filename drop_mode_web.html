@@ -262,10 +262,13 @@ input[type=search]:focus{border-color:var(--accent)}
 .bridge button{padding:6px 12px}
 .kwtag.kwnot{background:var(--bad-soft);color:var(--bad)}
 /* Whose list: you, or a friend (their wishlist pings them on Discord) */
-.listfor{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px;font-size:13.5px;color:var(--muted)}
-.listfor .cat.on{background:var(--ok);border-color:var(--ok);color:var(--tab-ink)}
-.listfor .cat.you.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+select.whosel{font:600 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:9px;padding:3px 8px;min-width:0;max-width:100%;cursor:pointer}
+select.whosel:hover{border-color:var(--faint)}
+select.whosel option{font-weight:500}
+.addperson{margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
+.addperson .row input{min-width:0}
 .friendnote{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:var(--ok-soft);color:var(--text)}
+.friendnote .linkish{padding:0;margin-left:4px;font-size:inherit}
 .friend{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
 .friend:first-child{border-top:0}
 .friend .id{color:var(--faint);font-size:12.5px;font-variant-numeric:tabular-nums}
@@ -445,7 +448,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
             </div>
             <p class="hint" id="dcMsg" style="margin:6px 0 0"></p>
             <div class="pop-title" style="font-size:14px;margin-top:16px">👥 Friends' wishlists</div>
-            <p class="lead" style="margin:2px 0 8px">Give a friend their own wishlist: pick them under <b>List</b> in your watchlist and add things for them. When one comes in stock, they get a Discord ping with checkout links. Nothing opens on this PC.</p>
+            <p class="lead" style="margin:2px 0 8px">Give someone their own wishlist: choose <b>＋ Add someone…</b> in your watchlist's dropdown (or add them here), then add things for them. When one comes in stock, they get a Discord ping with checkout links. Nothing opens on this PC.</p>
             <div id="friendList"></div>
             <div class="row" style="margin-top:8px;gap:6px">
               <input type="text" id="frName" placeholder="Name" maxlength="30" autocomplete="off" style="min-width:0;flex:1">
@@ -515,7 +518,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       </section>
 
       <section class="card">
-        <h2><span class="step">2</span><span id="addTitle">Add to your watchlist</span></h2>
+        <h2><span class="step">2</span>Add to <select class="whosel" id="addWho" aria-label="Whose list to add to"></select></h2>
 
         <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.<br><br>Put a <b>minus</b> before a word to leave out products that have it: <i>30th Booster Bundle -tin</i> skips the bundle that comes with mini tins.</span></span></h3>
         <div class="kwbox">
@@ -546,8 +549,20 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head"><span class="grip" aria-hidden="true">⠿</span><span class="col-title">Watching</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="watch">−</button></div>
     <div class="stack">
       <section class="card">
-        <h2><span class="step">3</span><span id="wlTitle">Your watchlist</span> <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on <span class="shopHost">mrtofu.store</span> if the shop is locked. You always press Pay yourself.</span></span></h2>
-        <div class="listfor" id="listFor" hidden></div>
+        <h2><span class="step">3</span><select class="whosel" id="wlWho" aria-label="Whose list to show"></select> <span class="count" id="wlCount"></span> <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">When something here is in stock, or gets added to the shop, checkout opens by itself with this many in the cart.<br><br>For that to work, <b>allow pop-ups for this page</b> the first time your browser asks, and make sure this browser is <b>signed in to Shop Pay</b> and has the <b>shop password</b> entered on <span class="shopHost">mrtofu.store</span> if the shop is locked. You always press Pay yourself.</span></span></h2>
+        <div class="addperson" id="addPerson" hidden>
+          <div class="pop-title" style="font-size:14px;margin-bottom:8px">Add someone</div>
+          <div class="row" style="gap:6px">
+            <input type="text" id="apName" placeholder="Nickname" maxlength="30" autocomplete="off" style="flex:1">
+            <input type="text" id="apId" placeholder="Their Discord ID" inputmode="numeric" autocomplete="off" style="flex:1.4">
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="primary" id="apAdd" style="padding:8px 14px">Add</button>
+            <button class="linkish" id="apCancel">Cancel</button>
+          </div>
+          <p class="hint" style="margin:8px 0 0">They get their own wishlist here. When something on it comes in stock, they get a Discord ping (in your drop mode channel) with links to check out on their own device. Their Discord ID: Settings → Advanced → Developer Mode on, then right-click their name → Copy User ID.</p>
+          <p class="hint" id="apMsg" style="margin:6px 0 0;color:var(--bad)"></p>
+        </div>
         <p class="hint friendnote" id="friendNote" hidden></p>
         <div class="controls watchctl">
           <label>Check every
@@ -1000,7 +1015,7 @@ const nameAsKeywords = (title) => title
 function renderKwActs() {
   const text = cleanKw($("kwInput").value), already = text && onList("words", wordsKey(text));
   $("kwActs").innerHTML = `<span class="lbl">Buy</span>${qtyButtons(kwQty)}
-    <button class="watchbtn${already ? " done" : ""}" id="kwAdd" ${!text || already ? "disabled" : ""}>${already ? "✓ On your watchlist" : "+ Watch keywords"}</button>`;
+    <button class="watchbtn${already ? " done" : ""}" id="kwAdd" ${!text || already ? "disabled" : ""}>${already ? (listFor ? `✓ On ${esc(listName())}'s wishlist` : "✓ On your watchlist") : `+ Watch keywords${esc(forWho())}`}</button>`;
   wireQty($("kwActs"), (n) => { kwQty = n; });
   $("kwAdd").onclick = addKeywords;
 }
@@ -1102,7 +1117,7 @@ function renderResults() {
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}${sortBy === "new" && it.listed && listedDate(it.listed) ? `<span class="listed">Listed ${esc(listedDate(it.listed))}</span>` : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : `+ Watch${esc(forWho())}`}</button></div></div>
     </div>`;
   }).join("");
   if (!r.items.length) html += showSold ? `<div class="empty">Nothing ${q ? "matches that" : where ? "is in this category" : "is in the shop"}.</div>`
@@ -1137,7 +1152,7 @@ function updateTicks() {
     box.checked = sel;
     if (!btn.disabled) {
       const n = ticked.size + (sel ? 0 : 1);
-      btn.textContent = n > 1 ? `+ Watch ${n}` : "+ Watch";
+      btn.textContent = (n > 1 ? `+ Watch ${n}` : "+ Watch") + forWho();
     }
   });
   const bar = $("selbar");
@@ -1146,7 +1161,7 @@ function updateTicks() {
   const names = "Ticked: " + [...ticked.values()].map((t) => `${t.qty}× ${t.title}`).join(" · ");
   bar.querySelector(".names").textContent = names;
   bar.querySelector(".names").title = names; // the full list on hover
-  $("watchTicked").textContent = `+ Watch ${ticked.size}`;
+  $("watchTicked").textContent = `+ Watch ${ticked.size}${forWho()}`;
 }
 // Add everything ticked (and the one whose + Watch was pressed) to the watchlist
 function addTicked(extra) {
@@ -1378,24 +1393,54 @@ $("panelA").oninput = () => {
 // ---------- friends' wishlists ----------
 // A friend's list pings them on Discord (with checkout links) when something on it comes in stock,
 // while that shop is being watched. Nothing opens here. Friends are managed in ⚙ Settings.
+// The two dropdowns (step 2 "Add to …" and step 3's heading) always show the same list, so
+// what you add appears straight away below. "＋ Add someone…" opens a little form for a
+// nickname and Discord ID.
+const forWho = () => (listName() ? ` for ${listName()}` : ""); // (on the add buttons)
 function showListFor() {
   if (listFor && !friends.some((f) => f.id === listFor)) listFor = "";
-  const el = $("listFor");
-  el.hidden = !friends.length;
-  el.innerHTML = '<span>List:</span>' + [{ id: "", name: "You" }, ...friends].map((f) =>
-    `<button type="button" class="cat${f.id ? "" : " you"}${f.id === listFor ? " on" : ""}" data-id="${esc(f.id)}">${esc(f.name)}</button>`).join("");
-  el.querySelectorAll("button").forEach((b) => b.onclick = () => {
-    if (b.dataset.id === listFor) return;
-    listFor = b.dataset.id;
-    try { localStorage.setItem("dropListFor", listFor); } catch {}
-    showListFor(); refreshInfo(); search(); renderKwActs();
-  });
+  const opts = '<option value="">My watchlist</option>'
+    + friends.map((f) => `<option value="${esc(f.id)}">${esc(f.name)}'s wishlist</option>`).join("")
+    + '<option value="__add">＋ Add someone…</option>';
+  for (const id of ["addWho", "wlWho"]) { $(id).innerHTML = opts; $(id).value = listFor; }
   const who = friends.find((f) => f.id === listFor);
-  $("addTitle").textContent = who ? `Add to ${who.name}'s wishlist` : "Add to your watchlist";
-  $("wlTitle").textContent = who ? `${who.name}'s wishlist` : "Your watchlist";
   $("friendNote").hidden = !who;
-  if (who) $("friendNote").textContent = `When something here comes in stock, ${who.name} gets a Discord ping with links to check out or add it to their cart, while this shop is being watched. Nothing opens on this PC.`;
+  if (who) {
+    $("friendNote").innerHTML = `When something here comes in stock, ${esc(who.name)} gets a Discord ping with links to check out or add it to their cart, while this shop is being watched. Nothing opens on this PC.<button class="linkish" id="rmPerson">Remove ${esc(who.name)}</button>`;
+    $("rmPerson").onclick = () => { if (confirm(`Remove ${who.name}? Their wishlists go too.`)) saveFriends(friends.filter((f) => f !== who)); };
+  }
 }
+function pickList(sel) {
+  if (sel.value === "__add") { // (open the form; the dropdown stays on the list you were on)
+    sel.value = listFor;
+    $("addPerson").hidden = false; $("apMsg").textContent = "";
+    $("addPerson").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("apName").focus();
+    return;
+  }
+  if (sel.value === listFor) return;
+  listFor = sel.value;
+  try { localStorage.setItem("dropListFor", listFor); } catch {}
+  showListFor(); refreshInfo(); search(); renderKwActs();
+}
+$("addWho").onchange = () => pickList($("addWho"));
+$("wlWho").onchange = () => pickList($("wlWho"));
+$("apAdd").onclick = async () => {
+  const name = $("apName").value.trim(), discord = $("apId").value.replace(/\D/g, "");
+  if (!name || discord.length < 15) { $("apMsg").textContent = "Give them a nickname and their Discord ID (the long number from Copy User ID)."; return; }
+  if (friends.some((f) => f.discord === discord)) { $("apMsg").textContent = "They're already on the list."; return; }
+  const before = new Set(friends.map((f) => f.id));
+  const r = await api("/api/friends", { friends: [...friends, { name, discord }] });
+  if (r.error) { $("apMsg").textContent = r.error; return; }
+  friends = r.friends;
+  const added = friends.find((f) => !before.has(f.id));
+  listFor = added ? added.id : listFor; // (straight to their new wishlist)
+  try { localStorage.setItem("dropListFor", listFor); } catch {}
+  $("apName").value = ""; $("apId").value = ""; $("addPerson").hidden = true;
+  showFriends(); showListFor(); loadWatchlist().catch(() => {});
+};
+$("apCancel").onclick = () => { $("addPerson").hidden = true; };
+$("apName").onkeydown = $("apId").onkeydown = (e) => { if (e.key === "Enter") $("apAdd").click(); if (e.key === "Escape") $("apCancel").click(); };
 function showFriends() {
   $("friendList").innerHTML = friends.map((f) => `<div class="friend"><b>${esc(f.name)}</b><span class="id">${esc(f.discord)}</span><button class="linkish" data-rm="${esc(f.id)}">Remove</button></div>`).join("");
   $("friendList").querySelectorAll("[data-rm]").forEach((b) => b.onclick = () => {
