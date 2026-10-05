@@ -10,6 +10,8 @@
 //   /wishlist ...   anyone in the server: keep a wishlist; pings go to their own private
 //                   channel (made the first time). Drop mode on the owner's PC watches the
 //                   wishlists (it reads them from /wishlists with DROP_MODE_KEY) and pings.
+//   /wishlist-panel posts buttons for it (Add something / My wishlist, with a pop-up form),
+//                   so people can click instead of typing commands (owner only)
 
 const SHOP = "https://mrtofu.store";
 const BROWSER_UA =
@@ -56,7 +58,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 3;
+const COMMANDS_VERSION = 4;
 const COMMANDS = [
   {
     name: "password",
@@ -95,6 +97,12 @@ const COMMANDS = [
       },
       { type: 1, name: "clear", description: "Empty your wishlist" },
     ],
+  },
+  {
+    name: "wishlist-panel",
+    description: "Post the wishlist buttons in this channel, for everyone to use",
+    default_member_permissions: "32", // (only people who can manage the server see it)
+    contexts: [0],
   },
 ];
 
@@ -445,12 +453,6 @@ async function handleInteraction(request, env, ctx) {
     return reply({ type: 8, data: { choices: choices.slice(0, 25) } });
   }
 
-  const user = (i.member && i.member.user) || i.user || {};
-  const owner = (env.DISCORD_OWNER_ID || "").trim();
-  const name = i.data && i.data.name;
-  if (name !== "wishlist" && (!owner || user.id !== owner)) {
-    return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
-  }
   // Defer (shows "thinking…" privately), then edit the reply when the work is done
   const followUp = async (work) => {
     let data;
@@ -466,6 +468,27 @@ async function handleInteraction(request, env, ctx) {
     });
   };
   const deferred = () => reply({ type: 5, data: { flags: EPHEMERAL } });
+
+  // The wishlist buttons, menu and pop-up form are for everyone
+  if ((i.type === 3 || i.type === 5) && String((i.data && i.data.custom_id) || "").startsWith("wl:")) return wishlistComponent(i, env, ctx, followUp);
+
+  const user = (i.member && i.member.user) || i.user || {};
+  const owner = (env.DISCORD_OWNER_ID || "").trim();
+  const name = i.data && i.data.name;
+  if (name !== "wishlist" && (!owner || user.id !== owner)) {
+    return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
+  }
+
+  if (name === "wishlist-panel") {
+    if (!i.guild_id || !i.channel_id) return reply({ type: 4, data: { flags: EPHEMERAL, content: "Use this in a channel in your server." } });
+    ctx.waitUntil(followUp(async () => {
+      const [s] = await bot(env, "POST", `/channels/${i.channel_id}/messages`, panelMessage());
+      if (s === 403) return { content: "I'm not allowed to post in this channel. Give me **Send Messages** and **Embed Links** here, then try again." };
+      if (s >= 300) return { content: `Couldn't post the panel (Discord said ${s}).` };
+      return { content: "Posted the wishlist panel. Pin it so people can find it: right-click it, then **Pin Message**." };
+    }));
+    return deferred();
+  }
 
   if (name === "wishlist") {
     if (!i.guild_id) return reply({ type: 4, data: { flags: EPHEMERAL, content: "Use /wishlist in the server, so I can make your private channel there." } });
@@ -639,38 +662,122 @@ async function ensureChannel(env, data, guildId, user, person) {
   const [problem, hook] = await makeHook(env, channel.id);
   if (problem) return problem;
   person.hook = hook;
-  await fetch(person.hook, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      content: `<@${user.id}> 👋 This is your wishlist channel. When something on your wishlist comes in stock, I'll ping you here with buttons to check out or add it to your cart. Change your list with \`/wishlist\`.`,
-      allowed_mentions: { parse: [], users: [user.id] },
-    }),
-  }).catch(() => {});
+  const welcome = {
+    content: `<@${user.id}> 👋 This is your wishlist channel. When something on your wishlist comes in stock, I'll ping you here with buttons to check out or add it to your cart. Change your list with the buttons below (or \`/wishlist\`).`,
+    allowed_mentions: { parse: [], users: [user.id] },
+  };
+  // (the webhook is the bot's own, so it can have working buttons; if Discord won't take them, it goes without)
+  const post = (body, query = "") => fetch(person.hook + query, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.ok).catch(() => false);
+  if (!(await post({ ...welcome, components: [row(addButton(), listButton())] }, "?with_components=true"))) await post(welcome);
   return null;
 }
 
 const describe = (it) => `**${it.text}**` + (it.qty > 1 ? ` · ${it.qty} of them` : "") + (it.max ? ` · max $${Number(it.max).toFixed(2)}` : "");
 
-async function wishlistCommand(i, env, user) {
-  const sub = (i.data.options || [])[0] || {};
-  const opt = (n) => ((sub.options || []).find((o) => o.name === n) || {}).value;
+// A short name for a wishlist item that stays the same while its words do (for menus and buttons)
+function itemKey(text) {
+  let h = 0x811c9dc5;
+  for (const ch of norm(text)) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, "0");
+}
+
+// ---- the buttons, menu and pop-up form ----
+const row = (...components) => ({ type: 1, components });
+const addButton = (label = "Add something") => ({ type: 2, style: 1, label, emoji: { name: "➕" }, custom_id: "wl:add" });
+const listButton = () => ({ type: 2, style: 2, label: "My wishlist", emoji: { name: "📋" }, custom_id: "wl:list" });
+
+const addForm = () => ({
+  custom_id: "wl:addform",
+  title: "Add to your wishlist",
+  components: [
+    row({ type: 4, custom_id: "keywords", label: "Keywords (every word must be in the name)", style: 1, required: true, max_length: 100,
+      placeholder: "e.g. focused fighters    (a - before a word leaves it out: -tin)" }),
+    row({ type: 4, custom_id: "quantity", label: "How many (1-5)", style: 1, required: false, max_length: 1, value: "1" }),
+    row({ type: 4, custom_id: "max_price", label: "Max price each (optional)", style: 1, required: false, max_length: 10, placeholder: "e.g. 120" }),
+  ],
+});
+
+// The panel everyone can use (posted with /wishlist-panel)
+const panelMessage = () => ({
+  embeds: [{
+    color: 0x6cc08d,
+    title: "🛒 Wishlists",
+    description: "Get pinged in your own private channel when something you want comes in stock.\n\n"
+      + "**➕ Add something**: type a few words from the product's name. Every word has to be in it, and a word with a - in front leaves products out (`booster bundle -tin`).\n"
+      + "**📋 My wishlist**: see your list, or take things off it.\n\nOnly you can see your list and your channel.",
+  }],
+  components: [row(addButton(), listButton())],
+  allowed_mentions: { parse: [] },
+});
+
+// Someone's list, with a menu to take things off and buttons to add or empty it (only they see it)
+function listView(person, note = "") {
+  const items = person.items || [];
+  const top = note ? `${note}\n\n` : "";
+  if (!items.length) return { content: top + "Your wishlist is empty. Press **Add something** to start one.", components: [row(addButton())] };
+  const where = person.channel ? `<#${person.channel}>` : "your private channel";
+  const detail = (it) => [it.qty > 1 ? `${it.qty} of them` : "", it.max ? `max $${Number(it.max).toFixed(2)}` : ""].filter(Boolean).join(" · ");
+  return {
+    content: (top + `Your wishlist (pings go in ${where}):\n` + items.map((it, n) => `${n + 1}. ${describe(it)}`).join("\n")).slice(0, 2000),
+    components: [
+      row({
+        type: 3, custom_id: "wl:rm", placeholder: "Take something off your list…", min_values: 1, max_values: Math.min(items.length, 25),
+        options: items.slice(0, 25).map((it) => ({ label: it.text.slice(0, 100), value: itemKey(it.text), ...(detail(it) ? { description: detail(it) } : {}) })),
+      }),
+      row(addButton(), { type: 2, style: 2, label: "Empty my list", emoji: { name: "🗑️" }, custom_id: "wl:clear" }),
+    ],
+  };
+}
+
+// The person's wishlist record (a new one the first time), with their current name
+async function personFor(env, i, user) {
   const data = await getWishlists(env);
   data.people = data.people || {};
   const name = (i.member && i.member.nick) || user.global_name || user.username || "someone";
   const person = data.people[user.id] || { name, items: [] };
   person.name = name;
-  const where = person.channel ? ` in <#${person.channel}>` : "";
+  return [data, person];
+}
 
-  if (sub.name === "list") {
-    if (!person.items.length) return { content: "Your wishlist is empty. Add something with `/wishlist add`." };
-    return { content: `Your wishlist (pings go${where || " to your private channel"}):\n` + person.items.map((it, n) => `${n + 1}. ${describe(it)}`).join("\n") };
+async function savePerson(env, data, user, person) {
+  data.people[user.id] = person;
+  await putWishlists(env, data);
+}
+
+// Add something (from /wishlist add or the pop-up form). Returns the reply.
+async function addItem(env, i, user, data, person, keywords, qty, max) {
+  const text = String(keywords || "").replace(/\s+/g, " ").trim().slice(0, 100);
+  const words = norm(text).split(/[\s,]+/).filter(Boolean);
+  if (!words.some((w) => !w.startsWith("-"))) return { content: "Give me at least one word to look for (words with a - in front only leave things out).", components: [row(addButton("Try again"))] };
+  if (person.items.some((it) => norm(it.text) === norm(text))) return { content: `${describe({ text })} is already on your wishlist.`, components: [row(listButton())] };
+  if (person.items.length >= WISHLIST_MAX) return { content: `Your wishlist is full (${WISHLIST_MAX} things). Take something off it first.`, components: [row(listButton())] };
+  const made = () => JSON.stringify([data.categories, person.channel, person.hook]), before = made();
+  const problem = await ensureChannel(env, data, i.guild_id, user, person);
+  if (problem) {
+    if (made() !== before) await savePerson(env, data, user, person); // (keep what was made on the way)
+    return { content: problem };
   }
+  const item = { text, qty };
+  if (max) item.max = max;
+  person.items.push(item);
+  await savePerson(env, data, user, person);
+  return {
+    content: `Added ${describe(item)}. I'll ping you in <#${person.channel}> when it's in stock (any shop drop mode watches). Every word has to be in the product's name.`,
+    components: [row(addButton("Add another"), listButton())],
+  };
+}
+
+async function wishlistCommand(i, env, user) {
+  const sub = (i.data.options || [])[0] || {};
+  const opt = (n) => ((sub.options || []).find((o) => o.name === n) || {}).value;
+  const [data, person] = await personFor(env, i, user);
+
+  if (sub.name === "list") return listView(person);
   if (sub.name === "clear") {
     if (!person.items.length) return { content: "Your wishlist is already empty." };
     person.items = [];
-    data.people[user.id] = person;
-    await putWishlists(env, data);
+    await savePerson(env, data, user, person);
     return { content: "Emptied your wishlist. (Your channel stays, ready for next time.)" };
   }
   if (sub.name === "remove") {
@@ -678,34 +785,75 @@ async function wishlistCommand(i, env, user) {
     const at = person.items.findIndex((it) => norm(it.text) === want);
     if (at < 0) return { content: "That isn't on your wishlist. See it with `/wishlist list`." };
     const [gone] = person.items.splice(at, 1);
-    data.people[user.id] = person;
-    await putWishlists(env, data);
+    await savePerson(env, data, user, person);
     return { content: `Took ${describe(gone)} off your wishlist.` };
   }
   if (sub.name === "add") {
-    const text = String(opt("keywords") || "").replace(/\s+/g, " ").trim().slice(0, 100);
-    const words = norm(text).split(/[\s,]+/).filter(Boolean);
-    if (!words.some((w) => !w.startsWith("-"))) return { content: "Give me at least one word to look for (words with a - in front only leave things out)." };
-    if (person.items.some((it) => norm(it.text) === norm(text))) return { content: `${describe({ text })} is already on your wishlist.` };
-    if (person.items.length >= WISHLIST_MAX) return { content: `Your wishlist is full (${WISHLIST_MAX} things). Take something off with \`/wishlist remove\` first.` };
-    const made = () => JSON.stringify([data.categories, person.channel, person.hook]), before = made();
-    const problem = await ensureChannel(env, data, i.guild_id, user, person);
-    if (problem) {
-      if (made() !== before) {
-        data.people[user.id] = person;
-        await putWishlists(env, data);
-      }
-      return { content: problem };
-    }
-    const item = { text, qty: Math.max(1, Math.min(5, parseInt(opt("quantity") || 1, 10) || 1)) };
     const max = parseFloat(opt("max_price"));
-    if (max > 0) item.max = Math.round(max * 100) / 100;
-    person.items.push(item);
-    data.people[user.id] = person;
-    await putWishlists(env, data);
-    return { content: `Added ${describe(item)}. I'll ping you in <#${person.channel}> when it's in stock (any shop drop mode watches). Every word has to be in the product's name.` };
+    return addItem(env, i, user, data, person, opt("keywords"), Math.max(1, Math.min(5, parseInt(opt("quantity") || 1, 10) || 1)),
+      max > 0 ? Math.round(max * 100) / 100 : null);
   }
   return { content: "Use `/wishlist add`, `/wishlist list`, `/wishlist remove` or `/wishlist clear`." };
+}
+
+// A click on a wishlist button or menu, or the pop-up form sent (from the panel, someone's own
+// private replies, their channel, or a ping in it). Each person only ever sees and changes their own.
+async function wishlistComponent(i, env, ctx, followUp) {
+  const user = (i.member && i.member.user) || i.user || {};
+  const id = String(i.data.custom_id);
+  const mine = (data) => reply({ type: 4, data: { flags: EPHEMERAL, allowed_mentions: { parse: [] }, ...data } }); // a new reply only they see
+  const update = (data) => reply({ type: 7, data: { allowed_mentions: { parse: [] }, ...data } }); // change the reply they clicked in
+  if (!i.guild_id) return mine({ content: "Use this in the server." });
+  if (id === "wl:add") return reply({ type: 9, data: addForm() });
+  if (id === "wl:addform") {
+    const field = (name) => {
+      for (const r of i.data.components || []) for (const c of r.components || (r.component ? [r.component] : [])) if (c.custom_id === name) return String(c.value || "").trim();
+      return "";
+    };
+    const qty = Number(field("quantity") || "1"), maxText = field("max_price").replace(/^\$/, ""), max = maxText ? Number(maxText) : null;
+    if (!Number.isInteger(qty) || qty < 1 || qty > 5) return mine({ content: "How many has to be a number from 1 to 5.", components: [row(addButton("Try again"))] });
+    if (max !== null && !(max > 0)) return mine({ content: "The max price has to be a number (or leave it empty).", components: [row(addButton("Try again"))] });
+    ctx.waitUntil(followUp(async () => {
+      const [data, person] = await personFor(env, i, user);
+      return addItem(env, i, user, data, person, field("keywords"), qty, max === null ? null : Math.round(max * 100) / 100);
+    }));
+    return reply({ type: 5, data: { flags: EPHEMERAL } });
+  }
+  const [data, person] = await personFor(env, i, user);
+  const inPlace = ((i.message && i.message.flags) || 0) & EPHEMERAL; // (clicked in one of their own private replies)
+  if (id === "wl:list") return (inPlace ? update : mine)(listView(person));
+  if (id === "wl:rm") {
+    const keys = new Set(i.data.values || []);
+    const gone = person.items.filter((it) => keys.has(itemKey(it.text)));
+    if (gone.length) {
+      person.items = person.items.filter((it) => !keys.has(itemKey(it.text)));
+      await savePerson(env, data, user, person);
+    }
+    return update(listView(person, gone.length ? `Took ${gone.map(describe).join(", ")} off your wishlist.` : "That was already off your list."));
+  }
+  if (id === "wl:clear") {
+    const n = person.items.length;
+    if (!n) return update(listView(person));
+    return update({
+      content: `Empty your whole wishlist (${n} thing${n === 1 ? "" : "s"})?`,
+      components: [row({ type: 2, style: 4, label: "Empty it", custom_id: "wl:clearyes" }, { type: 2, style: 2, label: "Keep it", custom_id: "wl:list" })],
+    });
+  }
+  if (id === "wl:clearyes") {
+    if (person.items.length) {
+      person.items = [];
+      await savePerson(env, data, user, person);
+    }
+    return update(listView(person, "Emptied your wishlist. Your channel stays, ready for next time."));
+  }
+  if (id.startsWith("wl:drop:")) { // "Remove from my wishlist" on a ping
+    const at = person.items.findIndex((it) => itemKey(it.text) === id.slice(8));
+    if (at < 0) return mine({ content: "That's already off your wishlist.", components: [row(listButton())] });
+    const [gone] = person.items.splice(at, 1);
+    await savePerson(env, data, user, person);
+    return mine({ content: `Took ${describe(gone)} off your wishlist, so you won't be pinged about it any more.`, components: [row(listButton())] });
+  }
+  return mine({ content: "That button doesn't do anything any more." });
 }
 
 // /wishlist remove: suggest the person's own items
@@ -734,7 +882,7 @@ async function wishlistFeed(request, env) {
   const data = await getWishlists(env);
   const people = Object.entries(data.people || {})
     .filter(([, p]) => p.hook && p.items && p.items.length)
-    .map(([id, p]) => ({ id, name: p.name, hook: p.hook, items: p.items }));
+    .map(([id, p]) => ({ id, name: p.name, hook: p.hook, items: p.items.map((it) => ({ ...it, key: itemKey(it.text) })) }));
   return Response.json({ version: data.version || 0, people }, { headers: { "Cache-Control": "no-store" } });
 }
 

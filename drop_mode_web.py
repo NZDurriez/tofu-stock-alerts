@@ -357,16 +357,17 @@ class Watcher:
 
     # ---- friends' wishlists: they get a Discord ping with checkout links; nothing opens here ----
     def friend_items(self):
-        """[(friend, kind, product id or keywords, qty, max)]: friends' wishlists for this shop, then
-        the ones people keep in Discord (keywords, watched on every shop)."""
+        """[(friend, kind, product id or keywords, qty, max, item)]: friends' wishlists for this shop,
+        then the ones people keep in Discord (keywords, watched on every shop; item is the bot's name
+        for it, for the button on the ping that takes it off their list)."""
         friends, out = {f["id"]: f for f in FRIENDS}, []
         for w in self.watchlist:
             f = friends.get(w.get("who"))
             key = (w["id"] if w["kind"] == "product" else keywords(w["text"])) if f else None
             if key:
-                out.append((f, w["kind"], key, w["qty"], w.get("max")))
+                out.append((f, w["kind"], key, w["qty"], w.get("max"), None))
         for person in LISTS.people:
-            out += [(person, "words", keywords(it["text"]), it["qty"], it.get("max")) for it in person["items"]]
+            out += [(person, "words", keywords(it["text"]), it["qty"], it.get("max"), it.get("key")) for it in person["items"]]
         return out
 
     def ping_friends(self, old, current, first=False):
@@ -385,7 +386,7 @@ class Watcher:
                 if not live:
                     continue
                 vid = live[0]
-                for friend, kind, key, qty, cap in items:
+                for friend, kind, key, qty, cap, item in items:
                     seen = (friend["id"], vid)
                     if seen in done or (first and seen in self.friend_pinged):
                         continue
@@ -409,14 +410,15 @@ class Watcher:
                                              "until a Discord webhook is set up in ⚙ Settings.")
                         continue
                     self.friend_pinged.add(seen)
-                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price))
+                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item))
             for friend, pings in todo.values():
                 where = " in their channel" if friend.get("hook") else ""
-                for it, vid, q, price in pings:
+                for it, vid, q, price, _ in pings:
                     self.log("info", f"📣 Pinged {friend['name']}{where} on Discord: x{q} {it['title'][:70]} ${price}",
                              f"{self.site.shop}/products/{it['handle']}")
                 # A ping each (with buttons), but not dozens at once: past a few, the rest go in one message
-                msgs = [DISCORD.friend_message(friend, self.name, self.site.shop, it, vid, q, price) for it, vid, q, price in pings[:PING_CARDS]]
+                msgs = [DISCORD.friend_message(friend, self.name, self.site.shop, it, vid, q, price, item)
+                        for it, vid, q, price, item in pings[:PING_CARDS]]
                 if len(pings) > PING_CARDS:
                     msgs.append(DISCORD.more_message(friend, self.name, self.site.shop, pings[PING_CARDS:]))
                 DISCORD.send(msgs, self.log, friend.get("hook") or DISCORD.friends_hook(), friend["name"] if friend.get("hook") else None)
@@ -786,9 +788,10 @@ class Discord:
         return msg
 
     @classmethod
-    def friend_message(cls, friend, shop_name, shop, it, vid, qty, price):
+    def friend_message(cls, friend, shop_name, shop, it, vid, qty, price, item=None):
         """For a friend: their @mention, the product, and buttons to check out (Shop Pay), add it to
-        their cart, or look at it, all on their own device."""
+        their cart, or look at it, all on their own device. Someone's Discord wishlist item also gets
+        a button to take it off their list (the bot answers that one)."""
         checkout = f"{shop}/cart/{vid}:{qty}?payment=shop_pay"
         add = f"{shop}/cart/add?id={vid}&quantity={qty}"
         view = f"{shop}/products/{it['handle']}"
@@ -798,7 +801,15 @@ class Discord:
                          it.get("image"), "Checkout goes straight to Shop Pay")
         return {"content": f"<@{friend['discord']}> 🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**!",
                 "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
-                "components": cls.buttons(("⚡", "Checkout", checkout), ("🛒", "Add to cart", add), ("🔎", "View", view))}
+                "components": cls.buttons(("⚡", "Checkout", checkout), ("🛒", "Add to cart", add), ("🔎", "View", view))
+                + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}"))] if item and friend.get("hook") else [])}
+
+    @staticmethod
+    def bot_buttons(*buttons):
+        """A row of buttons the bot answers ([(emoji, label, id)]): they only work in messages sent
+        through the bot's own webhooks (each Discord wishlist channel's)."""
+        return {"type": 1, "components": [{"type": 2, "style": 2, "label": label, "emoji": {"name": emoji}, "custom_id": cid}
+                                          for emoji, label, cid in buttons[:5]]}
 
     @classmethod
     def more_message(cls, friend, shop_name, shop, rest):
@@ -806,14 +817,17 @@ class Discord:
         checkout link) rather than a ping each."""
         tidy = lambda title: title.replace("[", "(").replace("]", ")")[:90]
         lines = [f"• [{tidy(it['title'])}]({shop}/cart/{vid}:{q}?payment=shop_pay)" + (f" — ${price}" if price else "")
-                 for it, vid, q, price in rest[:15]]
+                 for it, vid, q, price, _ in rest[:15]]
         if len(rest) > 15:
             lines.append(f"…and {len(rest) - 15} more")
         embed = cls.card(f"🛒 Also in stock at {shop_name}", 0x6CC08D, f"{len(rest)} more from your wishlist", shop, (), None,
                          "Each link goes straight to checkout (Shop Pay)", "\n".join(lines))
         tip = " Narrow your keywords with `/wishlist` to get fewer pings." if friend.get("hook") else ""
-        return {"content": f"…and **{len(rest)} more** things on your wishlist are in stock at **{shop_name}**.{tip}",
-                "allowed_mentions": {"parse": []}, "embeds": [embed]}
+        msg = {"content": f"…and **{len(rest)} more** things on your wishlist are in stock at **{shop_name}**.{tip}",
+               "allowed_mentions": {"parse": []}, "embeds": [embed]}
+        if friend.get("hook"):
+            msg["components"] = [cls.bot_buttons(("📋", "My wishlist", "wl:list"))]
+        return msg
 
     def lock_message(self, shop):
         return self._message(f"🔒 {shop} just locked the shop. Enter the password in drop mode to keep watching.")
@@ -864,8 +878,8 @@ class Discord:
             return self.post(msg, hook, again=False)
         if res.returncode == 0 and code == "400" and msg.get("components"):
             plain = {k: v for k, v in msg.items() if k != "components"}
-            links = "  ·  ".join(f"[{b['emoji']['name']} {b['label']}]({b['url']})" for row in msg["components"] for b in row["components"])
-            if plain.get("embeds"):
+            links = "  ·  ".join(f"[{b['emoji']['name']} {b['label']}]({b['url']})" for row in msg["components"] for b in row["components"] if b.get("url"))
+            if plain.get("embeds") and links:
                 plain["embeds"] = [dict(plain["embeds"][0], description=((plain["embeds"][0].get("description") or "") + "\n\n" + links).strip())]
             return self.post(plain, hook, again)
         return False, f"reply {code}" if res.returncode == 0 else "couldn't reach Discord"
@@ -1013,7 +1027,8 @@ class DiscordLists:
                     qty = max(1, min(5, int(it.get("qty") or 1)))
                 except (TypeError, ValueError):
                     qty = 1
-                items.append({"text": text, "qty": qty, "max": price_cap(it.get("max"))})
+                items.append({"text": text, "qty": qty, "max": price_cap(it.get("max")),
+                              "key": it["key"] if re.fullmatch(r"[0-9a-f]{8}", str(it.get("key") or "")) else None})
             if items:
                 name = re.sub(r"[^\w &'.-]", "", str(p.get("name") or "")).strip()[:30] or "Someone"
                 out.append({"id": "discord:" + discord, "name": name, "discord": discord, "hook": hook, "items": items[:15]})
