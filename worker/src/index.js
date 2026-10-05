@@ -3,16 +3,21 @@
 // last snapshot in KV, and posts Discord alerts for new listings, restocks and
 // newly-buyable options. Same behaviour as check_stock.py on GitHub Actions.
 //
-// Also answers Discord slash commands at /interactions (owner only):
-//   /password <pw>  log in behind the shop's password page and keep watching there
-//   /scan           check right now        /instock  list what's buyable
-//   /status         what the watcher sees right now
+// Also answers Discord slash commands at /interactions:
+//   /password <pw>  log in behind the shop's password page and keep watching there (owner only)
+//   /scan           check right now        /instock  list what's buyable (owner only)
+//   /status         what the watcher sees right now (owner only)
+//   /wishlist ...   anyone in the server: keep a wishlist; pings go to their own private
+//                   channel (made the first time). Drop mode on the owner's PC watches the
+//                   wishlists (it reads them from /wishlists with DROP_MODE_KEY) and pings.
 
 const SHOP = "https://mrtofu.store";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36";
 const OUTAGE_WARN_MS = 15 * 60 * 1000;
-const DISCORD_API = "https://discord.com/api/v10";
+// Discord's API (DISCORD_API_BASE can point at a pretend Discord when testing locally)
+const apiBase = (env) => (env.DISCORD_API_BASE || "https://discord.com/api").replace(/\/$/, "");
+const discordApi = (env) => `${apiBase(env)}/v10`;
 const EPHEMERAL = 64;
 
 const LABELS = {
@@ -51,7 +56,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 2;
+const COMMANDS_VERSION = 3;
 const COMMANDS = [
   {
     name: "password",
@@ -71,6 +76,26 @@ const COMMANDS = [
     }],
   },
   { name: "status", description: "What the stock watcher can see right now" },
+  {
+    name: "wishlist",
+    description: "Your own wishlist: get pinged in your private channel when something's in stock",
+    options: [
+      {
+        type: 1, name: "add", description: "Watch for something (every word has to be in the product's name)",
+        options: [
+          { type: 3, name: "keywords", description: "e.g. focused fighters   (a - before a word leaves it out: booster bundle -tin)", required: true, max_length: 100 },
+          { type: 4, name: "quantity", description: "How many to put in the checkout link (1-5, normally 1)", required: false, min_value: 1, max_value: 5 },
+          { type: 10, name: "max_price", description: "Don't ping me if it costs more than this (each)", required: false, min_value: 0 },
+        ],
+      },
+      { type: 1, name: "list", description: "See your wishlist" },
+      {
+        type: 1, name: "remove", description: "Take something off your wishlist",
+        options: [{ type: 3, name: "item", description: "Which one", required: true, autocomplete: true }],
+      },
+      { type: 1, name: "clear", description: "Empty your wishlist" },
+    ],
+  },
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -111,6 +136,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/interactions" && request.method === "POST") return handleInteraction(request, env, ctx);
+    if (url.pathname === "/wishlists" && request.method === "GET") return wishlistFeed(request, env);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
     return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -367,7 +393,7 @@ async function registerCommands(env) {
   if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_APP_ID) return;
   const meta = await getMeta(env);
   if (meta.commandsVersion === COMMANDS_VERSION) return;
-  const res = await fetch(`${DISCORD_API}/applications/${env.DISCORD_APP_ID}/commands`, {
+  const res = await fetch(`${discordApi(env)}/applications/${env.DISCORD_APP_ID}/commands`, {
     method: "PUT",
     headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN.trim()}`, "Content-Type": "application/json" },
     body: JSON.stringify(COMMANDS),
@@ -406,6 +432,7 @@ async function handleInteraction(request, env, ctx) {
   if (!i) return new Response("bad signature", { status: 401 });
   if (i.type === 1) return reply({ type: 1 }); // Discord's endpoint check
 
+  if (i.type === 4 && i.data && i.data.name === "wishlist") return reply({ type: 8, data: { choices: await wishlistChoices(i, env) } });
   if (i.type === 4) {
     // Autocomplete for /instock filter: suggest collections matching what's typed,
     // plus whatever was typed as a free-text search
@@ -420,11 +447,10 @@ async function handleInteraction(request, env, ctx) {
 
   const user = (i.member && i.member.user) || i.user || {};
   const owner = (env.DISCORD_OWNER_ID || "").trim();
-  if (!owner || user.id !== owner) {
+  const name = i.data && i.data.name;
+  if (name !== "wishlist" && (!owner || user.id !== owner)) {
     return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
   }
-
-  const name = i.data && i.data.name;
   // Defer (shows "thinking…" privately), then edit the reply when the work is done
   const followUp = async (work) => {
     let data;
@@ -433,13 +459,19 @@ async function handleInteraction(request, env, ctx) {
     } catch (err) {
       data = { content: `Something went wrong: ${err}` };
     }
-    await fetch(`${DISCORD_API}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`, {
+    await fetch(`${discordApi(env)}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ allowed_mentions: { parse: [] }, ...data }),
     });
   };
   const deferred = () => reply({ type: 5, data: { flags: EPHEMERAL } });
+
+  if (name === "wishlist") {
+    if (!i.guild_id) return reply({ type: 4, data: { flags: EPHEMERAL, content: "Use /wishlist in the server, so I can make your private channel there." } });
+    ctx.waitUntil(followUp(() => wishlistCommand(i, env, user)));
+    return deferred();
+  }
 
   if (name === "password") {
     // The password itself is never stored or echoed: only the shop's session cookie is kept
@@ -518,6 +550,192 @@ async function handleInteraction(request, env, ctx) {
   }
 
   return reply({ type: 4, data: { flags: EPHEMERAL, content: "I don't know that command." } });
+}
+
+// ---------- Wishlists (anyone in the server) ----------
+// Kept in KV as one "wishlists" record: { version, categories: { guildId: id }, people: { userId: { name, channel,
+// hook, items: [{ text, qty, max }] } } }. Written only when someone changes their list.
+
+const WISHLIST_MAX = 15;
+const VIEW_CHANNEL = 1n << 10n, SEND_MESSAGES = 1n << 11n, EMBED_LINKS = 1n << 14n, READ_HISTORY = 1n << 16n;
+
+async function getWishlists(env) {
+  try {
+    return JSON.parse((await env.STATE.get("wishlists")) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+async function putWishlists(env, data) {
+  data.version = (data.version || 0) + 1;
+  await env.STATE.put("wishlists", JSON.stringify(data));
+}
+
+// A call to Discord's API as the bot. Returns [status, parsed body]
+async function bot(env, method, path, body) {
+  const res = await fetch(`${discordApi(env)}${path}`, {
+    method,
+    headers: { Authorization: `Bot ${(env.DISCORD_BOT_TOKEN || "").trim()}`, "Content-Type": "application/json", "User-Agent": "DiscordBot (tofu-stock-watch, 1.0)" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return [res.status, data];
+}
+
+const noPermission = "I'm not allowed to make your channel yet. Ask the server owner to give me (PokeStock) the **Manage Channels** and **Manage Webhooks** permissions (plus View Channels, Send Messages, Embed Links and Read Message History), then try again.";
+
+// A webhook in someone's channel, for drop mode to post to. Returns [error message, its link]
+async function makeHook(env, channelId) {
+  const [w, hook] = await bot(env, "POST", `/channels/${channelId}/webhooks`, { name: "Drop mode" });
+  if (w === 403) return [noPermission];
+  if (w >= 300 || !hook || !hook.id || !hook.token) return [`Couldn't set up the pings in your channel (Discord said ${w}).`];
+  return [null, `${apiBase(env)}/webhooks/${hook.id}/${hook.token}`];
+}
+
+// The person's private channel (and a webhook in it, which drop mode posts to). Made the first
+// time, and again if it's been deleted (a deleted webhook gets a new one). Returns an error
+// message, or null when it's ready.
+async function ensureChannel(env, data, guildId, user, person) {
+  if (!env.DISCORD_BOT_TOKEN) return "The bot isn't fully set up yet (it has no token).";
+  if (person.channel) {
+    const [status] = await bot(env, "GET", `/channels/${person.channel}`);
+    if (status === 200 || (status !== 404 && status !== 403 && person.hook)) { // (there, or a Discord hiccup)
+      if (person.hook && (await fetch(person.hook).then((r) => r.status).catch(() => 0)) !== 404) return null;
+      const [problem, hook] = await makeHook(env, person.channel);
+      if (problem) return problem;
+      person.hook = hook;
+      return null;
+    }
+    delete person.channel; // (deleted, or the bot can't see it any more: make a new one)
+    delete person.hook;
+  }
+  // One "🛒 Wishlists" category (in each server) holds everyone's channels
+  data.categories = data.categories || {};
+  let [status] = data.categories[guildId] ? await bot(env, "GET", `/channels/${data.categories[guildId]}`) : [404];
+  if (status !== 200) {
+    const [s, cat] = await bot(env, "POST", `/guilds/${guildId}/channels`, { name: "🛒 Wishlists", type: 4 });
+    if (s === 403) return noPermission;
+    if (s >= 300 || !cat || !cat.id) return `Couldn't make the Wishlists category (Discord said ${s}).`;
+    data.categories[guildId] = cat.id;
+  }
+  const slug = String(person.name || user.username || user.id).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || user.id;
+  const [s, channel] = await bot(env, "POST", `/guilds/${guildId}/channels`, {
+    name: `wishlist-${slug}`,
+    type: 0,
+    parent_id: data.categories[guildId],
+    topic: "Your wishlist pings land here. Only you (and the server's admins) can see this channel. Change your list with /wishlist.",
+    permission_overwrites: [
+      { id: guildId, type: 0, deny: String(VIEW_CHANNEL) }, // @everyone can't see it
+      { id: user.id, type: 1, allow: String(VIEW_CHANNEL | READ_HISTORY) },
+      { id: env.DISCORD_APP_ID, type: 1, allow: String(VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | READ_HISTORY) },
+    ],
+  });
+  if (s === 403) return noPermission;
+  if (s >= 300 || !channel || !channel.id) return `Couldn't make your channel (Discord said ${s}).`;
+  person.channel = channel.id; // (kept even if the webhook doesn't work out, so trying again uses this channel)
+  const [problem, hook] = await makeHook(env, channel.id);
+  if (problem) return problem;
+  person.hook = hook;
+  await fetch(person.hook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: `<@${user.id}> 👋 This is your wishlist channel. When something on your wishlist comes in stock, I'll ping you here with buttons to check out or add it to your cart. Change your list with \`/wishlist\`.`,
+      allowed_mentions: { parse: [], users: [user.id] },
+    }),
+  }).catch(() => {});
+  return null;
+}
+
+const describe = (it) => `**${it.text}**` + (it.qty > 1 ? ` · ${it.qty} of them` : "") + (it.max ? ` · max $${Number(it.max).toFixed(2)}` : "");
+
+async function wishlistCommand(i, env, user) {
+  const sub = (i.data.options || [])[0] || {};
+  const opt = (n) => ((sub.options || []).find((o) => o.name === n) || {}).value;
+  const data = await getWishlists(env);
+  data.people = data.people || {};
+  const name = (i.member && i.member.nick) || user.global_name || user.username || "someone";
+  const person = data.people[user.id] || { name, items: [] };
+  person.name = name;
+  const where = person.channel ? ` in <#${person.channel}>` : "";
+
+  if (sub.name === "list") {
+    if (!person.items.length) return { content: "Your wishlist is empty. Add something with `/wishlist add`." };
+    return { content: `Your wishlist (pings go${where || " to your private channel"}):\n` + person.items.map((it, n) => `${n + 1}. ${describe(it)}`).join("\n") };
+  }
+  if (sub.name === "clear") {
+    if (!person.items.length) return { content: "Your wishlist is already empty." };
+    person.items = [];
+    data.people[user.id] = person;
+    await putWishlists(env, data);
+    return { content: "Emptied your wishlist. (Your channel stays, ready for next time.)" };
+  }
+  if (sub.name === "remove") {
+    const want = norm(opt("item"));
+    const at = person.items.findIndex((it) => norm(it.text) === want);
+    if (at < 0) return { content: "That isn't on your wishlist. See it with `/wishlist list`." };
+    const [gone] = person.items.splice(at, 1);
+    data.people[user.id] = person;
+    await putWishlists(env, data);
+    return { content: `Took ${describe(gone)} off your wishlist.` };
+  }
+  if (sub.name === "add") {
+    const text = String(opt("keywords") || "").replace(/\s+/g, " ").trim().slice(0, 100);
+    const words = norm(text).split(/[\s,]+/).filter(Boolean);
+    if (!words.some((w) => !w.startsWith("-"))) return { content: "Give me at least one word to look for (words with a - in front only leave things out)." };
+    if (person.items.some((it) => norm(it.text) === norm(text))) return { content: `${describe({ text })} is already on your wishlist.` };
+    if (person.items.length >= WISHLIST_MAX) return { content: `Your wishlist is full (${WISHLIST_MAX} things). Take something off with \`/wishlist remove\` first.` };
+    const made = () => JSON.stringify([data.categories, person.channel, person.hook]), before = made();
+    const problem = await ensureChannel(env, data, i.guild_id, user, person);
+    if (problem) {
+      if (made() !== before) {
+        data.people[user.id] = person;
+        await putWishlists(env, data);
+      }
+      return { content: problem };
+    }
+    const item = { text, qty: Math.max(1, Math.min(5, parseInt(opt("quantity") || 1, 10) || 1)) };
+    const max = parseFloat(opt("max_price"));
+    if (max > 0) item.max = Math.round(max * 100) / 100;
+    person.items.push(item);
+    data.people[user.id] = person;
+    await putWishlists(env, data);
+    return { content: `Added ${describe(item)}. I'll ping you in <#${person.channel}> when it's in stock (any shop drop mode watches). Every word has to be in the product's name.` };
+  }
+  return { content: "Use `/wishlist add`, `/wishlist list`, `/wishlist remove` or `/wishlist clear`." };
+}
+
+// /wishlist remove: suggest the person's own items
+async function wishlistChoices(i, env) {
+  const user = (i.member && i.member.user) || i.user || {};
+  const typed = norm((((i.data.options || [])[0] || {}).options || []).find((o) => o.focused)?.value || "");
+  const person = ((await getWishlists(env)).people || {})[user.id];
+  return ((person && person.items) || [])
+    .filter((it) => !typed || norm(it.text).includes(typed))
+    .slice(0, 25)
+    .map((it) => ({ name: `${it.text}${it.qty > 1 ? ` (x${it.qty})` : ""}${it.max ? ` · max $${it.max}` : ""}`.slice(0, 100), value: it.text.slice(0, 100) }));
+}
+
+// For drop mode (with DROP_MODE_KEY): everyone's wishlist, and where to ping them
+function sameText(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let k = 0; k < a.length; k++) diff |= a.charCodeAt(k) ^ b.charCodeAt(k);
+  return diff === 0;
+}
+
+async function wishlistFeed(request, env) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  const data = await getWishlists(env);
+  const people = Object.entries(data.people || {})
+    .filter(([, p]) => p.hook && p.items && p.items.length)
+    .map(([id, p]) => ({ id, name: p.name, hook: p.hook, items: p.items }));
+  return Response.json({ version: data.version || 0, people }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // ---------- Shop data and alerts ----------
