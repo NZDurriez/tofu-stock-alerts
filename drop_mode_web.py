@@ -20,7 +20,7 @@ import time
 import traceback
 import webbrowser
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import drop_mode as dm  # shop access, labels and matching come from drop mode
@@ -316,13 +316,12 @@ class Watcher:
             webbrowser.open(url)
         play_alert()
         if DISCORD.webhook and DISCORD.on_checkout:
-            lines, picture = [], None
+            parts, picture = [], None
             for vid, q, t in items:
                 it = next((p for p in self.products.values() if vid in p["variants"]), None)
-                price = it["variants"][vid][2] if it else None
-                lines.append(f"x{q} {t[:120]}" + (f" · ${price}" if price else ""))
+                parts.append((q, t, it["variants"][vid][2] if it else None, (it or {}).get("limit")))
                 picture = picture or (it or {}).get("image")
-            DISCORD.send(DISCORD.checkout_message(self.name, url, lines, picture), self.log)
+            DISCORD.send(DISCORD.checkout_message(self.name, url, parts, picture), self.log)
 
     def target(self, pid, it, wanted=None, words=None):
         """(how many, max price) if this product is on the watchlist, else None."""
@@ -707,29 +706,58 @@ class Discord:
             msg["embeds"] = [embed]
         return msg
 
-    def checkout_message(self, shop, url, lines, picture=None):
-        # The link in the ping goes straight to Shop Pay (signed in: pay; not: the Shop Pay sign-in, rather
-        # than the plain checkout form). The checkout drop mode opens on the PC stays as it is.
-        link = url + ("&" if "?" in url else "?") + "payment=shop_pay"
-        embed = {"title": (lines[0] if len(lines) == 1 else f"{len(lines)} items")[:256], "url": link, "color": 0xD9A24B,
-                 "description": ("\n".join(lines[:15]) + "\n\n" if len(lines) > 1 else "")
-                 + "It's open in your browser on the PC. Or tap the title to pay with Shop Pay on this device."}
+    @staticmethod
+    def card(header, colour, title, url, fields=(), picture=None, footer="", description=None):
+        """A Discord embed laid out the same way for every ping."""
+        embed = {"author": {"name": header[:256]}, "title": title[:256], "url": url, "color": colour,
+                 "fields": [{"name": n, "value": v[:1024], "inline": True} for n, v in fields if v],
+                 "footer": {"text": ("Drop mode" + (f" · {footer}" if footer else ""))[:2048]},
+                 "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        if description:
+            embed["description"] = description[:4096]
         if picture:
-            embed["thumbnail"] = {"url": picture + ("&" if "?" in picture else "?") + "width=300"}
-        return self._message(f"⚡ Drop mode opened checkout at {shop}", embed)
+            embed["image"] = {"url": picture + ("&" if "?" in picture else "?") + "width=600"}
+        return embed
 
     @staticmethod
-    def friend_message(friend, shop_name, shop, it, vid, qty, price):
-        """For a friend: their @mention, the product, and links to check out (Shop Pay), add it to
+    def buttons(*links):
+        """Link buttons under the message ([(emoji, label, url)])."""
+        return [{"type": 1, "components": [{"type": 2, "style": 5, "label": label, "emoji": {"name": emoji}, "url": url}
+                                           for emoji, label, url in links[:5]]}]
+
+    def checkout_message(self, shop, url, parts, picture=None):
+        # The button in the ping goes straight to Shop Pay (signed in: pay; not: the Shop Pay sign-in, rather
+        # than the plain checkout form). The checkout drop mode opens on the PC stays as it is.
+        link = url + ("&" if "?" in url else "?") + "payment=shop_pay"
+        if len(parts) == 1:
+            q, title, price, limit = parts[0]
+            embed = self.card(f"⚡ Checkout opened at {shop}", 0xD9A24B, title, link,
+                              [("Price", f"${price}" if price else ""), ("Quantity", str(q)), ("Limit", f"{limit} per customer" if limit else "")],
+                              picture, "it's open in your browser on the PC")
+            text = f"⚡ **{title[:90]}** — checkout's open on your PC!"
+        else:
+            embed = self.card(f"⚡ Checkout opened at {shop}", 0xD9A24B, f"{len(parts)} items in one checkout", link, (), picture,
+                              "it's open in your browser on the PC",
+                              "\n".join(f"• x{q} {title[:100]}" + (f" — ${price}" if price else "") for q, title, price, _ in parts[:15]))
+            text = f"⚡ {len(parts)} things you're watching — checkout's open on your PC!"
+        msg = self._message(text, embed)
+        msg["components"] = self.buttons(("⚡", "Pay on this device", link))
+        return msg
+
+    @classmethod
+    def friend_message(cls, friend, shop_name, shop, it, vid, qty, price):
+        """For a friend: their @mention, the product, and buttons to check out (Shop Pay), add it to
         their cart, or look at it, all on their own device."""
         checkout = f"{shop}/cart/{vid}:{qty}?payment=shop_pay"
         add = f"{shop}/cart/add?id={vid}&quantity={qty}"
-        embed = {"title": f"x{qty} {it['title']}"[:230] + (f" · ${price}" if price else ""), "url": checkout, "color": 0x6CC08D,
-                 "description": f"[⚡ Checkout]({checkout})  ·  [🛒 Add to cart]({add})  ·  [View]({shop}/products/{it['handle']})"}
-        if it.get("image"):
-            embed["thumbnail"] = {"url": it["image"] + ("&" if "?" in it["image"] else "?") + "width=300"}
-        return {"content": f"<@{friend['discord']}> 🛒 Something on your wishlist is in stock at {shop_name}!",
-                "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed]}
+        view = f"{shop}/products/{it['handle']}"
+        limit = it.get("limit")
+        embed = cls.card(f"🛒 In stock at {shop_name}", 0x6CC08D, it["title"], checkout,
+                         [("Price", f"${price}" if price else ""), ("Quantity", str(qty)), ("Limit", f"{limit} per customer" if limit else "")],
+                         it.get("image"), "Checkout goes straight to Shop Pay")
+        return {"content": f"<@{friend['discord']}> 🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**!",
+                "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
+                "components": cls.buttons(("⚡", "Checkout", checkout), ("🛒", "Add to cart", add), ("🔎", "View", view))}
 
     def lock_message(self, shop):
         return self._message(f"🔒 {shop} just locked the shop. Enter the password in drop mode to keep watching.")
@@ -739,22 +767,42 @@ class Discord:
                              f" <https://www.twitch.tv/{TWITCH_CHANNEL}>")
 
     def test_message(self):
-        return self._message("🔔 Drop mode test: checkout pings will show up here.")
+        """A sample ping, using something on sale in Mr Tofu's shop (if it's loaded), to see what they look like."""
+        tofu = WATCHERS.get("tofu")
+        sample = next(((pid, it) for pid, it in (tofu.products.items() if tofu else []) if dm.buyable(it) and it.get("image")), None)
+        if not sample:
+            return self._message("🔔 Drop mode test: pings will show up here.")
+        it = sample[1]
+        vid = next(v for v, x in it["variants"].items() if x[1])
+        msg = self.friend_message({"discord": ""}, tofu.name, tofu.site.shop, it, vid, 1, it["variants"][vid][2])
+        msg["content"] = (f"<@{self.user}> " if self.user else "") + "🔔 Drop mode test: this is what a ping looks like. (Nothing's been added to a cart.)"
+        msg["allowed_mentions"] = {"parse": [], "users": [self.user] if self.user else []}
+        msg["embeds"][0]["author"]["name"] = "🔔 Test · " + msg["embeds"][0]["author"]["name"]
+        return msg
 
     def post(self, msg, hook=None):
-        """Send it now. Returns (worked, what went wrong). Never repeats the link (it's a secret)."""
+        """Send it now. Returns (worked, what went wrong). Never repeats the link (it's a secret).
+        Buttons need with_components on a channel's webhook; if Discord won't take them, the same
+        message goes again with the buttons as plain links."""
         hook = hook or self.webhook
         if not hook:
             return False, "no webhook set"
+        url = hook + ("&" if "?" in hook else "?") + "with_components=true" if msg.get("components") else hook
         try:
             res = subprocess.run(["curl", "-sS", "--max-time", "10", "-X", "POST", "-H", "Content-Type: application/json",
-                                  "--data-binary", "@-", "-o", os.devnull, "-w", "%{http_code}", hook],
+                                  "--data-binary", "@-", "-o", os.devnull, "-w", "%{http_code}", url],
                                  input=json.dumps(msg).encode(), capture_output=True)
         except Exception as exc:
             return False, type(exc).__name__
         code = res.stdout.decode(errors="replace").strip()
         if res.returncode == 0 and code.startswith("2"):
             return True, ""
+        if res.returncode == 0 and code == "400" and msg.get("components"):
+            plain = {k: v for k, v in msg.items() if k != "components"}
+            links = "  ·  ".join(f"[{b['emoji']['name']} {b['label']}]({b['url']})" for row in msg["components"] for b in row["components"])
+            if plain.get("embeds"):
+                plain["embeds"] = [dict(plain["embeds"][0], description=((plain["embeds"][0].get("description") or "") + "\n\n" + links).strip())]
+            return self.post(plain, hook)
         return False, f"reply {code}" if res.returncode == 0 else "couldn't reach Discord"
 
     def send(self, msg, log, hook=None):
