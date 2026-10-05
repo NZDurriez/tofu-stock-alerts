@@ -264,25 +264,11 @@ input[type=search]:focus{border-color:var(--accent)}
 /* Whose list: you, or a friend (their wishlist pings them on Discord) */
 select.whosel{font:600 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:9px;padding:3px 8px;min-width:0;max-width:100%;cursor:pointer}
 select.whosel:hover{border-color:var(--faint)}
-/* Dropdown lists match the page: a solid panel like the tooltips, amber for what's picked. Chrome and Brave
-   draw the list from these styles; other browsers keep their own list, with readable colours. */
+/* The open dropdown list is the browser's own, in the page's colours (dark and readable). Chrome's
+   restyleable kind isn't used: it opens over the whole page, and anything that does pauses the stream. */
 select option,select optgroup{background-color:var(--solid);color:var(--text)}
-@supports (appearance:base-select){
-  select,::picker(select){appearance:base-select}
-  select{display:inline-flex;align-items:center;gap:8px}
-  select::picker-icon{color:var(--muted);font-size:11px;transition:rotate .15s}
-  select:open{border-color:var(--accent)}
-  select:open::picker-icon{rotate:180deg}
-  ::picker(select){background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:5px;margin-block:6px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
-  select option{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 10px;border-radius:8px;background:transparent;color:var(--text);font:500 14px/1.35 Inter,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer}
-  select option:hover,select option:focus-visible{background:var(--accent-soft);outline:none}
-  select option:checked{color:var(--accent);font-weight:600}
-  select option::checkmark{color:var(--accent)}
-  select option:disabled{color:var(--faint);background:transparent;cursor:default}
-  select optgroup{background:transparent;color:var(--faint);font:600 11px/1.4 Inter,sans-serif;letter-spacing:.05em;text-transform:uppercase;margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
-  select hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
-  select option[value="__add"]{color:var(--muted)}
-}
+select optgroup{color:var(--faint)}
+select option[value="__add"]{color:var(--muted)}
 .addperson{margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
 .addperson .row input{min-width:0}
 .friendnote{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:var(--ok-soft);color:var(--text)}
@@ -899,6 +885,11 @@ const isMuted = () => { try { return player.getMuted() || player.getVolume() < 0
 // (Until your first click the browser has it muted, whatever the player says; after that, it's muted if you muted it.)
 function showSound() { if (player && playerReady) $("soundOn").hidden = soundDone && !isMuted(); }
 $("soundOn").onclick = restartWithSound;
+// If this browser lets drop mode play sound without a click (in Brave: brave://settings/content/autoplay,
+// with drop mode allowed), the stream started with sound, so there's nothing to switch on (and no reload).
+// A blink of silence tells: it only plays if sound's allowed.
+new Audio("data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==")
+  .play().then(() => { if (!soundDone) { soundDone = true; showSound(); } }).catch(() => {});
 document.addEventListener("pointerdown", firstTouch, true);
 document.addEventListener("keydown", firstTouch, true);
 setInterval(showSound, 2000);
