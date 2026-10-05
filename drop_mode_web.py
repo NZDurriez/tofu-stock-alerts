@@ -715,8 +715,8 @@ class Discord:
                  "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if description:
             embed["description"] = description[:4096]
-        if picture:
-            embed["image"] = {"url": picture + ("&" if "?" in picture else "?") + "width=600"}
+        if picture:  # (a small picture on the right keeps the ping compact)
+            embed["thumbnail"] = {"url": picture + ("&" if "?" in picture else "?") + "width=300"}
         return embed
 
     @staticmethod
