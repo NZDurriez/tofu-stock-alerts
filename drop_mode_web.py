@@ -86,8 +86,10 @@ CATEGORIES = [
     ("riftbound", "Riftbound", ["riftbound-league-of-legends-tcg"]),
     ("magic", "Magic: The Gathering", ["magic-the-gathering"]),
     ("gundam", "Gundam Card Game", ["gundam-card-game"]),
-    ("events", "Store Events & Tournaments", ["store-events-tournaments"]),
 ]
+# Mr Tofu's Store Events & Tournaments: tickets for things at the shop in Auckland, so they're left out
+# everywhere (not shown, not watched, not pinged), like in-store-only listings.
+EVENTS = "store-events-tournaments"
 # The live stream split up by game. Those products aren't in Tofu's game
 # categories, so this goes by words in their names.
 GAMES = [
@@ -111,7 +113,7 @@ class Watcher:
     """One shop's watching: everything its tab sees, shared between the web
     requests and the watch thread."""
 
-    def __init__(self, sid="tofu", name="Mr Tofu", site=None, categories=CATEGORIES, watchlist_file=WATCHLIST_FILE):
+    def __init__(self, sid="tofu", name="Mr Tofu", site=None, categories=CATEGORIES, watchlist_file=WATCHLIST_FILE, events=None):
         self.id, self.name = sid, name
         self.site = site or dm.DEFAULT
         self.cat_cfg = categories        # menu headers to filter by (Mr Tofu's; none for other shops)
@@ -144,7 +146,9 @@ class Watcher:
         self.restart = False    # start a fresh batch of checks (new speed or new login)
         self.slow_downs = 0     # "slow down" replies in a row
         self.trouble = None     # what's going wrong with the checks, if anything
-        self.in_store = 0       # in-store-only listings left out (they can't be bought online)
+        self.left_out = {}      # listings left out, by why: in-store only (can't be bought online), store events
+        self.events_collection = events  # the shop's events section, if it has one (Mr Tofu's)
+        self.event_ids = set()  # products in it (loaded with the menu headers)
         self.watchlist = self.load_watchlist()  # what you're watching for (the page's list)
         self.wl_version = 1     # goes up on every change, so other open pages reload it
         self.categories = {}    # category id -> product ids in it (Tofu's menu)
@@ -165,7 +169,8 @@ class Watcher:
         code, headers, body = dm.fetch(site=self.site)
         if code == 200:
             self.etag = headers.get("etag")
-            self.products, self.in_store = dm.summarise_all(body)
+            self.products, self.left_out = dm.summarise_all(body)
+            self.products = self.without_events(self.products)
             return True, len(self.products)
         return False, code
 
@@ -197,10 +202,9 @@ class Watcher:
                 "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
             }[self.shop_state])
             if ok:
-                self.log("info", f"Shop has {info} products"
-                         + (f" (and {self.in_store} in-store only, which drop mode leaves out)." if self.in_store else "."))
+                self.log("info", f"Shop has {info} products{self.left_out_text()}.")
         if ok:
-            if info + self.in_store >= 250:
+            if info + sum(self.left_out.values()) >= 250:
                 self.log("warn", "That's as many as drop mode can read at once (250), so anything past them isn't watched."
                          + ("" if self.id == "tofu" else " To watch just one section, remove this tab and add the section's link (…/collections/…)."))
             self.load_categories_soon()
@@ -236,6 +240,21 @@ class Watcher:
         self.restart = True
         self.checker.stop()
 
+    def without_events(self, products):
+        """Leave out what's in the shop's events section (the description check in drop mode catches
+        new ones before the section's list is next loaded)."""
+        if not self.event_ids:
+            return products
+        keep = {pid: it for pid, it in products.items() if pid not in self.event_ids}
+        if len(keep) < len(products):
+            self.left_out["store events"] = self.left_out.get("store events", 0) + len(products) - len(keep)
+        return keep
+
+    def left_out_text(self):
+        bits = [f"{n} in-store only" if why == "in-store only" else f"{n} store event{'' if n == 1 else 's'}"
+                for why, n in self.left_out.items() if n]
+        return f" (and {' and '.join(bits)}, which drop mode leaves out)" if bits else ""
+
     def load_categories_soon(self):
         threading.Thread(target=self.load_categories, daemon=True).start()
 
@@ -243,22 +262,26 @@ class Watcher:
         """Which products are in each of the shop's menu headers (a few requests,
         done in the background after the shop loads). Only Mr Tofu's has them."""
         self.cats_at = 0.0
-        found = {}
-        for cid, _, handles in self.cat_cfg:
-            ids = set()
-            for handle in handles:
-                for page in range(1, 5):
-                    try:
-                        code, _, body = dm.curl([f"{self.site.shop}/collections/{handle}/products.json?limit=250&page={page}",
-                                                 "-H", "Accept: application/json", "--compressed"], self.site.cookies)
-                        batch = json.loads(body).get("products", []) if code == 200 else []
-                    except Exception:
-                        batch = []
-                    ids.update(str(p["id"]) for p in batch)
-                    if len(batch) < 250:
-                        break
-            found[cid] = ids
+        found = {cid: set().union(*(self.collection_ids(h) for h in handles)) for cid, _, handles in self.cat_cfg}
+        if self.events_collection:  # (and what's in the events section, to leave out)
+            self.event_ids = self.collection_ids(self.events_collection)
+            self.products = self.without_events(self.products)
         self.categories, self.cats_at = found, time.time()
+
+    def collection_ids(self, handle):
+        """The ids of the products in one of the shop's collections."""
+        ids = set()
+        for page in range(1, 5):
+            try:
+                code, _, body = dm.curl([f"{self.site.shop}/collections/{handle}/products.json?limit=250&page={page}",
+                                         "-H", "Accept: application/json", "--compressed"], self.site.cookies)
+                batch = json.loads(body).get("products", []) if code == 200 else []
+            except Exception:
+                batch = []
+            ids.update(str(p["id"]) for p in batch)
+            if len(batch) < 250:
+                break
+        return ids
 
     def category_list(self, everything=False):
         if not self.cat_cfg:
@@ -618,7 +641,8 @@ class Watcher:
             if self.shop_state in ("locked", "bad"):  # reopened before a working password was given
                 self.shop_state = "open"
                 self.log("ok", "🔓 The shop is open again. Carrying on watching.", None, alert="open")
-            current, self.in_store = dm.summarise_all(body)
+            current, self.left_out = dm.summarise_all(body)
+            current = self.without_events(current)
             self.etag = etag or None
             ready = self.went_live(self.products, current)
             self.ping_friends(self.products, current)
@@ -1299,7 +1323,7 @@ def store_list():
             for w in list(WATCHERS.values())]
 
 
-WATCHERS = {"tofu": Watcher()}   # Mr Tofu's shop first, then the ones you've added
+WATCHERS = {"tofu": Watcher(events=EVENTS)}   # Mr Tofu's shop first, then the ones you've added
 for _s in load_stores():
     WATCHERS[_s["id"]] = make_watcher(_s)
 # What each tab asks about (?store=...). The rest (sound, background, the list of shops) is shared.

@@ -261,17 +261,34 @@ def capped(qty, it):
 # Listings a shop only sells at the counter ("INSTORE ONLY …", "IN STORE …", "… IN-STORE PLAYERS
 # ONLY"): drop mode leaves them out entirely, as they can't be bought online. ("in stores" doesn't count.)
 IN_STORE = re.compile(r"\bin[\s-]?store\b", re.I)
+# A store event: a ticket for something at the shop, like a prerelease or a tournament ("Pokémon Delta
+# Reign Prerelease"). Its description is about entry, rounds and players. Names can't tell ("Pre-release
+# Kit" and "Draft Night" are things you buy), and Shopify doesn't mark them.
+EVENT_WORDS = re.compile(r"your entry includes|entry fee|registered players?|best of [13]\b|\b\d+ rounds\b|swiss rounds|"
+                         r"prize support|prerelease event|release event|launch event", re.I)
 
 
 def in_store_only(p):
     return bool(IN_STORE.search(p.get("title") or ""))
 
 
+def store_event(p):
+    text = html.unescape(re.sub(r"<[^>]+>", " ", p.get("body_html") or "")).replace("\xa0", " ")
+    return bool(EVENT_WORDS.search(re.sub(r"\s+", " ", text)))
+
+
 def summarise_all(body):
-    """A products.json reply -> ({product id: summary}, how many in-store-only ones were left out)."""
+    """A products.json reply -> ({product id: summary}, {what was left out: how many}). Listings that
+    can't be bought online (in-store only) and store events (tickets for things at the shop) are left out."""
     products = json.loads(body).get("products", [])
-    keep = {str(p["id"]): summarise(p) for p in products if not in_store_only(p)}
-    return keep, len(products) - len(keep)
+    keep, left_out = {}, {"in-store only": 0, "store events": 0}
+    for p in products:
+        why = "in-store only" if in_store_only(p) else "store events" if store_event(p) else None
+        if why:
+            left_out[why] += 1
+        else:
+            keep[str(p["id"])] = summarise(p)
+    return keep, left_out
 
 
 def summarise(p):
