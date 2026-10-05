@@ -264,7 +264,25 @@ input[type=search]:focus{border-color:var(--accent)}
 /* Whose list: you, or a friend (their wishlist pings them on Discord) */
 select.whosel{font:600 16px Inter,sans-serif;color:var(--text);background:var(--field);border:1px solid var(--line);border-radius:9px;padding:3px 8px;min-width:0;max-width:100%;cursor:pointer}
 select.whosel:hover{border-color:var(--faint)}
-select.whosel option{font-weight:500}
+/* Dropdown lists match the page: a solid panel like the tooltips, amber for what's picked. Chrome and Brave
+   draw the list from these styles; other browsers keep their own list, with readable colours. */
+select option,select optgroup{background-color:var(--solid);color:var(--text)}
+@supports (appearance:base-select){
+  select,::picker(select){appearance:base-select}
+  select{display:inline-flex;align-items:center;gap:8px}
+  select::picker-icon{color:var(--muted);font-size:11px;transition:rotate .15s}
+  select:open{border-color:var(--accent)}
+  select:open::picker-icon{rotate:180deg}
+  ::picker(select){background:var(--solid);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:5px;margin-block:6px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+  select option{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 10px;border-radius:8px;background:transparent;color:var(--text);font:500 14px/1.35 Inter,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer}
+  select option:hover,select option:focus-visible{background:var(--accent-soft);outline:none}
+  select option:checked{color:var(--accent);font-weight:600}
+  select option::checkmark{color:var(--accent)}
+  select option:disabled{color:var(--faint);background:transparent;cursor:default}
+  select optgroup{background:transparent;color:var(--faint);font:600 11px/1.4 Inter,sans-serif;letter-spacing:.05em;text-transform:uppercase;margin-top:4px;padding-top:4px;border-top:1px solid var(--line)}
+  select hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+  select option[value="__add"]{color:var(--muted)}
+}
 .addperson{margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--field)}
 .addperson .row input{min-width:0}
 .friendnote{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:var(--ok-soft);color:var(--text)}
@@ -864,8 +882,10 @@ $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat"
 // click is in the player itself, it's left alone: you're running it. (Turn Twitch's volume down
 // rather than muting it.)
 let soundDone = false;
-function soundOn() {
+function soundOn(e) {
   if (soundDone) return;
+  // (not from a dropdown or text box: the stream reloads and takes the focus, which would close or interrupt it)
+  if (e && e.target && e.target.closest && e.target.closest("select, input, textarea")) return;
   soundDone = true;
   $("soundOn").hidden = true;
   $("player").innerHTML = "";
@@ -1428,7 +1448,7 @@ function showListFor() {
   const opt = (id, text, off) => `<option value="${esc(id)}"${off ? " disabled" : ""}>${esc(text)}</option>`;
   const opts = (off) => opt("", "My watchlist") + friends.map((f) => opt(f.id, `${f.name}'s wishlist`)).join("")
     + (discordPeople.length ? `<optgroup label="Kept in Discord (/wishlist)">${discordPeople.map((p) => opt(p.id, `${p.name}'s wishlist`, off)).join("")}</optgroup>` : "")
-    + opt("__add", "＋ Add someone…");
+    + "<hr>" + opt("__add", "＋ Add someone…"); // (a line above it: it's not a list)
   $("wlWho").innerHTML = opts(false);
   $("addWho").innerHTML = opts(true); // (nothing can be added to a Discord list here: they keep it themselves)
   for (const id of ["addWho", "wlWho"]) $(id).value = listFor;
