@@ -584,7 +584,7 @@ async function bot(env, method, path, body) {
   return [res.status, data];
 }
 
-const noPermission = "I'm not allowed to make your channel yet. Ask the server owner to give me (PokeStock) the **Manage Channels** and **Manage Webhooks** permissions (plus View Channels, Send Messages, Embed Links and Read Message History), then try again.";
+const noPermission = "I'm not allowed to make your channel yet. Ask the server owner to give me the **Manage Channels** and **Manage Webhooks** permissions (plus View Channels, Send Messages, Embed Links and Read Message History), then try again.";
 
 // A webhook in someone's channel, for drop mode to post to. Returns [error message, its link]
 async function makeHook(env, channelId) {
