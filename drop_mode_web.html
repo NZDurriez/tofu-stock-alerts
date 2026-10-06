@@ -310,6 +310,7 @@ select option[value="__add"]{color:var(--muted)}
 .addperson .row input{min-width:0}
 .friendnote{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:var(--ok-soft);color:var(--text)}
 .friendnote .linkish{padding:0;margin-left:4px;font-size:inherit}
+.friendnote .linkish.bad{color:var(--bad)}
 .friend{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}
 .friend:first-child{border-top:0}
 .friend .id{color:var(--faint);font-size:12.5px;font-variant-numeric:tabular-nums}
@@ -1111,6 +1112,15 @@ async function discordChange(action, extra) {
   return true;
 }
 
+// Deleting someone who keeps a wishlist in Discord: the bot deletes their list and their channel
+async function deleteDiscordPerson(dc) {
+  if (!confirm(`Delete ${dc.name}? Their Discord wishlist and their wishlist channel are deleted for good. They can start a new one with /wishlist.`)) return;
+  if (!(await discordChange("delete"))) return;
+  listFor = ""; // (back to your watchlist)
+  try { localStorage.setItem("dropListFor", listFor); } catch {}
+  showListFor(); refreshInfo(); search(); renderKwActs();
+}
+
 // ---- keywords ----
 const SUGGEST = ["Elite Trainer Box", "Booster Bundle", "Booster Box", "Booster Pack", "Pre-order"];
 let kwQty = 1;
@@ -1642,7 +1652,8 @@ function showListFor() {
     $("friendNote").innerHTML = `When something here comes in stock, ${esc(who.name)} gets a Discord ping with links to check out or add it to their cart, while this shop is being watched. Nothing opens on this PC.<button class="linkish" id="rmPerson">Remove ${esc(who.name)}</button>`;
     $("rmPerson").onclick = () => { if (confirm(`Remove ${who.name}? Their wishlists go too.`)) saveFriends(friends.filter((f) => f !== who)); };
   } else if (dc) {
-    $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, and you can change it here too: ${esc(dc.name)} gets a note in their channel about each change. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping there with links to check out. Nothing opens on this PC.`;
+    $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, and you can change it here too: ${esc(dc.name)} gets a note in their channel about each change. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping there with links to check out. Nothing opens on this PC.<button class="linkish bad" id="rmPerson">Delete ${esc(dc.name)}</button>`;
+    $("rmPerson").onclick = () => deleteDiscordPerson(dc);
   }
   $("addNote").hidden = !dc;
   if (dc) {

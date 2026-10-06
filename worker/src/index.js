@@ -921,7 +921,7 @@ const feedPerson = (id, p) => ({ id, name: p.name, hook: p.hook, items: (p.items
 
 // Drop mode changing someone's wishlist (with DROP_MODE_KEY): add something, change how many or the max
 // price, or take something off. They get a note in their channel saying what changed (it names the owner,
-// without pinging anyone), with a button to see their list.
+// without pinging anyone), with a button to see their list. Or delete them: their list and their channel.
 async function wishlistEdit(request, env, ctx, userId) {
   const key = (env.DROP_MODE_KEY || "").trim();
   if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
@@ -935,6 +935,7 @@ async function wishlistEdit(request, env, ctx, userId) {
   }
   const data = await getWishlists(env);
   const person = (data.people || {})[userId];
+  if (body.action === "delete") return wishlistDelete(env, data, userId, person);
   if (!person || !person.hook) return no("They haven't got a wishlist channel yet (they make one with /wishlist).", 404);
   person.items = person.items || [];
   const owner = (env.DISCORD_OWNER_ID || "").trim();
@@ -974,6 +975,21 @@ async function wishlistEdit(request, env, ctx, userId) {
     .then((r) => r.ok).catch(() => false);
   ctx.waitUntil(post({ ...message, components: [row(listButton())] }, "?with_components=true").then((ok) => ok || post(message)));
   return Response.json({ ok: true, person: feedPerson(userId, person), version: data.version });
+}
+
+// Deleting someone (drop mode's Delete button): their list, their channel and its webhook, and them. If they
+// use /wishlist again, they start afresh with a new channel.
+async function wishlistDelete(env, data, userId, person) {
+  if (!person) return Response.json({ error: "They don't have a wishlist any more." }, { status: 404 });
+  if (person.hook) await fetch(person.hook, { method: "DELETE" }).catch(() => null); // (nothing can post there now, even if the channel stays)
+  let channel = "none";
+  if (person.channel) {
+    const [s] = await bot(env, "DELETE", `/channels/${person.channel}`);
+    channel = s < 300 ? "deleted" : s === 404 ? "gone" : "kept";
+  }
+  delete data.people[userId];
+  await putWishlists(env, data);
+  return Response.json({ ok: true, channel, version: data.version });
 }
 
 async function wishlistFeed(request, env) {

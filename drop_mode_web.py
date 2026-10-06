@@ -1289,7 +1289,8 @@ class DiscordLists:
 
     def change(self, pid, data):
         """Change someone's list through the bot: add something, change how many or the max price, or
-        take something off. The bot tells them in their channel. Returns what went wrong, or None."""
+        take something off (the bot tells them in their channel); or delete them: their list and their
+        channel. Returns what went wrong, or None."""
         person = next((p for p in self.people if p["id"] == pid), None)
         if not person:
             return "They're not in the Discord wishlists any more."
@@ -1303,7 +1304,7 @@ class DiscordLists:
             body["key"] = str(data.get("key") or "")[:16]
             if action == "update":
                 body.update({k: (price_cap(data[k]) or 0) if k == "max" else data[k] for k in ("qty", "max") if k in data})
-        else:
+        elif action != "delete":
             return "That isn't a change drop mode knows."
         try:  # (the key goes to curl on stdin; the change itself is plain ASCII JSON)
             res = subprocess.run(["curl", "-sS", "--max-time", "15", "-H", "@-", "-H", "Content-Type: application/json",
@@ -1321,6 +1322,16 @@ class DiscordLists:
             return (reply.get("error") if isinstance(reply, dict) else None) or (
                 "The bot didn't accept drop mode's key." if code == "403" else
                 "Couldn't reach the bot" + (f" (it said {code})." if res.returncode == 0 else "."))
+        if action == "delete":  # (they're gone from here straight away too)
+            with self.lock:
+                self.people = [p for p in self.people if p["id"] != pid]
+                self.version = max(self.version, int(reply.get("version") or 0))
+                self.seq += 1
+            kept = reply.get("channel") == "kept"
+            WATCHERS["tofu"].log("warn" if kept else "info", f"🗑️ You deleted {person['name']}'s Discord wishlist" + (
+                ". The bot couldn't delete their channel, so delete it in Discord (the bot needs Manage Channels)." if kept
+                else " and their channel."))
+            return None
         fresh = self.clean({"people": [reply.get("person") or {}]})
         was = {it["key"]: it["text"] for it in person["items"]}
         with self.lock:
