@@ -178,7 +178,7 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   .col-setup>.stack>.card:last-child,.col-watch>.stack>.card:last-child{flex:1}
   #addCard{display:flex;flex-direction:column} /* (the product list fills the rest of its panel, and scrolls) */
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
-  #exactBody .list{flex:1 1 0;min-height:160px;max-height:none}
+  #exactBody .list{flex:1 1 0;min-height:max(380px,50vh);max-height:none} /* (at least half the window: room to browse) */
 }
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr}
@@ -1230,7 +1230,7 @@ function renderResults() {
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}${sortBy === "new" && it.listed && listedDate(it.listed) ? `<span class="listed">Listed ${esc(listedDate(it.listed))}</span>` : ""}</div>
-        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : `+ Watch${esc(forWho())}`}</button></div></div>
+        <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
   if (!r.items.length) html += showSold ? `<div class="empty">Nothing ${q ? "matches that" : where ? "is in this category" : "is in the shop"}.</div>`
@@ -1266,7 +1266,7 @@ function updateTicks() {
     box.checked = sel;
     if (!btn.disabled) {
       const n = ticked.size + (sel ? 0 : 1);
-      btn.textContent = (n > 1 ? `+ Watch ${n}` : "+ Watch") + forWho();
+      btn.textContent = n > 1 ? `+ Watch ${n}` : "+ Watch"; // (whose list: the Add to dropdown just above says)
     }
   });
   const bar = $("selbar");
@@ -1645,7 +1645,10 @@ function showListFor() {
     $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, and you can change it here too: ${esc(dc.name)} gets a note in their channel about each change. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping there with links to check out. Nothing opens on this PC.`;
   }
   $("addNote").hidden = !dc;
-  if (dc) $("addNote").textContent = `This adds to ${dc.name}'s Discord wishlist, and ${dc.name} gets a note in their channel. (A product you pick goes on as its name, since Discord wishlists are keywords.)`;
+  if (dc) {
+    $("addNote").textContent = `Adds go to ${dc.name}'s Discord wishlist (they get a note in their channel).`;
+    $("addNote").title = "A product you pick goes on as its name, since Discord wishlists are keywords.";
+  }
 }
 function pickList(sel) {
   if (sel.value === "__add") { // (open the form; the dropdown stays on the list you were on)
