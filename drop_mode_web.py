@@ -956,12 +956,12 @@ class Discord:
             most = 5
         embed = cls.card(f"🛒 In stock at {shop_name}", 0x6CC08D, it["title"], checkout,
                          [("Price", f"${price}" if price else ""), ("Quantity", str(qty)), ("Limit", f"{limit} per customer" if limit else "")],
-                         it.get("image"), f"Wishlist checkout buys your wishlist amount · 💳 ×1–{most} check out with that many · all straight to Shop Pay",
+                         it.get("image"), f"Wishlist checkout buys your wishlist amount · 🛒 ×1–{most} check out with that many · all straight to Shop Pay",
                          includes_text(it))
         return {"content": f"<@{friend['discord']}> 🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**! · {when()}",
                 "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
                 "components": cls.buttons(("⚡", f"Wishlist checkout · Qty {qty}", checkout), ("🔎", "View", view))
-                + cls.buttons(*[("💳", f"×{n}", f"{shop}/cart/{vid}:{n}?payment=shop_pay") for n in range(1, most + 1)])
+                + cls.buttons(*[("🛒", f"×{n}", f"{shop}/cart/{vid}:{n}?payment=shop_pay") for n in range(1, most + 1)])
                 + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}"))] if item and friend.get("hook") else [])}
 
     @classmethod
