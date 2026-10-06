@@ -966,11 +966,14 @@ class Discord:
 
     @classmethod
     def soldout_message(cls, friend, shop_name, shop, it):
-        """Something they were pinged about has sold out (it pings them again if it comes back)."""
-        return {"content": f"<@{friend['discord']}> ❌ **{it['title'][:90]}** just sold out at **{shop_name}** · {when()}. "
-                           "You'll get another ping if it comes back in stock.",
-                "allowed_mentions": {"parse": [], "users": [friend["discord"]]},
-                "components": cls.buttons(("🔎", "View", f"{shop}/products/{it['handle']}"))}
+        """Something they were pinged about has sold out (it pings them again if it comes back): a red card,
+        like the in-stock ping's green one."""
+        view = f"{shop}/products/{it['handle']}"
+        embed = cls.card(f"❌ Sold out at {shop_name}", 0xE5534B, it["title"], view, (), it.get("image"),
+                         "You'll get another ping if it comes back in stock")
+        return {"content": f"<@{friend['discord']}> ❌ **{it['title'][:90]}** just sold out at **{shop_name}** · {when()}",
+                "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
+                "components": cls.buttons(("🔎", "View", view))}
 
     @staticmethod
     def bot_buttons(*buttons):
