@@ -97,7 +97,9 @@ h1 span{color:var(--accent)}
 .actbtn{position:relative}
 .actbtn .ico{flex:none;width:15px;height:15px}
 .actbtn .actdot{position:absolute;top:1px;right:1px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface)}
-.actpop{width:min(560px,calc(100vw - 32px));padding:14px}
+.status{position:relative} /* (the activity log spans the whole status area: from Shop open to Settings) */
+.popwrap.actwrap{position:static}
+.pop.actpop{left:0;right:0;width:auto;padding:14px}
 .actpop .acthead{display:flex;align-items:center;gap:8px;margin:0 0 10px}
 .actpop .acthead .hint{margin:0 0 0 auto;font-size:12.5px}
 .actpop .feed{height:auto;min-height:140px;max-height:min(62vh,560px)}
@@ -451,7 +453,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <span class="chip-s" id="sShop"><i class="dot"></i><span>Shop not loaded</span></span>
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
       <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
-      <div class="popwrap">
+      <div class="popwrap actwrap">
         <button class="theme cogbtn actbtn" id="actBtn" data-pop="actPop" aria-expanded="false" aria-haspopup="true" title="Everything drop mode sees, for the shop on show"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>Activity<span class="actdot" id="actDot" hidden></span></button>
         <div class="pop actpop" id="actPop" hidden>
           <div class="acthead"><span class="pop-title">Activity log</span><span class="col-shop" hidden></span><span class="hint">Newest at the bottom</span></div>
