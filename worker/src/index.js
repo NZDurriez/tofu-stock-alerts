@@ -457,7 +457,8 @@ async function handleInteraction(request, env, ctx) {
     return reply({ type: 8, data: { choices: choices.slice(0, 25) } });
   }
 
-  // Defer (shows "thinking…" privately), then edit the reply when the work is done
+  // Defer (shows "thinking…" privately), then edit the reply when the work is done. One with vanish goes
+  // away that many seconds later, unless it's changed since (they clicked My wishlist in it, say)
   const followUp = async (work) => {
     let data;
     try {
@@ -465,11 +466,17 @@ async function handleInteraction(request, env, ctx) {
     } catch (err) {
       data = { content: `Something went wrong: ${err}` };
     }
-    await fetch(`${discordApi(env)}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`, {
+    const { vanish, ...shown } = data;
+    const original = `${discordApi(env)}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`;
+    await fetch(original, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allowed_mentions: { parse: [] }, ...data }),
+      body: JSON.stringify({ allowed_mentions: { parse: [] }, ...shown }),
     });
+    if (!vanish) return;
+    await new Promise((done) => setTimeout(done, vanish * 1000));
+    const now = await fetch(original).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (now && now.content === shown.content) await fetch(original, { method: "DELETE" });
   };
   const deferred = () => reply({ type: 5, data: { flags: EPHEMERAL } });
 
@@ -799,6 +806,7 @@ async function addItem(env, i, user, data, person, keywords, qty, max) {
   return {
     content: `Added ${describe(item)}. I'll ping you in <#${person.channel}> when it's in stock (any shop drop mode watches). Every word has to be in the product's name.`,
     components: [row(addButton("Add another"), listButton())],
+    vanish: 15, // (gone after 15 seconds: it's only saying it worked)
   };
 }
 
