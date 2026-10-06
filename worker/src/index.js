@@ -12,6 +12,8 @@
 //                   wishlists (it reads them from /wishlists with DROP_MODE_KEY) and pings.
 //   /wishlist-panel posts buttons for it (Add something / My wishlist, with a pop-up form),
 //                   so people can click instead of typing commands (owner only)
+// Drop mode can change someone's wishlist too (POST /wishlists/<their id>, with DROP_MODE_KEY);
+// they get a note in their channel saying what changed.
 
 const SHOP = "https://mrtofu.store";
 const BROWSER_UA =
@@ -145,6 +147,8 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/interactions" && request.method === "POST") return handleInteraction(request, env, ctx);
     if (url.pathname === "/wishlists" && request.method === "GET") return wishlistFeed(request, env);
+    const edit = url.pathname.match(/^\/wishlists\/(\d{15,25})$/);
+    if (edit && request.method === "POST") return wishlistEdit(request, env, ctx, edit[1]);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
     return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -582,17 +586,47 @@ async function handleInteraction(request, env, ctx) {
 const WISHLIST_MAX = 15;
 const VIEW_CHANNEL = 1n << 10n, SEND_MESSAGES = 1n << 11n, EMBED_LINKS = 1n << 14n, READ_HISTORY = 1n << 16n;
 
-async function getWishlists(env) {
-  try {
-    return JSON.parse((await env.STATE.get("wishlists")) || "{}");
-  } catch {
-    return {};
+// Everyone's wishlists live in one Durable Object: a single copy in one place, so a change is seen
+// straight away everywhere. (KV can take a minute to reach other parts of the world, and two people
+// changing the same list then could undo each other's change.) The first time, the lists kept in KV
+// before are brought over; KV keeps that old copy.
+export class WishlistStore {
+  constructor(state) {
+    this.state = state;
   }
+
+  async fetch(request) {
+    if (request.method === "PUT") {
+      await this.state.storage.put("data", await request.json());
+      return new Response("ok");
+    }
+    return Response.json((await this.state.storage.get("data")) ?? null);
+  }
+}
+
+const wishlistStore = (env) => env.WISHLISTS.get(env.WISHLISTS.idFromName("wishlists"));
+
+// (Throws if the lists can't be read, rather than handing back an empty record that saving would
+// write over everyone's lists with.)
+async function getWishlists(env) {
+  if (!env.WISHLISTS) return JSON.parse((await env.STATE.get("wishlists")) || "{}");
+  const res = await wishlistStore(env).fetch("https://wishlists/");
+  if (!res.ok) throw new Error(`the wishlists couldn't be read (${res.status})`);
+  const data = await res.json();
+  if (data) return data;
+  let old = {};
+  try {
+    old = JSON.parse((await env.STATE.get("wishlists")) || "{}");
+  } catch {}
+  await wishlistStore(env).fetch("https://wishlists/", { method: "PUT", body: JSON.stringify(old) });
+  return old;
 }
 
 async function putWishlists(env, data) {
   data.version = (data.version || 0) + 1;
-  await env.STATE.put("wishlists", JSON.stringify(data));
+  if (!env.WISHLISTS) return env.STATE.put("wishlists", JSON.stringify(data));
+  const res = await wishlistStore(env).fetch("https://wishlists/", { method: "PUT", body: JSON.stringify(data) });
+  if (!res.ok) throw new Error(`the wishlists couldn't be saved (${res.status})`);
 }
 
 // A call to Discord's API as the bot. Returns [status, parsed body]
@@ -875,14 +909,71 @@ function sameText(a, b) {
   return diff === 0;
 }
 
+const feedPerson = (id, p) => ({ id, name: p.name, hook: p.hook, items: (p.items || []).map((it) => ({ ...it, key: itemKey(it.text) })) });
+
+// Drop mode changing someone's wishlist (with DROP_MODE_KEY): add something, change how many or the max
+// price, or take something off. They get a note in their channel saying what changed (it names the owner,
+// without pinging anyone), with a button to see their list.
+async function wishlistEdit(request, env, ctx, userId) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  const no = (error, status = 400) => Response.json({ error }, { status });
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return no("That wasn't a change drop mode understands.");
+  }
+  const data = await getWishlists(env);
+  const person = (data.people || {})[userId];
+  if (!person || !person.hook) return no("They haven't got a wishlist channel yet (they make one with /wishlist).", 404);
+  person.items = person.items || [];
+  const owner = (env.DISCORD_OWNER_ID || "").trim();
+  const by = owner ? `<@${owner}>` : "The server owner";
+  const money = (v) => Math.round(parseFloat(v) * 100) / 100;
+  let note;
+  if (body.action === "add") {
+    const text = String(body.text || "").replace(/\s+/g, " ").trim().slice(0, 100);
+    if (!norm(text).split(/[\s,]+/).filter(Boolean).some((w) => !w.startsWith("-"))) return no("Give it at least one word to look for (words with a - in front only leave things out).");
+    if (person.items.some((it) => norm(it.text) === norm(text))) return no(`${text} is already on their wishlist.`);
+    if (person.items.length >= WISHLIST_MAX) return no(`Their wishlist is full (${WISHLIST_MAX} things).`);
+    const item = { text, qty: Math.max(1, Math.min(5, parseInt(body.qty, 10) || 1)), added: Date.now() };
+    if (money(body.max) > 0) item.max = money(body.max);
+    person.items.push(item);
+    note = `📝 ${by} added ${describe(item)} to your wishlist.`;
+  } else if (body.action === "update" || body.action === "remove") {
+    const at = person.items.findIndex((it) => itemKey(it.text) === String(body.key || ""));
+    if (at < 0) return no("That's not on their wishlist any more.", 404);
+    if (body.action === "remove") {
+      const [gone] = person.items.splice(at, 1);
+      note = `📝 ${by} took ${describe(gone)} off your wishlist.`;
+    } else {
+      const it = person.items[at];
+      if (body.qty !== undefined) it.qty = Math.max(1, Math.min(5, parseInt(body.qty, 10) || 1));
+      if (body.max !== undefined) {
+        if (money(body.max) > 0) it.max = money(body.max);
+        else delete it.max;
+      }
+      note = `📝 ${by} changed **${it.text}** on your wishlist (now: buy ${it.qty}, ${it.max ? `max $${Number(it.max).toFixed(2)} each` : "no max price"}).`;
+    }
+  } else {
+    return no("That wasn't a change drop mode understands.");
+  }
+  await putWishlists(env, data);
+  const message = { content: note, allowed_mentions: { parse: [] } };
+  const post = (body, query = "") => fetch(person.hook + query, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.ok).catch(() => false);
+  ctx.waitUntil(post({ ...message, components: [row(listButton())] }, "?with_components=true").then((ok) => ok || post(message)));
+  return Response.json({ ok: true, person: feedPerson(userId, person), version: data.version });
+}
+
 async function wishlistFeed(request, env) {
   const key = (env.DROP_MODE_KEY || "").trim();
   if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
   if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
   const data = await getWishlists(env);
-  const people = Object.entries(data.people || {})
-    .filter(([, p]) => p.hook && p.items && p.items.length)
-    .map(([id, p]) => ({ id, name: p.name, hook: p.hook, items: p.items.map((it) => ({ ...it, key: itemKey(it.text) })) }));
+  const people = Object.entries(data.people || {}).filter(([, p]) => p.hook).map(([id, p]) => feedPerson(id, p));
   return Response.json({ version: data.version || 0, people }, { headers: { "Cache-Control": "no-store" } });
 }
 

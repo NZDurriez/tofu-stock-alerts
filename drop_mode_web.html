@@ -317,7 +317,6 @@ select option[value="__add"]{color:var(--muted)}
 /* Someone's list from Discord: shown, but they change it themselves (so no adding to it here) */
 .wl-row .acts.ro{gap:6px;font-size:13px;color:var(--muted)}
 .wl-row .acts.ro b{color:var(--text);font-weight:600}
-.card.addoff .watchbtn,.card.addoff .pick{pointer-events:none;opacity:.35}
 .checkline{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13.5px;color:var(--muted);cursor:pointer;width:max-content}
 .checkline input{accent-color:var(--accent);margin:0}
 .exactopts{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:0 0 10px}
@@ -1095,7 +1094,22 @@ const ownedNow = (w) => (w.who || "") === listFor;
 const isDiscordList = () => listFor.startsWith("discord:");
 const discordPerson = () => (isDiscordList() ? discordPeople.find((p) => p.id === listFor) : null);
 const listName = () => (discordPerson() || friends.find((f) => f.id === listFor) || {}).name || "";
-const onList = (kind, key) => watchlist.some((w) => ownedNow(w) && w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
+const onList = (kind, key, title) => {
+  const dc = discordPerson();
+  if (dc) return dc.items.some((it) => wordsKey(it.text) === (kind === "product" ? wordsKey(nameAsKeywords(title || "")) : key));
+  return watchlist.some((w) => ownedNow(w) && w.kind === kind && (kind === "product" ? w.id === key : wordsKey(w.text) === key));
+};
+// Changing someone's Discord wishlist: drop mode asks the bot, which tells them in their channel
+async function discordChange(action, extra) {
+  const dc = discordPerson();
+  if (!dc) return false;
+  let r;
+  try { r = await api("/api/discord/list", { person: dc.id, action, ...extra }); } catch { r = { error: "Couldn't reach drop mode." }; }
+  if (r.error) { alert(r.error); return false; }
+  discordPeople = r.discord || discordPeople; listsSeq = r.lists || listsSeq;
+  showListFor(); renderKwActs(); refreshInfo(); search();
+  return true;
+}
 
 // ---- keywords ----
 const SUGGEST = ["Elite Trainer Box", "Booster Bundle", "Booster Box", "Booster Pack", "Pre-order"];
@@ -1168,10 +1182,13 @@ async function kwPreview() {
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
-function addKeywords() {
-  if (isDiscordList()) return; // (they keep that list themselves)
+async function addKeywords() {
   const text = cleanKw($("kwInput").value);
   if (!text || onList("words", wordsKey(text))) return;
+  if (isDiscordList()) { // (onto their Discord wishlist)
+    if (await discordChange("add", { text, qty: kwQty })) { $("kwInput").value = ""; kwQty = 1; kwChanged(0); }
+    return;
+  }
   watchlist.push({ kind: "words", text, qty: kwQty, ...(listFor ? { who: listFor } : {}) });
   $("kwInput").value = ""; kwQty = 1;
   kwChanged(0);
@@ -1207,7 +1224,7 @@ function renderResults() {
       : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop" : "Everything in stock right now"}, ${order}. Type to search, or tick several to add them together.</div>`;
   }
   html += r.items.map((it) => {
-    const already = onList("product", it.id), sel = ticked.get(it.id);
+    const already = onList("product", it.id, it.title), sel = ticked.get(it.id);
     return `<div class="item" data-id="${it.id}">
       <input type="checkbox" class="pick" ${already ? "disabled" : ""} aria-label="Tick ${esc(it.title)}">
       ${thumb(it)}
@@ -1261,10 +1278,15 @@ function updateTicks() {
   $("watchTicked").textContent = `+ Watch ${ticked.size}${forWho()}`;
 }
 // Add everything ticked (and the one whose + Watch was pressed) to the watchlist
-function addTicked(extra) {
-  if (isDiscordList()) return; // (they keep that list themselves)
+async function addTicked(extra) {
   const items = [...ticked.values()];
   if (extra && !ticked.has(extra.id)) items.push(extra);
+  if (isDiscordList()) { // (a Discord wishlist holds keywords: each product goes on as its name)
+    for (const it of items) if (!onList("product", it.id, it.title)) await discordChange("add", { text: nameAsKeywords(it.title), qty: it.qty });
+    ticked.clear();
+    search();
+    return;
+  }
   for (const it of items) {
     if (!onList("product", it.id)) watchlist.push({ kind: "product", id: it.id, title: it.title, image: it.image, qty: it.qty, ...(listFor ? { who: listFor } : {}) });
   }
@@ -1447,13 +1469,13 @@ function renderWatchlist(force) {
   if (picPanel && !watchlist.includes(picPanel)) picPanel = null; // (that entry's gone)
   if (picPanel && !force) { wlRedrawLater = true; return; } // (a picture panel's open: leave it be)
   if (force) wlRedrawLater = false;
-  const dc = discordPerson(); // (their entries have no index: read only)
+  const dc = discordPerson(); // (their entries have no index, but a key the bot knows them by)
   const rows = dc ? dc.items.map((it) => ({ w: { kind: "words", ...it }, i: -1 })) : watchlist.map((w, i) => ({ w, i })).filter((r) => ownedNow(r.w));
   $("wlCount").textContent = rows.length ? `${rows.length} item${rows.length === 1 ? "" : "s"}` : "";
   const html = !rows.length ? `<div class="wl-empty">Nothing on ${listFor ? esc(listName()) + "'s wishlist" : "your watchlist"} yet. Add keywords or a product in step 2.</div>` : rows.map(({ w, i }) => {
     const s = statusParts(w);
     return `
-    <div class="wl-row" data-i="${i}">
+    <div class="wl-row" data-i="${i}"${i < 0 && w.key ? ` data-dkey="${esc(w.key)}"` : ""}>
       ${entryThumb(w, i)}
       <div class="t">
         <div class="sum${s.more ? " has-more" : ""}"${s.more ? ' tabindex="0"' : ""}>
@@ -1461,12 +1483,12 @@ function renderWatchlist(force) {
           <div class="st">${s.line}</div>
           ${s.more ? `<div class="more" role="tooltip">${s.more}</div>` : ""}
         </div>
-        ${i < 0 ? `<div class="acts ro">Buy <b>${w.qty}</b> · ${w.max ? `max <b>$${w.max.toFixed(2)}</b> each` : "no max price"}</div>`
+        ${i < 0 && !w.key ? `<div class="acts ro">Buy <b>${w.qty}</b> · ${w.max ? `max <b>$${w.max.toFixed(2)}</b> each` : "no max price"}</div>`
           : `<div class="acts"><span class="lbl">Buy</span>${qtyButtons(w.qty, w.kind === "product" ? info.picks[w.id]?.limit : 0)}
           <span class="lbl" style="margin-left:8px" title="The most you'll pay for each one. Leave empty for no limit.">Max $</span><input type="number" class="maxin" min="0" step="0.01" inputmode="decimal" placeholder="no limit" value="${w.max ?? ""}" aria-label="Max price for each"></div>`}
         ${i >= 0 && w === picPanel ? picPanelHtml(w) : ""}
       </div>
-      ${i < 0 ? "" : '<button class="rm" title="Remove from watchlist">×</button>'}
+      ${i < 0 && !w.key ? "" : `<button class="rm" title="${i < 0 ? "Take it off their wishlist (they get a note)" : "Remove from watchlist"}">×</button>`}
     </div>`;
   }).join("");
   if (html === wlHtml) return;
@@ -1474,7 +1496,17 @@ function renderWatchlist(force) {
   $("watchlist").innerHTML = html;
   $("watchlist").querySelectorAll(".wl-row").forEach((row) => {
     const i = +row.dataset.i;
-    if (i < 0) return; // (someone's list from Discord: read only)
+    const dkey = row.dataset.dkey;
+    if (dkey) { // (someone's Discord wishlist: changes go through the bot, which tells them)
+      wireQty(row, (n) => discordChange("update", { key: dkey, qty: n }));
+      const box = row.querySelector(".maxin");
+      box.onchange = () => { const v = Math.round(parseFloat(box.value) * 100) / 100; discordChange("update", { key: dkey, max: v > 0 ? v : 0 }); };
+      box.onkeydown = (e) => { if (e.key === "Enter") box.blur(); };
+      box.onblur = () => { if (wlRedrawLater) { wlRedrawLater = false; renderWatchlist(); } };
+      row.querySelector(".rm").onclick = () => discordChange("remove", { key: dkey });
+      return;
+    }
+    if (i < 0) return; // (read only)
     wireQty(row, (n) => { watchlist[i].qty = n; watchlistChanged(false); });
     const maxin = row.querySelector(".maxin");
     maxin.onchange = () => { // the most you'll pay for each (empty = no limit)
@@ -1602,7 +1634,7 @@ function showListFor() {
     + (discordPeople.length ? `<optgroup label="Kept in Discord (/wishlist)">${discordPeople.map((p) => opt(p.id, `${p.name}'s wishlist`, off)).join("")}</optgroup>` : "")
     + "<hr>" + opt("__add", "＋ Add someone…"); // (a line above it: it's not a list)
   $("wlWho").innerHTML = opts(false);
-  $("addWho").innerHTML = opts(true); // (nothing can be added to a Discord list here: they keep it themselves)
+  $("addWho").innerHTML = opts(false);
   for (const id of ["addWho", "wlWho"]) $(id).value = listFor;
   const who = friends.find((f) => f.id === listFor), dc = discordPerson();
   $("friendNote").hidden = !who && !dc;
@@ -1610,11 +1642,10 @@ function showListFor() {
     $("friendNote").innerHTML = `When something here comes in stock, ${esc(who.name)} gets a Discord ping with links to check out or add it to their cart, while this shop is being watched. Nothing opens on this PC.<button class="linkish" id="rmPerson">Remove ${esc(who.name)}</button>`;
     $("rmPerson").onclick = () => { if (confirm(`Remove ${who.name}? Their wishlists go too.`)) saveFriends(friends.filter((f) => f !== who)); };
   } else if (dc) {
-    $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, so it's changed there, not here. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping in their own channel with links to check out. Nothing opens on this PC.`;
+    $("friendNote").innerHTML = `${esc(dc.name)} keeps this wishlist in Discord with <b>/wishlist</b>, and you can change it here too: ${esc(dc.name)} gets a note in their channel about each change. When something on it comes in stock at a shop drop mode is watching, ${esc(dc.name)} gets a ping there with links to check out. Nothing opens on this PC.`;
   }
-  $("addCard").classList.toggle("addoff", !!dc);
   $("addNote").hidden = !dc;
-  if (dc) $("addNote").textContent = `${dc.name} keeps their wishlist in Discord, so nothing can be added to it here. Pick My watchlist (or someone else) to add things.`;
+  if (dc) $("addNote").textContent = `This adds to ${dc.name}'s Discord wishlist, and ${dc.name} gets a note in their channel. (A product you pick goes on as its name, since Discord wishlists are keywords.)`;
 }
 function pickList(sel) {
   if (sel.value === "__add") { // (open the form; the dropdown stays on the list you were on)

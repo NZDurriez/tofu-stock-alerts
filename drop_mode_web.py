@@ -613,9 +613,9 @@ class Watcher:
         theirs = [x for x in self.friend_items() if not x[0].get("hook")]
         if theirs:
             summary.append(f"friends' wishlists ({len(theirs)} item{'' if len(theirs) == 1 else 's'})")
-        kept = sum(len(p["items"]) for p in LISTS.people)
+        kept, keepers = sum(len(p["items"]) for p in LISTS.people), len(LISTS.keeping())
         if kept:
-            summary.append(f"wishlists from Discord ({len(LISTS.people)} {'person' if len(LISTS.people) == 1 else 'people'}, "
+            summary.append(f"wishlists from Discord ({keepers} {'person' if keepers == 1 else 'people'}, "
                            f"{kept} thing{'' if kept == 1 else 's'})")
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
         if open_now:
@@ -1055,6 +1055,7 @@ class DiscordLists:
         self.fails = 0        # looks in a row that couldn't reach the bot
         self.checked = None   # when the lists last came in
         self.seq = 0          # goes up when they change, so open pages show the new ones
+        self.version = 0      # the bot's version of them (a look that's older than a change made here is ignored)
         self.lock = threading.Lock()
 
     @staticmethod
@@ -1081,7 +1082,7 @@ class DiscordLists:
 
     @staticmethod
     def clean(data):
-        """The bot's answer -> people with a channel to ping and something to look for."""
+        """The bot's answer -> people with a channel to ping (an empty list too: you can add to it)."""
         out = []
         for p in data.get("people") or []:
             if not isinstance(p, dict):
@@ -1101,10 +1102,63 @@ class DiscordLists:
                 items.append({"text": text, "qty": qty, "max": price_cap(it.get("max")),
                               "key": it["key"] if re.fullmatch(r"[0-9a-f]{8}", str(it.get("key") or "")) else None,
                               "added": it["added"] if isinstance(it.get("added"), int) else 0})
-            if items:
-                name = re.sub(r"[^\w &'.-]", "", str(p.get("name") or "")).strip()[:30] or "Someone"
-                out.append({"id": "discord:" + discord, "name": name, "discord": discord, "hook": hook, "items": items[:15]})
+            name = re.sub(r"[^\w &'.-]", "", str(p.get("name") or "")).strip()[:30] or "Someone"
+            out.append({"id": "discord:" + discord, "name": name, "discord": discord, "hook": hook, "items": items[:15]})
         return out
+
+    def keeping(self):
+        """The people with something on their list."""
+        return [p for p in self.people if p["items"]]
+
+    def change(self, pid, data):
+        """Change someone's list through the bot: add something, change how many or the max price, or
+        take something off. The bot tells them in their channel. Returns what went wrong, or None."""
+        person = next((p for p in self.people if p["id"] == pid), None)
+        if not person:
+            return "They're not in the Discord wishlists any more."
+        if not DISCORD.bot_key:
+            return "Connect the Discord wishlists first (⚙ Settings → Discord)."
+        action, body = data.get("action"), {"action": data.get("action")}
+        if action == "add":
+            body.update(text=re.sub(r"\s+", " ", str(data.get("text") or "")).strip()[:100], qty=data.get("qty") or 1,
+                        max=price_cap(data.get("max")) or 0)
+        elif action in ("update", "remove"):
+            body["key"] = str(data.get("key") or "")[:16]
+            if action == "update":
+                body.update({k: (price_cap(data[k]) or 0) if k == "max" else data[k] for k in ("qty", "max") if k in data})
+        else:
+            return "That isn't a change drop mode knows."
+        try:  # (the key goes to curl on stdin; the change itself is plain ASCII JSON)
+            res = subprocess.run(["curl", "-sS", "--max-time", "15", "-H", "@-", "-H", "Content-Type: application/json",
+                                  "--data-binary", json.dumps(body), "-w", "\n%{http_code}", f"{BOT_URL}/wishlists/{person['discord']}"],
+                                 input=f"Authorization: Bearer {DISCORD.bot_key}\n".encode(), capture_output=True)
+        except Exception:
+            return "Couldn't reach the bot."
+        text, _, code = res.stdout.decode("utf-8", errors="replace").rpartition("\n")
+        code = code.strip()
+        try:
+            reply = json.loads(text) if text.strip() else {}
+        except ValueError:
+            reply = {}
+        if res.returncode != 0 or not code.startswith("2"):
+            return (reply.get("error") if isinstance(reply, dict) else None) or (
+                "The bot didn't accept drop mode's key." if code == "403" else
+                "Couldn't reach the bot" + (f" (it said {code})." if res.returncode == 0 else "."))
+        fresh = self.clean({"people": [reply.get("person") or {}]})
+        was = {it["key"]: it["text"] for it in person["items"]}
+        with self.lock:
+            self.people = [fresh[0] if p["id"] == pid and fresh else p for p in self.people]
+            self.version = max(self.version, int(reply.get("version") or 0))
+            self.seq += 1
+        thing = body.get("text") or was.get(body.get("key"), "something")
+        WATCHERS["tofu"].log("info", {"add": f"📋 You added {thing} to {person['name']}'s Discord wishlist",
+                                      "update": f"📋 You changed {thing} on {person['name']}'s Discord wishlist",
+                                      "remove": f"📋 You took {thing} off {person['name']}'s Discord wishlist"}[action]
+                             + " (they get a note in their channel).")
+        for w in list(WATCHERS.values()):  # (something added that's in stock already: they're pinged now)
+            if w.running:
+                w.ping_friends({}, w.products, first=True)
+        return None
 
     def watch(self):
         while True:
@@ -1120,11 +1174,13 @@ class DiscordLists:
             state, data = self.fetch()
             old, said = self.people, self.said
             if state == "ok":
-                self.people, self.checked, self.fails = self.clean(data), time.strftime("%H:%M:%S"), 0
+                self.checked, self.fails = time.strftime("%H:%M:%S"), 0
+                if int(data.get("version") or 0) >= self.version:  # (not one from before a change made here)
+                    self.people, self.version = self.clean(data), int(data.get("version") or 0)
             elif state == "down":
                 self.fails += 1  # (keep watching the last lists while the bot can't be reached)
             else:
-                self.people = []
+                self.people, self.version = [], 0
             self.state = state
             self.said = state if state != "down" or self.fails * LISTS_EVERY >= 60 else said  # (under a minute without the bot isn't news)
             changed = self.people != old
@@ -1140,11 +1196,12 @@ class DiscordLists:
         """Say so in Mr Tofu's activity log: connecting (or not), and who changed their list."""
         log = WATCHERS["tofu"].log
         if self.said != said:
-            n = sum(len(p["items"]) for p in self.people)
+            keep = self.keeping()
+            n = sum(len(p["items"]) for p in keep)
             log(*{
-                "ok": ("ok", f"🤖 Reading the wishlists people keep in Discord: {len(self.people)} "
-                             f"{'person' if len(self.people) == 1 else 'people'}, {n} thing{'' if n == 1 else 's'}"
-                             + (f" ({', '.join(p['name'] for p in self.people[:8])})" if self.people else "")
+                "ok": ("ok", f"🤖 Reading the wishlists people keep in Discord: {len(keep)} "
+                             f"{'person' if len(keep) == 1 else 'people'}, {n} thing{'' if n == 1 else 's'}"
+                             + (f" ({', '.join(p['name'] for p in keep[:8])})" if keep else "")
                              + ". Watched on every shop; each person is pinged in their own channel."),
                 "down": ("warn", "🤖 Can't reach the bot for the Discord wishlists. Still watching the last ones, and still trying."),
                 "badkey": ("warn", "🤖 The bot didn't accept drop mode's key, so the Discord wishlists aren't being watched (⚙ Settings → Discord)."),
@@ -1165,7 +1222,7 @@ class DiscordLists:
             log("info", f"📋 {p['name']} emptied their Discord wishlist.")
 
     def info(self):
-        return {"state": self.state, "people": len(self.people), "items": sum(len(p["items"]) for p in self.people),
+        return {"state": self.state, "people": len(self.keeping()), "items": sum(len(p["items"]) for p in self.people),
                 "checked": self.checked}
 
     def public(self):
@@ -1616,6 +1673,12 @@ class Handler(BaseHTTPRequestHandler):
             if data.get("botKey") or data.get("removeBotKey"):
                 LISTS.update()  # (straight away, to say whether the key works)
             self.send_json(DISCORD.info())
+        elif path == "/api/discord/list":  # change someone's Discord wishlist (the bot tells them in their channel)
+            error = LISTS.change(str(data.get("person") or ""), data)
+            if error:
+                self.send_json({"error": error}, 400)
+                return
+            self.send_json({"discord": LISTS.public(), "lists": LISTS.seq})
         elif path == "/api/discord/test":
             ok, why = DISCORD.post(DISCORD.test_message())
             self.send_json({"ok": ok, "message": why})

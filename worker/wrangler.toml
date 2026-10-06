@@ -22,5 +22,14 @@ WATCH_KEYWORDS = "delta reign, booster bundle, elite trainer box, etb, booster b
 binding = "STATE"
 id = "9c53192ccb9b4ba1bb169c013c1d5a80"
 
+# Everyone's wishlists (/wishlist): one Durable Object, so changes are seen straight away everywhere
+[[durable_objects.bindings]]
+name = "WISHLISTS"
+class_name = "WishlistStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WishlistStore"]
+
 [observability]
 enabled = true
