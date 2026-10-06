@@ -51,6 +51,7 @@ ALERTS_FILE = os.path.join(dm.SOUND_DIR, "alerts.json")        # those pings' me
 BOT_URL = (os.environ.get("DROP_BOT_URL") or "https://tofu-stock-watch.alex-mangin35.workers.dev").rstrip("/")
 LISTS_EVERY = float(os.environ.get("DROP_LISTS_EVERY") or 5)  # seconds between looks at them (so a new item pings within seconds)
 PING_CARDS = 5  # pings with buttons for one person at once; any more go in one message
+YOU = "@you"    # you, among the people drop mode pings (your own watchlist: it can't clash with a friend's id)
 WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+(?:\?[\w=&-]*)?$")
 if os.environ.get("DROP_DISCORD_TEST") == "1":  # tests only: a pretend Discord on this PC
     WEBHOOK = re.compile(r"^http://127\.0\.0\.1:\d+/api/webhooks/\d+/[\w-]+$")
@@ -391,13 +392,6 @@ class Watcher:
         if by_program:
             webbrowser.open(url)
         play_alert()
-        if DISCORD.webhook and DISCORD.on_checkout:
-            parts, picture = [], None
-            for vid, q, t in items:
-                it = next((p for p in self.products.values() if vid in p["variants"]), None)
-                parts.append((q, t, it["variants"][vid][2] if it else None, (it or {}).get("limit"), includes_text(it or {})))
-                picture = picture or (it or {}).get("image")
-            DISCORD.send(DISCORD.checkout_message(self.name, url, parts, picture), self.log)
 
     def target(self, pid, it, wanted=None, words=None):
         """(how many, max price) if this product is on the watchlist, else None."""
@@ -428,7 +422,8 @@ class Watcher:
     def friend_items(self):
         """[(friend, kind, product id or keywords, qty, max, item)]: friends' wishlists for this shop,
         then the ones people keep in Discord (keywords, watched on every shop; item is the entry from
-        the bot: its key, for the button on the ping that takes it off their list, and when it was added)."""
+        the bot: its key, for the button on the ping that takes it off their list, and when it was added),
+        then your own watchlist, if your Discord ping is set up (you're pinged the same way)."""
         friends, out = {f["id"]: f for f in FRIENDS}, []
         for w in self.watchlist:
             f = friends.get(w.get("who"))
@@ -437,6 +432,10 @@ class Watcher:
                 out.append((f, w["kind"], key, w["qty"], w.get("max"), None))
         for person in LISTS.people:
             out += [(person, "words", keywords(it["text"]), it["qty"], it.get("max"), it) for it in person["items"]]
+        me = owner_friend()
+        if me:
+            out += [(me, "product", pid, q, cap, None) for pid, (q, cap) in self.picks.items()]
+            out += [(me, "words", keys, q, cap, None) for keys, q, _, cap in self.words]
         return out
 
     def ping_friends(self, old, current, first=False, sold_out=True):
@@ -469,12 +468,12 @@ class Watcher:
                     except (TypeError, ValueError):
                         over = False
                     if over:
-                        if seen not in self.friend_over:
+                        if seen not in self.friend_over and not friend.get("you"):  # (yours: "Skipped …" says it)
                             self.friend_over.add(seen)
                             self.log("info", f"Didn't ping {friend['name']} about {it['title'][:60]}: ${price} is over their max of ${cap:.2f}.")
                         continue
                     done.add(seen)
-                    if not friend.get("hook") and not DISCORD.friends_hook():
+                    if not ping_hook(friend):
                         if not self.no_hook_said:
                             self.no_hook_said = True
                             self.log("warn", f"{it['title'][:60]} is on {friend['name']}'s wishlist, but drop mode can't ping them "
@@ -483,18 +482,7 @@ class Watcher:
                     self.friend_pinged.add(told)
                     todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item and item.get("key"), told))
             for friend, pings in todo.values():
-                where = " in their channel" if friend.get("hook") else ""
-                for it, vid, q, price, *_ in pings:
-                    self.log("info", f"📣 Pinged {friend['name']}{where} on Discord: x{q} {it['title'][:70]} ${price}",
-                             f"{self.site.shop}/products/{it['handle']}")
-                # A ping each (with buttons), but not dozens at once: past a few, the rest go in one message
-                msgs = [DISCORD.friend_message(friend, self.name, self.site.shop, it, vid, q, price, item)
-                        for it, vid, q, price, item, _ in pings[:PING_CARDS]]
-                if len(pings) > PING_CARDS:
-                    msgs.append(DISCORD.more_message(friend, self.name, self.site.shop, pings[PING_CARDS:]))
-                hook, keys = friend.get("hook") or DISCORD.friends_hook(), [told for *_, told in pings[:PING_CARDS]]
-                DISCORD.send(msgs, self.log, hook, friend["name"] if friend.get("hook") else None,
-                             sent=lambda ids, keys=keys, hook=hook: self.remember_alerts(keys, hook, ids))
+                self.send_pings(friend, pings)
             # Remember who's been told about what's in stock (forgetting what's sold out, so a restock pings again)
             live_now = {vid for it in current.values() for vid, v in it["variants"].items() if v[1]}
             kept = {x for x in self.friend_pinged if x[1] in live_now}
@@ -509,6 +497,21 @@ class Watcher:
                 save_pinged(self.id, kept)
             if gone:  # (their in-stock alerts go: the buttons would only lead to a sold-out page)
                 self.delete_alerts(gone)
+
+    def send_pings(self, friend, pings):
+        """Someone's in-stock pings: a card each (with buttons), but not dozens at once: past a few, the
+        rest go in one message. Which ping is which message is noted, to delete them once it's sold out."""
+        where = " in their channel" if friend.get("hook") else ""
+        for it, vid, q, price, *_ in pings:
+            self.log("info", f"📣 Pinged {friend['name']}{where} on Discord: x{q} {it['title'][:70]} ${price}",
+                     f"{self.site.shop}/products/{it['handle']}")
+        msgs = [DISCORD.friend_message(friend, self.name, self.site.shop, it, vid, q, price, item)
+                for it, vid, q, price, item, _ in pings[:PING_CARDS]]
+        if len(pings) > PING_CARDS:
+            msgs.append(DISCORD.more_message(friend, self.name, self.site.shop, pings[PING_CARDS:]))
+        hook, keys = ping_hook(friend), [told for *_, told in pings[:PING_CARDS]]
+        DISCORD.send(msgs, self.log, hook, friend["name"] if friend.get("hook") else None,
+                     sent=lambda ids, keys=keys, hook=hook: self.remember_alerts(keys, hook, ids))
 
     def remember_alerts(self, keys, hook, ids):
         """Note the in-stock alerts just sent (which ping is which message), to delete them once it's sold
@@ -552,10 +555,12 @@ class Watcher:
                 continue  # (only what was on sale a moment ago, once per person and product)
             if any(v[1] for v in current.get(pid, {"variants": {}})["variants"].values()):
                 continue  # (another option of it is still on sale)
+            if friend.get("you") and not self.target(pid, it):
+                continue  # (taken off your watchlist since)
             said.add((friend["id"], pid))
             out.setdefault(friend["id"], (friend, []))[1].append(it)
         for friend, sold in out.values():
-            hook = friend.get("hook") or DISCORD.friends_hook()
+            hook = ping_hook(friend)
             if not hook:
                 continue
             for it in sold:
@@ -678,7 +683,7 @@ class Watcher:
         summary = [f"{self.products[p]['title'][:60] if p in self.products else 'product ' + p} x{q}{upto(cap)}"
                    for p, (q, cap) in self.picks.items()]
         summary += [f"keywords [{t}] x{q}{upto(cap)}" for _, q, t, cap in self.words]
-        theirs = [x for x in self.friend_items() if not x[0].get("hook")]
+        theirs = [x for x in self.friend_items() if not x[0].get("hook") and not x[0].get("you")]
         if theirs:
             summary.append(f"friends' wishlists ({len(theirs)} item{'' if len(theirs) == 1 else 's'})")
         kept, keepers = sum(len(p["items"]) for p in LISTS.people), len(LISTS.keeping())
@@ -816,6 +821,16 @@ def when():
     return f"<t:{int(time.time())}:T>"
 
 
+def mention(friend):
+    """Their @mention at the start of a ping (none if there's no Discord id, e.g. you haven't set yours)."""
+    return f"<@{friend['discord']}> " if friend.get("discord") else ""
+
+
+def mentions(friend):
+    """Only they get pinged (parse: [] so a product called "@everyone" can't ping the whole server)."""
+    return {"parse": [], "users": [friend["discord"]] if friend.get("discord") else []}
+
+
 def includes_text(it):
     """What a bundle includes (from its description), for a ping."""
     got = it.get("includes") or []
@@ -922,32 +937,15 @@ class Discord:
         return [{"type": 1, "components": [{"type": 2, "style": 5, "label": label, "emoji": {"name": emoji}, "url": url}
                                            for emoji, label, url in links[:5]]}]
 
-    def checkout_message(self, shop, url, parts, picture=None):
-        # The button in the ping goes straight to Shop Pay (signed in: pay; not: the Shop Pay sign-in, rather
-        # than the plain checkout form). The checkout drop mode opens on the PC stays as it is.
-        link = url + ("&" if "?" in url else "?") + "payment=shop_pay"
-        if len(parts) == 1:
-            q, title, price, limit, inside = parts[0]
-            embed = self.card(f"⚡ Checkout opened at {shop}", 0xD9A24B, title, link,
-                              [("Price", f"${price}" if price else ""), ("Quantity", str(q)), ("Limit", f"{limit} per customer" if limit else "")],
-                              picture, "it's open in your browser on the PC", inside)
-            text = f"⚡ **{title[:90]}** — checkout's open on your PC! · {when()}"
-        else:
-            embed = self.card(f"⚡ Checkout opened at {shop}", 0xD9A24B, f"{len(parts)} items in one checkout", link, (), picture,
-                              "it's open in your browser on the PC",
-                              "\n".join(f"• x{q} {title[:100]}" + (f" — ${price}" if price else "") for q, title, price, _, _ in parts[:15]))
-            text = f"⚡ {len(parts)} things you're watching — checkout's open on your PC! · {when()}"
-        msg = self._message(text, embed)
-        msg["components"] = self.buttons(("⚡", "Pay on this device", link))
-        return msg
-
     @classmethod
     def friend_message(cls, friend, shop_name, shop, it, vid, qty, price, item=None):
         """For a friend: their @mention, the product (and what a bundle includes), the time to the second,
         and buttons for their own device: check out with their wishlist amount, or with 1 to 5 (no more than
         the shop allows each customer), all straight to Shop Pay; or look at it. Someone's Discord wishlist
-        item also gets a button to take it off their list (the bot answers that one)."""
+        item also gets a button to take it off their list (the bot answers that one). Yours (your own
+        watchlist) is the same, but says Watchlist."""
         checkout = f"{shop}/cart/{vid}:{qty}?payment=shop_pay"
+        listed = "Watchlist" if friend.get("you") else "Wishlist"
         view = f"{shop}/products/{it['handle']}"
         limit = it.get("limit")
         try:
@@ -956,11 +954,11 @@ class Discord:
             most = 5
         embed = cls.card(f"🛒 In stock at {shop_name}", 0x6CC08D, it["title"], checkout,
                          [("Price", f"${price}" if price else ""), ("Quantity", str(qty)), ("Limit", f"{limit} per customer" if limit else "")],
-                         it.get("image"), f"Wishlist checkout buys your wishlist amount · 🛒 ×1–{most} check out with that many · all straight to Shop Pay",
+                         it.get("image"), f"{listed} checkout buys your {listed.lower()} amount · 🛒 ×1–{most} check out with that many · all straight to Shop Pay",
                          includes_text(it))
-        return {"content": f"<@{friend['discord']}> 🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**! · {when()}",
-                "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
-                "components": cls.buttons(("⚡", f"Wishlist checkout · Qty {qty}", checkout), ("🔎", "View", view))
+        return {"content": f"{mention(friend)}🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**! · {when()}",
+                "allowed_mentions": mentions(friend), "embeds": [embed],
+                "components": cls.buttons(("⚡", f"{listed} checkout · Qty {qty}", checkout), ("🔎", "View", view))
                 + cls.buttons(*[("🛒", f"×{n}", f"{shop}/cart/{vid}:{n}?payment=shop_pay") for n in range(1, most + 1)])
                 + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}", 4))] if item and friend.get("hook") else [])}
 
@@ -971,8 +969,8 @@ class Discord:
         view = f"{shop}/products/{it['handle']}"
         embed = cls.card(f"❌ Sold out at {shop_name}", 0xE5534B, it["title"], view, (), it.get("image"),
                          "You'll get another ping if it comes back in stock")
-        return {"content": f"<@{friend['discord']}> ❌ **{it['title'][:90]}** just sold out at **{shop_name}** · {when()}",
-                "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
+        return {"content": f"{mention(friend)}❌ **{it['title'][:90]}** just sold out at **{shop_name}** · {when()}",
+                "allowed_mentions": mentions(friend), "embeds": [embed],
                 "components": cls.buttons(("🔎", "View", view))}
 
     @staticmethod
@@ -992,10 +990,11 @@ class Discord:
                  for it, vid, q, price, *_ in rest[:15]]
         if len(rest) > 15:
             lines.append(f"…and {len(rest) - 15} more")
-        embed = cls.card(f"🛒 Also in stock at {shop_name}", 0x6CC08D, f"{len(rest)} more from your wishlist", shop, (), None,
+        listed = "watchlist" if friend.get("you") else "wishlist"
+        embed = cls.card(f"🛒 Also in stock at {shop_name}", 0x6CC08D, f"{len(rest)} more from your {listed}", shop, (), None,
                          "Each link goes straight to checkout (Shop Pay)", "\n".join(lines))
         tip = " Narrow your keywords with `/wishlist` to get fewer pings." if friend.get("hook") else ""
-        msg = {"content": f"…and **{len(rest)} more** things on your wishlist are in stock at **{shop_name}** · {when()}.{tip}",
+        msg = {"content": f"…and **{len(rest)} more** things on your {listed} are in stock at **{shop_name}** · {when()}.{tip}",
                "allowed_mentions": {"parse": []}, "embeds": [embed]}
         if friend.get("hook"):
             msg["components"] = [cls.bot_buttons(("📋", "My wishlist", "wl:list"))]
@@ -1016,7 +1015,7 @@ class Discord:
             return self._message("🔔 Drop mode test: pings will show up here.")
         it = sample[1]
         vid = next(v for v, x in it["variants"].items() if x[1])
-        msg = self.friend_message({"discord": ""}, tofu.name, tofu.site.shop, it, vid, 1, it["variants"][vid][2])
+        msg = self.friend_message({"discord": "", "you": True}, tofu.name, tofu.site.shop, it, vid, 1, it["variants"][vid][2])
         msg["content"] = (f"<@{self.user}> " if self.user else "") + "🔔 Drop mode test: this is what a ping looks like. (Nothing's been added to a cart.)"
         msg["allowed_mentions"] = {"parse": [], "users": [self.user] if self.user else []}
         msg["embeds"][0]["author"]["name"] = "🔔 Test · " + msg["embeds"][0]["author"]["name"]
@@ -1112,6 +1111,20 @@ class Discord:
 
 
 DISCORD = Discord()
+
+
+def owner_friend():
+    """You, pinged about your own watchlist the same way friends are (the same cards and buttons, a sold-out
+    ping, the card deleted then), through your own webhook: when it's set and that ping is switched on."""
+    if DISCORD.webhook and DISCORD.on_checkout:
+        return {"id": YOU, "name": "you", "discord": DISCORD.user, "you": True}
+    return None
+
+
+def ping_hook(friend):
+    """Where someone's pings go: yours to your webhook, a Discord wishlist's to its own channel,
+    a friend's to the friends' webhook (or yours)."""
+    return DISCORD.webhook if friend.get("you") else friend.get("hook") or DISCORD.friends_hook()
 PINGED_LOCK = threading.Lock()
 
 
