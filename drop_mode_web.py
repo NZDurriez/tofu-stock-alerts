@@ -46,6 +46,7 @@ STORES_FILE = os.path.join(dm.SOUND_DIR, "stores.json")        # other shops you
 DISCORD_FILE = os.path.join(dm.SOUND_DIR, "discord.json")      # your Discord ping (the webhook link stays on this PC)
 FRIENDS_FILE = os.path.join(dm.SOUND_DIR, "friends.json")      # friends with their own wishlists (pinged, never opened here)
 PINGED_FILE = os.path.join(dm.SOUND_DIR, "pinged.json")        # what friends were pinged about (so a restart doesn't ping again)
+ALERTS_FILE = os.path.join(dm.SOUND_DIR, "alerts.json")        # those pings' messages (deleted when it sells out)
 # The stock-alert bot, where people keep wishlists of their own with /wishlist (drop mode reads them with your key)
 BOT_URL = (os.environ.get("DROP_BOT_URL") or "https://tofu-stock-watch.alex-mangin35.workers.dev").rstrip("/")
 LISTS_EVERY = float(os.environ.get("DROP_LISTS_EVERY") or 5)  # seconds between looks at them (so a new item pings within seconds)
@@ -176,6 +177,8 @@ class Watcher:
         self.skipped = set()    # variant ids not opened because they cost more than your max (said once)
         self.capped = set()     # products whose per-customer limit cut the quantity (said once)
         self.friend_pinged = load_pinged(sid)  # (friend, variant) pinged about while in stock (kept, so a restart doesn't ping again)
+        self.alerts = load_alerts(sid)  # (friend, variant) -> [(webhook, message id)]: those pings, to delete once it's sold out
+        self.alerts_lock = threading.Lock()
         self.friend_over = set()    # (friend, variant) over their max (said once)
         self.ping_lock = threading.Lock()
         self.no_hook_said = False   # (friends can't be pinged without a webhook: said once)
@@ -440,7 +443,7 @@ class Watcher:
         """Ping friends when something on their wishlist comes on sale (and when watching starts,
         or their list changes, about what's on sale already: once, even after a restart)."""
         items = self.friend_items()
-        if not items:
+        if not current or not (items or self.friend_pinged):  # (lists emptied since a ping: still tidy up once it sells out)
             return
         with self.ping_lock:
             done, todo = set(), {}
@@ -456,8 +459,8 @@ class Watcher:
                     seen = (friend["id"], vid)  # (one ping per person per product, each time)
                     # Told about it already, for this entry (one taken off the list and added again is new)
                     told = (f"{friend['id']}@{item.get('added') or 0}" if item else friend["id"], vid)
-                    if seen in done or (first and told in self.friend_pinged):
-                        continue
+                    if seen in done or told in self.friend_pinged:
+                        continue  # (told already, and it hasn't sold out since: a restock pings again once it has)
                     if not (key == pid if kind == "product" else keyword_match(key, it["title"])):
                         continue
                     price = it["variants"][vid][2]
@@ -478,26 +481,62 @@ class Watcher:
                                              "until a Discord webhook is set up in ⚙ Settings.")
                         continue
                     self.friend_pinged.add(told)
-                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item and item.get("key")))
+                    todo.setdefault(friend["id"], (friend, []))[1].append((it, vid, dm.capped(qty, it), price, item and item.get("key"), told))
             for friend, pings in todo.values():
                 where = " in their channel" if friend.get("hook") else ""
-                for it, vid, q, price, _ in pings:
+                for it, vid, q, price, *_ in pings:
                     self.log("info", f"📣 Pinged {friend['name']}{where} on Discord: x{q} {it['title'][:70]} ${price}",
                              f"{self.site.shop}/products/{it['handle']}")
                 # A ping each (with buttons), but not dozens at once: past a few, the rest go in one message
                 msgs = [DISCORD.friend_message(friend, self.name, self.site.shop, it, vid, q, price, item)
-                        for it, vid, q, price, item in pings[:PING_CARDS]]
+                        for it, vid, q, price, item, _ in pings[:PING_CARDS]]
                 if len(pings) > PING_CARDS:
                     msgs.append(DISCORD.more_message(friend, self.name, self.site.shop, pings[PING_CARDS:]))
-                DISCORD.send(msgs, self.log, friend.get("hook") or DISCORD.friends_hook(), friend["name"] if friend.get("hook") else None)
+                hook, keys = friend.get("hook") or DISCORD.friends_hook(), [told for *_, told in pings[:PING_CARDS]]
+                DISCORD.send(msgs, self.log, hook, friend["name"] if friend.get("hook") else None,
+                             sent=lambda ids, keys=keys, hook=hook: self.remember_alerts(keys, hook, ids))
             # Remember who's been told about what's in stock (forgetting what's sold out, so a restock pings again)
             live_now = {vid for it in current.values() for vid, v in it["variants"].items() if v[1]}
             kept = {x for x in self.friend_pinged if x[1] in live_now}
-            if not first and sold_out:  # (just now, between two checks close together: not while closed or paused)
-                self.ping_sold_out(items, old, current, self.friend_pinged - kept)
+            if old and len(current) < len(old) / 2:
+                kept = set(self.friend_pinged)  # (half the shop gone at once is a hiccup, not a sell-out: leave it be)
+            gone = self.friend_pinged - kept
+            if gone and not first and sold_out:  # (just now, between two checks close together: not while closed or paused)
+                self.ping_sold_out(items, old, current, gone)
             if todo or kept != self.friend_pinged:
-                self.friend_pinged = kept
+                with self.alerts_lock:  # (so an alert being noted down right now is either kept, and deleted below, or deleted then)
+                    self.friend_pinged = kept
                 save_pinged(self.id, kept)
+            if gone:  # (their in-stock alerts go: the buttons would only lead to a sold-out page)
+                self.delete_alerts(gone)
+
+    def remember_alerts(self, keys, hook, ids):
+        """Note the in-stock alerts just sent (which ping is which message), to delete them once it's sold
+        out. One that's sold out already, before Discord even answered, goes straight away."""
+        late = []
+        with self.alerts_lock:
+            for key, mid in zip(keys, ids):
+                if not mid:
+                    continue
+                if key in self.friend_pinged:
+                    self.alerts.setdefault(key, []).append((hook, mid))
+                else:
+                    late.append(mid)
+            save_alerts(self.id, self.alerts)
+        if late:
+            DISCORD.delete(hook, late)
+
+    def delete_alerts(self, gone):
+        """Delete the in-stock alerts for what's sold out (the sold-out ping, if there is one, says why)."""
+        by_hook = {}
+        with self.alerts_lock:
+            for key in gone:
+                for hook, mid in self.alerts.pop(key, []):
+                    by_hook.setdefault(hook, []).append(mid)
+            if by_hook:
+                save_alerts(self.id, self.alerts)
+        for hook, ids in by_hook.items():
+            DISCORD.delete(hook, ids)
 
     def ping_sold_out(self, items, old, current, gone):
         """Tell people when something they were pinged about sells out (every option of it), or is taken
@@ -946,7 +985,7 @@ class Discord:
         checkout link) rather than a ping each."""
         tidy = lambda title: title.replace("[", "(").replace("]", ")")[:90]
         lines = [f"• [{tidy(it['title'])}]({shop}/cart/{vid}:{q}?payment=shop_pay)" + (f" — ${price}" if price else "")
-                 for it, vid, q, price, _ in rest[:15]]
+                 for it, vid, q, price, *_ in rest[:15]]
         if len(rest) > 15:
             lines.append(f"…and {len(rest) - 15} more")
         embed = cls.card(f"🛒 Also in stock at {shop_name}", 0x6CC08D, f"{len(rest)} more from your wishlist", shop, (), None,
@@ -979,15 +1018,16 @@ class Discord:
         msg["embeds"][0]["author"]["name"] = "🔔 Test · " + msg["embeds"][0]["author"]["name"]
         return msg
 
-    def post(self, msg, hook=None, again=True):
-        """Send it now. Returns (worked, what went wrong). Never repeats the link (it's a secret).
-        Buttons need with_components on a channel's webhook; if Discord won't take them, the same
-        message goes again with the buttons as plain links. Too many at once: waits as long as
-        Discord asks, then tries once more."""
+    def post(self, msg, hook=None, again=True, wait=False):
+        """Send it now. Returns (worked, what went wrong), or with wait (worked, the message's id), so it can
+        be deleted later. Never repeats the link (it's a secret). Buttons need with_components on a channel's
+        webhook; if Discord won't take them, the same message goes again with the buttons as plain links.
+        Too many at once: waits as long as Discord asks, then tries once more."""
         hook = hook or self.webhook
         if not hook:
             return False, "no webhook set"
-        url = hook + ("&" if "?" in hook else "?") + "with_components=true" if msg.get("components") else hook
+        query = (["with_components=true"] if msg.get("components") else []) + (["wait=true"] if wait else [])
+        url = hook + ("&" if "?" in hook else "?") + "&".join(query) if query else hook
         try:
             res = subprocess.run(["curl", "-sS", "--max-time", "10", "-X", "POST", "-H", "Content-Type: application/json",
                                   "--data-binary", "@-", "-w", "\n%{http_code}", url],
@@ -997,32 +1037,40 @@ class Discord:
         body, _, code = res.stdout.decode(errors="replace").rpartition("\n")
         code = code.strip()
         if res.returncode == 0 and code.startswith("2"):
-            return True, ""
+            if not wait:
+                return True, ""
+            try:
+                return True, str(json.loads(body).get("id") or "")
+            except (ValueError, AttributeError):
+                return True, ""
         if res.returncode == 0 and code == "429" and again:
             try:
-                wait = float(json.loads(body).get("retry_after", 1))
+                pause = float(json.loads(body).get("retry_after", 1))
             except (ValueError, TypeError, AttributeError):
-                wait = 1.0
-            time.sleep(min(max(wait, 0.2), 10) + 0.1)
-            return self.post(msg, hook, again=False)
+                pause = 1.0
+            time.sleep(min(max(pause, 0.2), 10) + 0.1)
+            return self.post(msg, hook, again=False, wait=wait)
         if res.returncode == 0 and code == "400" and msg.get("components"):
             plain = {k: v for k, v in msg.items() if k != "components"}
             links = "  ·  ".join(f"[{b['emoji']['name']} {b['label']}]({b['url']})" for row in msg["components"] for b in row["components"] if b.get("url"))
             if plain.get("embeds") and links:
                 plain["embeds"] = [dict(plain["embeds"][0], description=((plain["embeds"][0].get("description") or "") + "\n\n" + links).strip())]
-            return self.post(plain, hook, again)
+            return self.post(plain, hook, again, wait)
         return False, f"reply {code}" if res.returncode == 0 else "couldn't reach Discord"
 
-    def send(self, msgs, log, hook=None, who=None):
+    def send(self, msgs, log, hook=None, who=None, sent=None):
         """Send in the background (so the watching carries straight on): one message, or a few in
-        order. who: whose own channel it is (someone's Discord wishlist), for the warning."""
+        order. who: whose own channel it is (someone's Discord wishlist), for the warning. sent: told
+        the messages' ids afterwards (None for any that didn't go)."""
         msgs = msgs if isinstance(msgs, list) else [msgs]
         hook = hook or self.webhook
 
         def go():
+            ids = []
             with self.hook_locks.setdefault(hook, threading.Lock()):
                 for msg in msgs:
-                    ok, why = self.post(msg, hook)
+                    ok, why = self.post(msg, hook, wait=sent is not None)
+                    ids.append(why if ok and sent else None)
                     if ok:
                         self.failing.discard(hook)
                     elif hook not in self.failing:
@@ -1030,6 +1078,32 @@ class Discord:
                         log("warn", f"Couldn't ping {who} in their wishlist channel ({why}). If the channel was deleted, "
                                     "they get a new one with /wishlist add." if who else
                                     f"Couldn't ping Discord ({why}). Check the webhook in ⚙ Settings.")
+            if sent:
+                sent(ids)
+        threading.Thread(target=go, daemon=True).start()
+
+    def delete(self, hook, ids):
+        """Delete messages this webhook sent, in the background (one already gone is fine). Too many at
+        once: waits as long as Discord asks, then tries once more."""
+        base, _, query = hook.partition("?")
+
+        def go():
+            with self.hook_locks.setdefault(hook, threading.Lock()):
+                for mid in ids:
+                    for _ in range(2):
+                        try:
+                            res = subprocess.run(["curl", "-sS", "--max-time", "10", "-X", "DELETE", "-w", "\n%{http_code}",
+                                                  f"{base}/messages/{mid}" + (f"?{query}" if query else "")], capture_output=True)
+                        except Exception:
+                            break
+                        body, _, code = res.stdout.decode(errors="replace").rpartition("\n")
+                        if code.strip() != "429":
+                            break
+                        try:
+                            pause = float(json.loads(body).get("retry_after", 1))
+                        except (ValueError, TypeError, AttributeError):
+                            pause = 1.0
+                        time.sleep(min(max(pause, 0.2), 10) + 0.1)
         threading.Thread(target=go, daemon=True).start()
 
 
@@ -1057,6 +1131,34 @@ def save_pinged(sid, pinged):
         data[sid] = sorted(list(x) for x in pinged)
         os.makedirs(dm.SOUND_DIR, exist_ok=True)
         with open(PINGED_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+
+def load_alerts(sid):
+    """{(friend, variant): [(webhook, message id)]}: this shop's in-stock alerts still up."""
+    try:
+        with open(ALERTS_FILE, encoding="utf-8") as f:
+            rows = json.load(f).get(sid, [])
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, list) and len(row) == 4 and WEBHOOK.match(str(row[2])) and str(row[3]).isdigit():
+            out.setdefault((row[0], row[1]), []).append((row[2], str(row[3])))
+    return out
+
+
+def save_alerts(sid, alerts):
+    with PINGED_LOCK:
+        try:
+            with open(ALERTS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        data = data if isinstance(data, dict) else {}
+        data[sid] = [[told, vid, hook, mid] for (told, vid), msgs in alerts.items() for hook, mid in msgs]
+        os.makedirs(dm.SOUND_DIR, exist_ok=True)
+        with open(ALERTS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
 
 
