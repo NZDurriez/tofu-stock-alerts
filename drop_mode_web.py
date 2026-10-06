@@ -962,7 +962,7 @@ class Discord:
                 "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
                 "components": cls.buttons(("⚡", f"Wishlist checkout · Qty {qty}", checkout), ("🔎", "View", view))
                 + cls.buttons(*[("🛒", f"×{n}", f"{shop}/cart/{vid}:{n}?payment=shop_pay") for n in range(1, most + 1)])
-                + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}"))] if item and friend.get("hook") else [])}
+                + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}", 4))] if item and friend.get("hook") else [])}
 
     @classmethod
     def soldout_message(cls, friend, shop_name, shop, it):
@@ -974,10 +974,11 @@ class Discord:
 
     @staticmethod
     def bot_buttons(*buttons):
-        """A row of buttons the bot answers ([(emoji, label, id)]): they only work in messages sent
-        through the bot's own webhooks (each Discord wishlist channel's)."""
-        return {"type": 1, "components": [{"type": 2, "style": 2, "label": label, "emoji": {"name": emoji}, "custom_id": cid}
-                                          for emoji, label, cid in buttons[:5]]}
+        """A row of buttons the bot answers ([(emoji, label, id)], or with a colour: 1 blurple, 3 green, 4 red;
+        grey otherwise): they only work in messages sent through the bot's own webhooks (each Discord wishlist
+        channel's). Only these can have a colour: Discord shows every link button grey."""
+        return {"type": 1, "components": [{"type": 2, "style": (style or [2])[0], "label": label, "emoji": {"name": emoji}, "custom_id": cid}
+                                          for emoji, label, cid, *style in buttons[:5]]}
 
     @classmethod
     def more_message(cls, friend, shop_name, shop, rest):
