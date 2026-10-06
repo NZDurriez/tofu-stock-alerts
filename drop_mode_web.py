@@ -860,19 +860,24 @@ class Discord:
 
     @classmethod
     def friend_message(cls, friend, shop_name, shop, it, vid, qty, price, item=None):
-        """For a friend: their @mention, the product, and buttons to check out (Shop Pay), add it to
-        their cart, or look at it, all on their own device. Someone's Discord wishlist item also gets
-        a button to take it off their list (the bot answers that one)."""
+        """For a friend: their @mention, the product, and buttons for their own device: check out with
+        their wishlist amount (Shop Pay), add 1 to 5 to their cart (no more than the shop allows each
+        customer), or look at it. Someone's Discord wishlist item also gets a button to take it off
+        their list (the bot answers that one)."""
         checkout = f"{shop}/cart/{vid}:{qty}?payment=shop_pay"
-        add = f"{shop}/cart/add?id={vid}&quantity={qty}"
         view = f"{shop}/products/{it['handle']}"
         limit = it.get("limit")
+        try:
+            most = max(1, min(5, int(limit))) if limit else 5
+        except (TypeError, ValueError):
+            most = 5
         embed = cls.card(f"🛒 In stock at {shop_name}", 0x6CC08D, it["title"], checkout,
                          [("Price", f"${price}" if price else ""), ("Quantity", str(qty)), ("Limit", f"{limit} per customer" if limit else "")],
-                         it.get("image"), "Checkout goes straight to Shop Pay")
+                         it.get("image"), f"Checkout ×{qty} is your wishlist amount, straight to Shop Pay · Add puts that many in your cart")
         return {"content": f"<@{friend['discord']}> 🛒 **{it['title'][:90]}** just came in stock at **{shop_name}**!",
                 "allowed_mentions": {"parse": [], "users": [friend["discord"]]}, "embeds": [embed],
-                "components": cls.buttons(("⚡", "Checkout", checkout), ("🛒", "Add to cart", add), ("🔎", "View", view))
+                "components": cls.buttons(("⚡", f"Checkout ×{qty}", checkout), ("🔎", "View", view))
+                + cls.buttons(*[("🛒", f"Add {n}", f"{shop}/cart/add?id={vid}&quantity={n}") for n in range(1, most + 1)])
                 + ([cls.bot_buttons(("🗑️", "Remove from my wishlist", f"wl:drop:{item}"))] if item and friend.get("hook") else [])}
 
     @staticmethod
