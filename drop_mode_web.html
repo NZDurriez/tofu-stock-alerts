@@ -93,6 +93,17 @@ h1 span{color:var(--accent)}
 .store .x:hover{color:var(--bad);background:var(--bad-soft)}
 .store.add{border-style:dashed;font-weight:500}
 .pop.left{left:0;right:auto}
+/* The activity log: a button in the top bar opens it (in the page, not a browser pop-up: those pause the stream) */
+.actbtn{position:relative}
+.actbtn .ico{flex:none;width:15px;height:15px}
+.actbtn .actdot{position:absolute;top:1px;right:1px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface)}
+.actpop{width:min(560px,calc(100vw - 32px));padding:14px}
+.actpop .acthead{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.actpop .acthead .hint{margin:0 0 0 auto;font-size:12.5px}
+.actpop .feed{height:auto;min-height:140px;max-height:min(62vh,560px)}
+/* Step 2: watch for keywords, or select an exact product (one at a time) */
+.modeset{display:flex;width:100%;margin:0 0 14px}
+.modeset button{flex:1;padding:9px 10px;font-size:14px}
 .col-shop{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:1px 10px}
 .col.collapsed .col-shop{display:none}
 
@@ -157,6 +168,15 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   .stream-body{flex-direction:row}
   .player{flex:1;aspect-ratio:auto;max-height:none}
   .chat{flex:none;width:340px}
+}
+@media (min-width:1100px){ /* Set up and Watching reach the bottom of the window too, their last panel stretching */
+  .col-setup:not(.collapsed),.col-watch:not(.collapsed){display:flex;flex-direction:column;min-height:calc(100vh - var(--head-h,62px) - 48px)}
+  .col-setup:not(.collapsed)>.stack,.col-watch:not(.collapsed)>.stack{flex:1;display:flex;flex-direction:column}
+  .col-setup>.stack>*,.col-watch>.stack>*{min-width:0}
+  .col-setup>.stack>.card:last-child,.col-watch>.stack>.card:last-child{flex:1}
+  #addCard{display:flex;flex-direction:column} /* (the product list fills the rest of its panel, and scrolls) */
+  #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
+  #exactBody .list{flex:1 1 0;min-height:160px;max-height:none}
 }
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr}
@@ -432,6 +452,13 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <span class="chip-s" id="sRun"><i class="dot"></i><span>Not watching</span></span>
       <span class="chip-s" id="sCheck"><i class="dot"></i><span>Last check –</span></span>
       <div class="popwrap">
+        <button class="theme cogbtn actbtn" id="actBtn" data-pop="actPop" aria-expanded="false" aria-haspopup="true" title="Everything drop mode sees, for the shop on show"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>Activity<span class="actdot" id="actDot" hidden></span></button>
+        <div class="pop actpop" id="actPop" hidden>
+          <div class="acthead"><span class="pop-title">Activity log</span><span class="col-shop" hidden></span><span class="hint">Newest at the bottom</span></div>
+          <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
+        </div>
+      </div>
+      <div class="popwrap">
         <button class="theme cogbtn" id="setBtn" data-pop="setPop" aria-expanded="false" aria-haspopup="true" title="Alert sound, Discord ping, theme and background"><svg class="cog" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="7.6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3 2.969" transform="rotate(-11.3 12 12)"/></svg>Settings</button>
         <div class="pop setpop" id="setPop" hidden>
           <section class="set">
@@ -554,21 +581,23 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <h2><span class="step">2</span>Add to <select class="whosel" id="addWho" aria-label="Whose list to add to"></select></h2>
         <p class="hint friendnote" id="addNote" hidden></p>
 
-        <h3 class="sub" style="margin:0 0 10px;display:flex;align-items:center;gap:8px">Watch for keywords <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Catches products the moment they're added or restocked, even ones that aren't listed yet. Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.<br><br>Put a <b>minus</b> before a word to leave out products that have it: <i>30th Booster Bundle -tin</i> skips the bundle that comes with mini tins.</span></span></h3>
-        <div class="kwbox">
-          <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
-          <div class="suggest" id="suggest"></div>
-          <div class="acts" id="kwActs"></div>
-          <div class="kwprev" id="kwPrev"></div>
+        <div class="qtyset modeset" id="addMode" role="tablist" aria-label="How to add">
+          <button type="button" role="tab" data-mode="kw">🔎 Watch for keywords</button>
+          <button type="button" role="tab" data-mode="exact">📦 Select a product</button>
         </div>
-
-        <div class="divider"></div>
-        <button class="subtoggle" id="exactToggle" aria-expanded="false" aria-controls="exactBody"><span class="chev">▸</span>Or pick an exact product</button>
+        <div id="kwBody">
+          <p class="lead" style="margin:0 0 10px">Catches products the moment they're added or restocked, even ones that aren't listed yet. <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Separate keywords with commas: a product needs <b>all of them</b> in its name. One keyword like <i>Delta Reign</i> catches everything Delta Reign; <i>Delta Reign, Booster Bundle</i> only the bundle.<br><br>Put a <b>minus</b> before a word to leave out products that have it: <i>30th Booster Bundle -tin</i> skips the bundle that comes with mini tins.</span></span></p>
+          <div class="kwbox">
+            <input type="text" id="kwInput" placeholder="e.g. Delta Reign, Elite Trainer Box" autocomplete="off">
+            <div class="suggest" id="suggest"></div>
+            <div class="acts" id="kwActs"></div>
+            <div class="kwprev" id="kwPrev"></div>
+          </div>
+        </div>
         <div id="exactBody" hidden>
-          <p class="lead" id="exactLead" style="margin:6px 0 12px"></p>
-          <div class="exactopts">
+          <div class="exactopts" style="margin-top:2px">
             <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
-            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button></span></span>
+            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button></span> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
           </div>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
@@ -609,10 +638,6 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <input type="file" id="picFile" accept="image/*" hidden>
       </section>
 
-      <section class="card">
-        <h2>Activity <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Everything drop mode sees, newest at the bottom.</span></span></h2>
-        <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
-      </section>
     </div>
   </section>
  </div>
@@ -772,8 +797,8 @@ try { showSold = localStorage.getItem("dropShowSold") === "1"; } catch {}
 $("showSold").checked = showSold;
 function exactLead() {
   $("exactLead").innerHTML = showSold
-    ? "Everything in the shop, sold out too. <b>+ Watch</b> on a sold-out one opens checkout if that listing comes back in stock. For something not listed yet, use a keyword watch above."
-    : "What's in stock right now. Press <b>+ Watch</b> on one. For something sold out or not listed yet, use a keyword watch above (or tick Show out of stock).";
+    ? "Everything in the shop, sold out too. <b>+ Watch</b> on a sold-out one opens checkout if that listing comes back in stock. For something not listed yet, use <b>Watch for keywords</b> instead."
+    : "What's in stock right now. Press <b>+ Watch</b> on one. For something sold out or not listed yet, use <b>Watch for keywords</b> instead (or tick Show out of stock).";
 }
 exactLead();
 $("showSold").onchange = () => {
@@ -801,13 +826,21 @@ const listedDate = (iso) => {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 };
 
-// "Or pick an exact product" starts folded away
-$("exactToggle").onclick = () => {
-  const open = $("exactBody").hidden;
-  $("exactBody").hidden = !open;
-  $("exactToggle").setAttribute("aria-expanded", String(open));
-  if (open) { loadCats(); search(); $("search").focus(); }
-};
+// Step 2 is one or the other: watch for keywords, or select an exact product (remembered in this browser)
+let addMode = "kw";
+try { if (localStorage.getItem("dropAddMode") === "exact") addMode = "exact"; } catch {}
+function setAddMode(mode, focus) {
+  const changed = mode !== addMode;
+  addMode = mode;
+  try { localStorage.setItem("dropAddMode", mode); } catch {}
+  $("kwBody").hidden = mode !== "kw";
+  $("exactBody").hidden = mode !== "exact";
+  $("addMode").querySelectorAll("button").forEach((b) => { const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); });
+  if (changed && mode === "exact") { loadCats(); search(); }
+  if (focus) (mode === "exact" ? $("search") : $("kwInput")).focus();
+}
+$("addMode").querySelectorAll("button").forEach((b) => b.onclick = () => setAddMode(b.dataset.mode, true));
+setAddMode(addMode, false);
 
 // Tofu's menu headers as filters for the search (same categories as his site; other shops don't have them)
 let cat = "", game = "", catNames = {}, gameNames = {}, catTimer;
@@ -930,6 +963,13 @@ document.querySelectorAll("[data-pop]").forEach((btn) => btn.onclick = () => {
   btn.setAttribute("aria-expanded", String(open));
 });
 document.addEventListener("click", (e) => { if (!e.target.closest(".popwrap")) closePops(); });
+// The activity log (⚙'s neighbour): a dot on it when something new comes in while it's closed
+function newActivity() { if ($("actPop").hidden) $("actDot").hidden = false; }
+$("actBtn").addEventListener("click", () => {
+  if ($("actPop").hidden) return;
+  $("actDot").hidden = true;
+  $("feed").scrollTop = $("feed").scrollHeight;
+});
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
 
 // ---------- step 1 ----------
@@ -970,6 +1010,7 @@ function logLocal(kind, text, sid = STORE) {
   line.className = "ev " + kind;
   line.innerHTML = `<span class="tm">${new Date().toLocaleTimeString([], { hour12: false })}</span><i class="k"></i><span>${esc(text)}</span>`;
   $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
+  newActivity();
 }
 
 let loginSig = "";
@@ -1190,6 +1231,7 @@ function renderResults() {
   $("clearTicked").onclick = () => { ticked.clear(); renderResults(); };
   const use = $("useKw");
   if (use) use.onclick = () => {
+    setAddMode("kw", false);
     $("kwInput").value = q;
     $("kwInput").scrollIntoView({ behavior: "smooth", block: "center" });
     $("kwInput").focus();
@@ -1862,6 +1904,7 @@ function switchStore(sid) {
   cat = ""; game = ""; ticked.clear(); lastResults = { items: [], total: 0 }; lastQuery = "";
   $("pw").value = ""; $("search").value = ""; $("kwInput").value = ""; kwQty = 1; kwShowAll = false;
   $("feed").innerHTML = '<div class="ev empty-ev">Nothing yet.</div>';
+  $("actDot").hidden = true;
   $("interval").value = savedInterval();
   applyStore(); renderLoginState(); renderWatchlist(); renderKwActs(); kwPreview(); search(); loadCats();
   loadWatchlist().catch(() => {});
@@ -1925,6 +1968,7 @@ async function pollOnce(sid) {
         line.className = "ev " + ev.kind;
         line.innerHTML = `<span class="tm">${ev.t}</span><i class="k"></i><span>${esc(ev.text.replace(/^⚡ /, ""))}${ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener">open</a>` : ""}</span>`;
         $("feed").appendChild(line); $("feed").scrollTop = $("feed").scrollHeight;
+        if (!first && ev.id > before) newActivity();
       }
       if (!first && ev.id > before) alertFor(ev, sid);
     }
