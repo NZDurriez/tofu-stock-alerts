@@ -291,6 +291,17 @@ def summarise_all(body):
     return keep, left_out
 
 
+# What a bundle includes, from its description's "1 x ..." lines (Midweek Madness: "1 x Pokémon English
+# 30th Celebration Booster Pack", ...). Pings list them.
+INCLUDES = re.compile(r"^(\d+)\s*[x×]\s+(\S.{2,})$", re.I)
+
+
+def includes(p):
+    text = html.unescape(re.sub(r"<(?:br|/p|/li|/div|/h\d)[^>]*>", "\n", p.get("body_html") or "", flags=re.I))
+    lines = (re.sub(r"\s+", " ", line.replace("\xa0", " ")).strip() for line in re.sub(r"<[^>]+>", " ", text).split("\n"))
+    return [line[:100] for line in lines if INCLUDES.match(line)][:12]
+
+
 def summarise(p):
     return {
         "title": p["title"],
@@ -299,6 +310,7 @@ def summarise(p):
         "image": ((p.get("images") or [{}])[0] or {}).get("src"),
         "variants": {str(v["id"]): (v.get("title") or "", bool(v.get("available")), v.get("price")) for v in p.get("variants") or []},
         "limit": purchase_limit(p),  # per customer, if the shop has one
+        "includes": includes(p),     # what a bundle comes with, if its description lists it
     }
 
 
