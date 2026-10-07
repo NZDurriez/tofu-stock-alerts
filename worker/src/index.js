@@ -149,6 +149,7 @@ export default {
     if (url.pathname === "/wishlists" && request.method === "GET") return wishlistFeed(request, env);
     const edit = url.pathname.match(/^\/wishlists\/(\d{15,25})$/);
     if (edit && request.method === "POST") return wishlistEdit(request, env, ctx, edit[1]);
+    if (url.pathname === "/test-alert" && request.method === "POST") return testAlert(request, env);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
     return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -1111,6 +1112,36 @@ function embed(kind, item, note, kw) {
   if (note) e.description = note;
   if (item.image) e.thumbnail = { url: item.image };
   return e;
+}
+
+// A test alert in the stock-alerts channel (drop mode's "Send a test alert", with DROP_MODE_KEY): something
+// that's in stock now, laid out exactly like a real alert, marked as a test (and pinging nobody)
+async function testAlert(request, env) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  if (!env.DISCORD_WEBHOOK_URL) return Response.json({ error: "The bot hasn't got a stock-alerts channel yet (its DISCORD_WEBHOOK_URL)." }, { status: 400 });
+  let items = [];
+  try {
+    items = (await fetchProducts((await env.STATE.get("cookie")) || null)).map(summarise);
+  } catch {} // (locked, or busy: the test still goes, without a product)
+  const item = items.find((it) => it.available && it.image) || items.find((it) => it.available) || items[0];
+  const payload = {
+    username: "Mr Tofu Stock Watch",
+    content: "🔔 Test: new listings and restocks show up here like this. (Only a test: nothing's changed in the shop.)",
+    allowed_mentions: { parse: [] },
+  };
+  if (item) {
+    const [{ embeds }] = alertMessages([["restock", item, null]], keywords(env), null);
+    embeds[0].author.name = "🔔 Test · " + embeds[0].author.name;
+    payload.embeds = embeds;
+  }
+  try {
+    await postWebhook(env, payload);
+  } catch (err) {
+    return Response.json({ error: `Couldn't post in the stock-alerts channel (${err.message}). Check the bot's DISCORD_WEBHOOK_URL.` }, { status: 502 });
+  }
+  return Response.json({ ok: true, item: item ? item.title : null });
 }
 
 async function postWebhook(env, payload) {

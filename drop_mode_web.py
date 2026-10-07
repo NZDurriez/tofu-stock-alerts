@@ -1410,6 +1410,28 @@ class DiscordLists:
                 w.ping_friends({}, w.products, first=True)
         return None
 
+    def test_alert(self):
+        """Ask the bot to post a test alert in its stock-alerts channel. Returns (what to say, worked)."""
+        if not DISCORD.bot_key:
+            return "Connect to the bot first (paste its key).", False
+        try:  # (the key goes to curl on stdin)
+            res = subprocess.run(["curl", "-sS", "--max-time", "30", "-X", "POST", "-H", "@-", "-w", "\n%{http_code}",
+                                  f"{BOT_URL}/test-alert"], input=f"Authorization: Bearer {DISCORD.bot_key}\n".encode(), capture_output=True)
+        except Exception:
+            return "Couldn't reach the bot.", False
+        text, _, code = res.stdout.decode("utf-8", errors="replace").rpartition("\n")
+        try:
+            reply = json.loads(text) if text.strip() else {}
+        except ValueError:
+            reply = {}
+        reply = reply if isinstance(reply, dict) else {}
+        if res.returncode == 0 and code.strip().startswith("2") and reply.get("ok"):
+            return "Sent. Look in the bot's stock-alerts channel" + (f" ({reply['item'][:60]})." if reply.get("item") else "."), True
+        if res.returncode != 0:
+            return "Couldn't reach the bot.", False
+        return reply.get("error") or ("The bot didn't accept drop mode's key." if code.strip() == "403" else
+                                      "The bot needs updating before it can send a test."), False
+
     def watch(self):
         while True:
             try:
@@ -1950,6 +1972,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": error}, 400)
                 return
             self.send_json({"discord": LISTS.public(), "lists": LISTS.seq})
+        elif path == "/api/bot/test":  # a test alert in the bot's stock-alerts channel
+            message, ok = LISTS.test_alert()
+            self.send_json({"ok": ok, "message": message})
         elif path == "/api/discord/test":
             ok, why = DISCORD.post(DISCORD.test_message())
             self.send_json({"ok": ok, "message": why})
