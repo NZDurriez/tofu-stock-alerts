@@ -139,7 +139,7 @@ details.how[open] summary{margin-bottom:4px}
 .cols{display:grid;grid-template-columns:var(--cols,minmax(0,1.1fr) minmax(0,1fr) minmax(0,.95fr));gap:16px 20px;align-items:start}
 .cols>header{grid-column:1/-1;position:relative;z-index:30} /* across the top, above the columns (so its menus aren't hidden behind them) */
 .col{min-width:0}
-.col-stream{--c:var(--c-stream);position:sticky;top:16px;height:calc(100vh - var(--head-h,62px) - 48px);min-height:460px;display:flex;flex-direction:column;container-type:inline-size}
+.col-stream{--c:var(--c-stream);position:sticky;top:16px;height:calc(100vh - var(--head-h,62px) - 72px);min-height:460px;display:flex;flex-direction:column;container-type:inline-size}
 .col-setup{--c:var(--c-setup)}
 .col-watch{--c:var(--c-watch)}
 /* Moving a column: drag it by its header */
@@ -196,11 +196,18 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   .chat{flex:none;width:340px}
 }
 @media (min-width:1100px){ /* Set up and Watching reach the bottom of the window too, their last panel stretching */
-  .col-setup:not(.collapsed),.col-watch:not(.collapsed){display:flex;flex-direction:column;min-height:calc(100vh - var(--head-h,62px) - 48px)}
+  .col-setup:not(.collapsed),.col-watch:not(.collapsed){display:flex;flex-direction:column;min-height:calc(100vh - var(--head-h,62px) - 72px)}
   .col-setup:not(.collapsed)>.stack,.col-watch:not(.collapsed)>.stack{flex:1;display:flex;flex-direction:column}
   .col-setup>.stack>*,.col-watch>.stack>*{min-width:0}
   .col-setup>.stack>.card:last-child,.col-watch>.stack>.card:last-child{flex:1}
   #addCard{display:flex;flex-direction:column} /* (the product list fills the rest of its panel, and scrolls) */
+  /* The page fits the window: Set up and Watching end where the stream does, and their last panel scrolls inside */
+  .col-setup:not(.collapsed),.col-watch:not(.collapsed){height:calc(100vh - var(--head-h,62px) - 72px)}
+  .col-setup:not(.collapsed)>.stack,.col-watch:not(.collapsed)>.stack{min-height:0}
+  .col-setup>.stack>.card:last-child,.col-watch>.stack>.card:last-child{min-height:0}
+  #addCard{overflow:auto}
+  .col-watch>.stack>.card:last-child{display:flex;flex-direction:column}
+  #watchlist{flex:1 1 0;min-height:0;overflow:auto;align-content:start;padding-right:4px;margin-right:-4px}
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
   #exactBody .list{flex:1 1 0;min-height:max(380px,50vh);max-height:none} /* (at least half the window: room to browse) */
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
