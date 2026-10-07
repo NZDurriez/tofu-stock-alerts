@@ -671,6 +671,9 @@ class Watcher:
         faster_or_slower, self.interval = interval != self.interval, interval
         if self.running:
             self.log("info", "Updated what to watch.")
+            # Taken off the watchlist since its checkout opened: forgotten, so adding it again opens it again
+            where = {vid: (pid, it) for pid, it in self.products.items() for vid in it["variants"]}
+            self.opened = {vid for vid in self.opened if vid in where and self.target(*where[vid])}
             if faster_or_slower:
                 self.renew()
         else:
