@@ -1574,25 +1574,35 @@ async function kwPreview() {
   const more = $("kwMore");
   if (more) more.onclick = () => { kwShowAll = !kwShowAll; kwPreview(); };
 }
-// With nothing typed: the shop's newest listings, to watch for (click one to use its name as the keywords)
+// With nothing typed: the shop's newest listings you can buy (and coming soon), to watch for. Sold-out ones
+// only on request. Click one to use its name as the keywords.
+let jaSold = false;
 async function justAdded(el) {
   el.classList.remove("fresh");
   if (!lastProducts) { el.innerHTML = ""; return; }
-  const sid = STORE, r = await api("/api/products?sort=new&all=1");
+  const sid = STORE;
+  const [buy, every] = await Promise.all([api("/api/products?sort=new"), api("/api/products?sort=new&all=1")]); // (in stock; and everything)
   if (sid !== STORE || cleanKw($("kwInput").value)) return; // (switched tabs, or started typing)
-  const items = (r.items || []).slice(0, 20);
-  if (!items.length) { el.innerHTML = ""; return; }
+  const all = every.items || [], sold = all.filter((it) => it.state === "soldout");
+  const live = (buy.items || []).concat(all.filter((it) => it.state === "soon")).sort((a, b) => (Date.parse(b.listed) || 0) - (Date.parse(a.listed) || 0));
+  const items = (jaSold ? live.concat(sold) : live).slice(0, jaSold ? 40 : 20);
+  if (!all.length) { el.innerHTML = ""; return; }
   el.classList.add("fresh");
-  el.innerHTML = `<div class="pv-head"><span>🆕 <b>Just added to the shop</b></span><span>Click one to watch for it</span></div>
+  const inStock = live.filter((it) => it.state === "buyable").length;
+  el.innerHTML = `<div class="pv-head"><span>🆕 <b>Just added to the shop</b> · ${inStock} in stock</span><span>Click one to watch for it</span></div>
     <div class="sugs">${items.map((it) => `
       <button type="button" class="sug" data-title="${esc(it.title)}" title="Use this product's name as the keywords">
         ${thumb(it)}<span class="nm">${esc(it.title)}</span>${pill(it)}
-      </button>`).join("")}</div>`;
+      </button>`).join("") || `<div class="pv-note" style="padding:10px">Nothing new is in stock right now.</div>`}
+      ${sold.length ? `<button type="button" class="sug-more" id="jaSold">${jaSold ? "Hide the sold-out ones" : `Show ${sold.length} sold out too`}</button>` : ""}
+    </div>`;
   el.querySelectorAll(".sug").forEach((b) => b.onclick = () => {
     $("kwInput").value = nameAsKeywords(b.dataset.title);
     kwChanged(0);
     $("kwInput").focus();
   });
+  const more = $("jaSold");
+  if (more) more.onclick = () => { jaSold = !jaSold; justAdded(el); };
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
