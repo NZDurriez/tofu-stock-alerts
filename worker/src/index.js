@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 4;
+const COMMANDS_VERSION = 5;
 const COMMANDS = [
   {
     name: "password",
@@ -80,6 +80,19 @@ const COMMANDS = [
     }],
   },
   { name: "status", description: "What the stock watcher can see right now" },
+  {
+    name: "dropmode",
+    description: "Start, stop or check drop mode on your PC",
+    default_member_permissions: "32", // (only people who can manage the server see it; only the owner can use it)
+    options: [{
+      type: 3, name: "do", description: "What to do", required: true,
+      choices: [
+        { name: "start (open it and start watching)", value: "start" },
+        { name: "stop (close it)", value: "stop" },
+        { name: "status", value: "status" },
+      ],
+    }],
+  },
   {
     name: "wishlist",
     description: "Your own wishlist: get pinged in your private channel when something's in stock",
@@ -159,6 +172,7 @@ export default {
     const edit = url.pathname.match(/^\/wishlists\/(\d{15,25})$/);
     if (edit && request.method === "POST") return wishlistEdit(request, env, ctx, edit[1]);
     if (url.pathname === "/test-alert" && request.method === "POST") return testAlert(request, env);
+    if (url.pathname === "/dropmode/poll" || url.pathname === "/dropmode/done") return dropModeHelper(request, env, url);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
     return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -296,6 +310,19 @@ async function runCheck(env, opts = {}) {
   );
 }
 
+// The helper on the owner's PC (drop_mode_helper.py, with DROP_MODE_KEY): every few seconds it says how drop
+// mode is doing and picks up a /dropmode command; then it says how that went.
+async function dropModeHelper(request, env, url) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  if (url.pathname === "/dropmode/poll") return wishlistStore(env).fetch("https://wishlists/dm/poll" + url.search);
+  if (request.method !== "POST") return new Response("POST it", { status: 405 });
+  return wishlistStore(env).fetch("https://wishlists/dm/done", { method: "POST", body: await request.text() });
+}
+
+const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
+
 // Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for a
 // few minutes (DROP_MODE_QUIET_SECONDS, normally 3 minutes), say so in the stock-alerts channel, once, with
 // a ping, and again when it's back.
@@ -307,6 +334,7 @@ async function watchDropMode(env) {
   const quiet = now - seen > (parseInt(env.DROP_MODE_QUIET_SECONDS || "180", 10) || 180) * 1000;
   const at = Math.floor(seen / 1000), ping = (env.DISCORD_PING || "").trim();
   if (quiet && !meta.dropModeDown) {
+    if (((await dropModeState(env)).stoppedAt || 0) >= seen - 60000) return; // (closed with /dropmode stop: not news)
     meta.dropModeDown = seen;
     await env.STATE.put("meta", JSON.stringify(meta));
     await notify(env, `${ping} ⚠️ **Drop mode has stopped.** It last checked in at <t:${at}:t> (<t:${at}:R>), so wishlist pings and checkouts on your PC aren't happening. I'll say here when it's back.`.trim());
@@ -609,6 +637,31 @@ async function handleInteraction(request, env, ctx) {
     return deferred();
   }
 
+  if (name === "dropmode") {
+    const action = ((i.data.options || [])[0] || {}).value;
+    const st = await dropModeState(env), helper = st.helper || null;
+    const fresh = !!helper && Date.now() - helper.at < 45000, ago = (t) => `<t:${Math.floor(t / 1000)}:R>`;
+    const say = (content) => reply({ type: 4, data: { flags: EPHEMERAL, content } });
+    if (!helper) return say("The helper on your PC hasn't checked in yet. It starts when you log in to Windows.");
+    if (action === "status") {
+      if (!fresh) return say(`Your PC's helper last checked in ${ago(helper.at)}, so the PC may be off or asleep.`);
+      return say(helper.running ? (helper.watching ? "✅ Drop mode is running and watching."
+        : "🟡 Drop mode is open but not watching. `/dropmode start` starts watching.")
+        : "⚪ Drop mode is closed. `/dropmode start` opens it.");
+    }
+    if (!fresh) return say(`Your PC's helper last checked in ${ago(helper.at)}, so I can't reach it. Is the PC on?`);
+    const job = await (await wishlistStore(env).fetch("https://wishlists/dm/request", { method: "POST", body: JSON.stringify({ action }) })).json();
+    ctx.waitUntil(followUp(async () => {
+      for (let n = 0; n < 13; n++) { // (the helper asks every few seconds; starting drop mode takes a few more)
+        await sleep(2000);
+        const s = await dropModeState(env);
+        if (s.result && s.result.id === job.id) return { content: (s.result.ok ? "✅ " : "⚠️ ") + s.result.message };
+      }
+      return { content: "⏳ Sent to your PC, but it hasn't answered yet. Check with `/dropmode status` in a minute." };
+    }));
+    return deferred();
+  }
+
   if (name === "status") {
     const meta = await getMeta(env);
     const hasPw = !!(await env.STATE.get("cookie"));
@@ -637,12 +690,53 @@ export class WishlistStore {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/seen") return Response.json({ seen: this.seen || (await this.state.storage.get("seen")) || 0 });
+    if (url.pathname.startsWith("/dm/")) return this.dropMode(url, request);
     if (request.method === "PUT") {
       await this.state.storage.put("data", await request.json());
       return new Response("ok");
     }
     if (url.searchParams.has("seen")) await this.markSeen();
     return Response.json((await this.state.storage.get("data")) ?? null);
+  }
+
+  // /dropmode: a command waits here for the helper on the owner's PC, which asks every few seconds (and says
+  // whether drop mode is running and watching). Commands older than 2 minutes are dropped, so a PC that was
+  // off doesn't open drop mode hours later. The helper's news is saved at most once a minute.
+  async dropMode(url, request) {
+    const store = this.state.storage, now = Date.now();
+    if (!this.dm) this.dm = (await store.get("dm")) || {};
+    const dm = this.dm, save = () => store.put("dm", dm);
+    if (url.pathname === "/dm/request") {
+      const { action } = await request.json();
+      dm.pending = { id: crypto.randomUUID(), action, at: now };
+      await save();
+      return Response.json(dm.pending);
+    }
+    if (url.pathname === "/dm/poll") {
+      dm.helper = { at: now, running: url.searchParams.get("running") === "1", watching: url.searchParams.get("watching") === "1" };
+      let job = null;
+      if (dm.pending && !dm.pending.taken && now - dm.pending.at < 120000) {
+        dm.pending.taken = now;
+        job = { id: dm.pending.id, action: dm.pending.action };
+        await save();
+      } else if (now - (this.dmSaved || 0) > 60000) {
+        this.dmSaved = now;
+        await save();
+      }
+      return Response.json({ job });
+    }
+    if (url.pathname === "/dm/done") {
+      const r = await request.json();
+      dm.result = { id: String(r.id || ""), ok: !!r.ok, message: String(r.message || "").slice(0, 300), at: now };
+      dm.helper = { at: now, running: !!r.running, watching: !!r.watching };
+      if (dm.pending && dm.pending.id === dm.result.id) {
+        if (dm.pending.action === "stop" && r.ok) dm.stoppedAt = now; // (closed on purpose: no "it's stopped" warning)
+        dm.pending = null;
+      }
+      await save();
+      return Response.json({ ok: true });
+    }
+    return Response.json(dm);
   }
 
   // When drop mode last read the lists (it does every few seconds while it's running): kept in memory,

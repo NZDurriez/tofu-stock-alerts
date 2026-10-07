@@ -49,6 +49,7 @@ DISCORD_FILE = os.path.join(dm.SOUND_DIR, "discord.json")      # your Discord pi
 FRIENDS_FILE = os.path.join(dm.SOUND_DIR, "friends.json")      # friends with their own wishlists (pinged, never opened here)
 PINGED_FILE = os.path.join(dm.SOUND_DIR, "pinged.json")        # what friends were pinged about (so a restart doesn't ping again)
 ALERTS_FILE = os.path.join(dm.SOUND_DIR, "alerts.json")        # those pings' messages (deleted when it sells out)
+WATCHING_FILE = os.path.join(dm.SOUND_DIR, "watching.json")    # which shops were being watched, how often (to resume)
 # The stock-alert bot, where people keep wishlists of their own with /wishlist (drop mode reads them with your key)
 BOT_URL = (os.environ.get("DROP_BOT_URL") or "https://tofu-stock-watch.alex-mangin35.workers.dev").rstrip("/")
 LISTS_EVERY = float(os.environ.get("DROP_LISTS_EVERY") or 5)  # seconds between looks at them (so a new item pings within seconds)
@@ -716,10 +717,15 @@ class Watcher:
             json.dump(clean, f)
         prune_pictures()
         if self.running:
-            mine = [w for w in clean if not w.get("who")]
-            self.start([{"id": w["id"], "qty": w["qty"], "max": w.get("max")} for w in mine if w["kind"] == "product"],
-                       [{"text": w["text"], "qty": w["qty"], "max": w.get("max")} for w in mine if w["kind"] == "words"],
-                       self.interval)
+            self.resume()
+
+    def resume(self, interval=None):
+        """Watch your saved watchlist (not friends' wishlists): when it changes while watching, or from
+        /dropmode start in Discord (through the helper on this PC)."""
+        mine = [w for w in self.watchlist if not w.get("who")]
+        self.start([{"id": w["id"], "qty": w["qty"], "max": w.get("max")} for w in mine if w["kind"] == "product"],
+                   [{"text": w["text"], "qty": w["qty"], "max": w.get("max")} for w in mine if w["kind"] == "words"],
+                   interval or self.interval)
 
     def start(self, picks, watches, interval, open_now=True):
         """Start (or update) watching. Anything on the watchlist that's in stock
@@ -728,6 +734,7 @@ class Watcher:
         self.picks, self.words = self.parse_wanted(picks, watches)
         interval = max(0.5, float(interval or 3))
         faster_or_slower, self.interval = interval != self.interval, interval
+        save_watching(self.id, interval)
         if self.running:
             self.log("info", "Updated what to watch.")
             # Taken off the watchlist since its checkout opened: forgotten, so adding it again opens it again
@@ -778,6 +785,7 @@ class Watcher:
 
     def stop(self):
         self.running = False
+        save_watching(self.id, None)
         self.gen += 1
         self.checker.stop()
         self.log("info", "Stopped watching.")
@@ -1188,6 +1196,32 @@ def ping_hook(friend):
     a friend's to the friends' webhook (or yours)."""
     return DISCORD.webhook if friend.get("you") else friend.get("hook") or DISCORD.friends_hook()
 PINGED_LOCK = threading.Lock()
+
+
+def load_watching():
+    """{shop id: how often (seconds)}: the shops being watched (pressing Stop takes one off; closing drop
+    mode doesn't, so /dropmode start can carry on where it was)."""
+    try:
+        with open(WATCHING_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {str(k): float(v) for k, v in data.items() if isinstance(v, (int, float))} if isinstance(data, dict) else {}
+
+
+def save_watching(sid, interval):
+    with PINGED_LOCK:
+        data = load_watching()
+        if interval:
+            data[sid] = interval
+        else:
+            data.pop(sid, None)
+        try:
+            os.makedirs(dm.SOUND_DIR, exist_ok=True)
+            with open(WATCHING_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except OSError:
+            pass
 
 
 def load_pinged(sid):
@@ -1874,6 +1908,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/stop":
             W.stop()
             self.send_json({"ok": True})
+        elif path == "/api/resume":  # watch what was being watched last time (/dropmode start, through the helper)
+            saved = load_watching() or {"tofu": None}
+            for sid, interval in saved.items():
+                w = WATCHERS.get(sid)
+                if w and not w.running:
+                    w.resume(interval)
+            self.send_json({"watching": [WATCHERS[s].name for s in saved if s in WATCHERS and WATCHERS[s].running]})
         elif path == "/api/events/clear":  # this shop's activity log, emptied (new lines carry on numbering)
             with W.lock:
                 W.events.clear()
