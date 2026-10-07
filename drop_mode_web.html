@@ -203,6 +203,10 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   #addCard{display:flex;flex-direction:column} /* (the product list fills the rest of its panel, and scrolls) */
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
   #exactBody .list{flex:1 1 0;min-height:max(380px,50vh);max-height:none} /* (at least half the window: room to browse) */
+  #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
+  #kwBody .kwbox{flex:1;display:flex;flex-direction:column;min-height:0}
+  #kwBody .kwprev.fresh{flex:1 1 0;min-height:110px;display:flex;flex-direction:column}
+  #kwBody .kwprev.fresh .sugs{flex:1 1 0;min-height:0;overflow:auto}
 }
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr}
@@ -1532,7 +1536,8 @@ const pill = (it) => it.state === "buyable"
   : badgeHtml[it.state];
 async function kwPreview() {
   const text = cleanKw($("kwInput").value), el = $("kwPrev");
-  if (!text) { el.innerHTML = ""; kwShowAll = false; return; }
+  if (!text) { kwShowAll = false; return justAdded(el); }
+  el.classList.remove("fresh");
   if (!lastProducts) { el.innerHTML = '<div class="pv-note">Load the shop to see what these keywords match.</div>'; return; }
   const sid = STORE, m = await api("/api/match?limit=50&k=" + encodeURIComponent(text));
   if (sid !== STORE || text !== cleanKw($("kwInput").value)) return; // still typing (or switched tabs)
@@ -1568,6 +1573,26 @@ async function kwPreview() {
   });
   const more = $("kwMore");
   if (more) more.onclick = () => { kwShowAll = !kwShowAll; kwPreview(); };
+}
+// With nothing typed: the shop's newest listings, to watch for (click one to use its name as the keywords)
+async function justAdded(el) {
+  el.classList.remove("fresh");
+  if (!lastProducts) { el.innerHTML = ""; return; }
+  const sid = STORE, r = await api("/api/products?sort=new&all=1");
+  if (sid !== STORE || cleanKw($("kwInput").value)) return; // (switched tabs, or started typing)
+  const items = (r.items || []).slice(0, 20);
+  if (!items.length) { el.innerHTML = ""; return; }
+  el.classList.add("fresh");
+  el.innerHTML = `<div class="pv-head"><span>🆕 <b>Just added to the shop</b></span><span>Click one to watch for it</span></div>
+    <div class="sugs">${items.map((it) => `
+      <button type="button" class="sug" data-title="${esc(it.title)}" title="Use this product's name as the keywords">
+        ${thumb(it)}<span class="nm">${esc(it.title)}</span>${pill(it)}
+      </button>`).join("")}</div>`;
+  el.querySelectorAll(".sug").forEach((b) => b.onclick = () => {
+    $("kwInput").value = nameAsKeywords(b.dataset.title);
+    kwChanged(0);
+    $("kwInput").focus();
+  });
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
