@@ -69,15 +69,38 @@ h1 span{color:var(--accent)}
 .cogbtn .cog{flex:none;width:16px;height:16px;transition:transform .35s ease}
 .cogbtn[aria-expanded="true"]{color:var(--text);border-color:var(--accent)}
 .cogbtn[aria-expanded="true"] .cog{transform:rotate(90deg)}
-.setpop{width:min(400px,calc(100vw - 32px));max-height:calc(100vh - 100px);overflow:auto;padding:2px 18px}
+.popwrap.setwrap{position:static}
+.pop.setpop{left:0;right:0;width:auto;max-height:calc(100vh - 100px);overflow:auto;padding:0 18px 18px} /* (as wide as the activity log) */
+.settabs{position:sticky;top:0;z-index:1;display:flex;gap:6px;flex-wrap:wrap;margin:0 -18px;padding:14px 18px 12px;background:inherit;border-bottom:1px solid var(--line)}
+.settabs button{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 11px;font:600 13px Inter,sans-serif;white-space:nowrap;cursor:pointer}
+.settabs button:hover{color:var(--text);background:var(--surface2)}
+.settabs button[aria-selected="true"]{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.setpane{padding-top:14px}
+.setpop .setpane .lead{margin:0 0 16px}
+.setgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px 28px;align-items:start}
+.sethead{font-weight:600;font-size:14px;margin:0 0 8px}
+.setpop .hint{margin:6px 0 0}
+.setpop .hint:empty{display:none}
+.setpop .sethead+.hint{margin:0 0 8px}
+.setpop .btnlike{border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px}
+.setpop #bgPick{width:100%;margin:0 0 8px}
+.setpop .row:has(input[type=text]){flex-wrap:nowrap} /* (a box and its button side by side) */
+.setpop .btnlike,.setpop .row .linkish{white-space:nowrap}
+.setpop .row input[type=text]{min-width:0}
+.setpop .vol{white-space:nowrap}
+.setpop .vol input{min-width:0}
+details.how{margin:8px 0 0;font-size:13px;line-height:1.5;color:var(--muted)}
+details.how summary{cursor:pointer;width:max-content;max-width:100%}
+details.how summary:hover{color:var(--text)}
+details.how[open] summary{margin-bottom:4px}
 .set{padding:16px 0}
 .set+.set{border-top:1px solid var(--line)}
 .setrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .themeset button{min-width:86px}
 .setpop .bgprev{height:90px}
 .secret{-webkit-text-security:disc} /* (the webhook link is a secret: shown as dots, without password-manager prompts) */
-.setpop .checkline{margin:8px 0 0}
-.setpop input.dcuser{width:190px;flex:none;min-width:0;padding:6px 10px;font-size:14px}
+.setpop .checkline{width:auto;margin:0 0 8px}
+.setpop input.dcuser{width:100%;max-width:260px;min-width:0;padding:6px 10px;font-size:14px}
 /* Shop tabs: Mr Tofu's shop, plus any other Shopify shops added with ＋. Each has
    its own watchlist and activity, and they all keep watching in the background. */
 .stores{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%}
@@ -460,91 +483,133 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
           <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
         </div>
       </div>
-      <div class="popwrap">
+      <div class="popwrap setwrap">
         <button class="theme cogbtn" id="setBtn" data-pop="setPop" aria-expanded="false" aria-haspopup="true" title="Alert sound, Discord ping, theme and background"><svg class="cog" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="12" cy="12" r="7.6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3 2.969" transform="rotate(-11.3 12 12)"/></svg>Settings</button>
         <div class="pop setpop" id="setPop" hidden>
-          <section class="set">
-            <div class="pop-title">🔔 Alert sound</div>
-            <p class="lead">Plays on this PC when checkout opens or a shop locks, even when this page is in the background.</p>
-            <div class="row">
-              <select id="sound" aria-label="Alert sound"></select>
-              <button class="secondary" id="soundTest" title="Play it">▶</button>
+          <div class="settabs" role="tablist" aria-label="Settings">
+            <button type="button" role="tab" data-tab="sound">🔔 Sound</button>
+            <button type="button" role="tab" data-tab="discord">💬 Discord</button>
+            <button type="button" role="tab" data-tab="friends">👥 Friends</button>
+            <button type="button" role="tab" data-tab="lists">🤖 /wishlist</button>
+            <button type="button" role="tab" data-tab="look">🎨 Look</button>
+          </div>
+
+          <section class="setpane" data-pane="sound" role="tabpanel">
+            <p class="lead">Plays on this PC when checkout opens or a shop locks, even with this page in the background.</p>
+            <div class="setgrid">
+              <div>
+                <div class="sethead">Alert sound</div>
+                <div class="row">
+                  <select id="sound" aria-label="Alert sound"></select>
+                  <button class="secondary" id="soundTest" title="Play it">▶</button>
+                </div>
+                <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
+              </div>
+              <div>
+                <div class="sethead">Your own sounds</div>
+                <div class="row snd-lib">
+                  <label class="secondary filebtn btnlike">＋ Add a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
+                  <button class="linkish" id="soundDel" hidden>Remove this sound</button>
+                </div>
+                <p class="hint" id="soundMsg"></p>
+              </div>
             </div>
-            <div class="row snd-lib">
-              <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">＋ Add a sound file…<input type="file" id="soundFile" accept="audio/*" hidden></label>
-              <button class="linkish" id="soundDel" hidden>Remove this sound</button>
-            </div>
-            <p class="hint" id="soundMsg" style="margin:6px 0 0"></p>
-            <label class="vol">Volume <input type="range" id="volume" min="5" max="100" step="5"><span id="volVal"></span></label>
           </section>
-          <section class="set">
-            <div class="pop-title">💬 Discord ping</div>
-            <p class="lead">Drop mode posts in a Discord channel when something you're watching comes in stock, with buttons to check out on your phone, so it buzzes too.</p>
-            <p class="hint" id="dcState" style="margin:0 0 8px"></p>
-            <div class="row">
-              <input type="text" id="dcHook" class="secret" placeholder="Paste the channel's webhook link" autocomplete="off" spellcheck="false">
-              <button class="secondary" id="dcSave">Save</button>
+
+          <section class="setpane" data-pane="discord" role="tabpanel" hidden>
+            <p class="lead">Posts in your Discord channel so your phone buzzes too, with buttons to check out from there.</p>
+            <div class="setgrid">
+              <div>
+                <div class="sethead">Your channel</div>
+                <p class="hint" id="dcState"></p>
+                <div class="row">
+                  <input type="text" id="dcHook" class="secret" placeholder="Paste the channel's webhook link" autocomplete="off" spellcheck="false">
+                  <button class="secondary" id="dcSave">Save</button>
+                </div>
+                <details class="how"><summary>Where do I get that link?</summary>In Discord: the channel's ⚙ settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. A channel just for you is best. The link stays on this PC.</details>
+                <div class="row" style="margin-top:12px">
+                  <button class="secondary" id="dcTest">Send a test</button>
+                  <button class="linkish" id="dcRemove" hidden>Remove the webhook</button>
+                </div>
+                <p class="hint" id="dcMsg"></p>
+              </div>
+              <div>
+                <div class="sethead">Ping me when</div>
+                <label class="checkline"><input type="checkbox" id="dcCheckout"><span>something I'm watching comes in stock (or sells out)</span></label>
+                <label class="checkline"><input type="checkbox" id="dcLock"><span>a shop locks</span></label>
+                <label class="checkline"><input type="checkbox" id="dcLive"><span>Mr Tofu goes live on Twitch</span></label>
+                <div class="sethead" style="margin-top:14px">@mention</div>
+                <input type="text" id="dcUser" class="dcuser" inputmode="numeric" placeholder="Discord ID (none: no @mention)" autocomplete="off">
+                <p class="hint" id="dcWho"></p>
+              </div>
             </div>
-            <p class="hint" style="margin:6px 0 0">In Discord: the channel's ⚙ settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. A channel just for you is best. The link stays on this PC.</p>
-            <label class="checkline"><input type="checkbox" id="dcCheckout"><span>When something you're watching comes in stock (and when it sells out)</span></label>
-            <label class="checkline"><input type="checkbox" id="dcLock"><span>When a shop locks</span></label>
-            <label class="checkline"><input type="checkbox" id="dcLive"><span>When Mr Tofu goes live on Twitch (a heads-up to open the Shop app)</span></label>
-            <div class="row" style="margin-top:10px;gap:8px">
-              <span class="hint" style="margin:0">@mention Discord ID</span>
-              <input type="text" id="dcUser" class="dcuser" inputmode="numeric" placeholder="no @mention" autocomplete="off">
+          </section>
+
+          <section class="setpane" data-pane="friends" role="tabpanel" hidden>
+            <p class="lead">Friends get a wishlist here. When something on it comes in stock, they get a Discord ping with checkout links. Nothing opens on this PC.</p>
+            <div class="setgrid">
+              <div>
+                <div class="sethead">Friends</div>
+                <div id="friendList"></div>
+                <div class="row" style="gap:6px">
+                  <input type="text" id="frName" placeholder="Name" maxlength="30" autocomplete="off" style="min-width:0;flex:1">
+                  <input type="text" id="frId" placeholder="Their Discord ID" inputmode="numeric" autocomplete="off" style="min-width:0;flex:1.4">
+                  <button class="secondary" id="frAdd">Add</button>
+                </div>
+                <details class="how"><summary>How do I find their Discord ID?</summary>In Discord: Settings → Advanced → turn on Developer Mode, then right-click their name → Copy User ID. You can also add someone from your watchlist's dropdown (＋ Add someone…).</details>
+                <p class="hint" id="frMsg"></p>
+              </div>
+              <div>
+                <div class="sethead">Where their pings go</div>
+                <p class="hint" id="dcFriendsState"></p>
+                <div class="row">
+                  <input type="text" id="dcFriendsHook" class="secret" placeholder="A different channel's webhook (optional)" autocomplete="off" spellcheck="false">
+                  <button class="secondary" id="dcFriendsSave">Save</button>
+                </div>
+                <button class="linkish" id="dcFriendsRemove" hidden>Use my channel for friends' pings again</button>
+              </div>
             </div>
-            <p class="hint" id="dcWho" style="margin:4px 0 0"></p>
-            <div class="row" style="margin-top:10px">
-              <button class="secondary" id="dcTest">Send a test</button>
-              <button class="linkish" id="dcRemove" hidden>Remove the webhook</button>
-            </div>
-            <p class="hint" id="dcMsg" style="margin:6px 0 0"></p>
-            <div class="pop-title" style="font-size:14px;margin-top:16px">👥 Friends' wishlists</div>
-            <p class="lead" style="margin:2px 0 8px">Give someone their own wishlist: choose <b>＋ Add someone…</b> in your watchlist's dropdown (or add them here), then add things for them. When one comes in stock, they get a Discord ping with checkout links. Nothing opens on this PC.</p>
-            <div id="friendList"></div>
-            <div class="row" style="margin-top:8px;gap:6px">
-              <input type="text" id="frName" placeholder="Name" maxlength="30" autocomplete="off" style="min-width:0;flex:1">
-              <input type="text" id="frId" placeholder="Their Discord ID" inputmode="numeric" autocomplete="off" style="min-width:0;flex:1.4">
-              <button class="secondary" id="frAdd">Add</button>
-            </div>
-            <p class="hint" style="margin:6px 0 0">Their Discord ID: in Discord, Settings → Advanced → turn on Developer Mode, then right-click their name → Copy User ID.</p>
-            <p class="hint" id="dcFriendsState" style="margin:10px 0 6px"></p>
-            <div class="row">
-              <input type="text" id="dcFriendsHook" class="secret" placeholder="A different channel for friends' pings (optional webhook)" autocomplete="off" spellcheck="false">
-              <button class="secondary" id="dcFriendsSave">Save</button>
-            </div>
-            <button class="linkish" id="dcFriendsRemove" hidden>Use my channel for friends' pings again</button>
-            <p class="hint" id="frMsg" style="margin:6px 0 0"></p>
-            <div class="pop-title" style="font-size:14px;margin-top:16px">🤖 Wishlists people keep in Discord</div>
-            <p class="lead" style="margin:2px 0 8px">People in your server can keep their own wishlist with your bot's <b>/wishlist</b> command. Each gets a private channel, and drop mode pings them there when something on their list comes in stock at a shop it's watching. Nothing opens on this PC.</p>
-            <p class="hint" id="dlState" style="margin:0 0 6px"></p>
+          </section>
+
+          <section class="setpane" data-pane="lists" role="tabpanel" hidden>
+            <p class="lead">People in your server keep their own wishlist with your bot's <b>/wishlist</b>. Drop mode pings each of them in their own channel. Nothing opens on this PC.</p>
+            <div class="sethead">Connection</div>
+            <p class="hint" id="dlState"></p>
             <div class="row">
               <input type="text" id="dlKey" class="secret" placeholder="Paste the key you gave the bot" autocomplete="off" spellcheck="false">
               <button class="secondary" id="dlSave">Connect</button>
             </div>
-            <p class="hint" style="margin:6px 0 0">The same key as the bot's DROP_MODE_KEY. It stays on this PC.</p>
+            <details class="how"><summary>Which key?</summary>The same key as the bot's DROP_MODE_KEY. It stays on this PC.</details>
             <button class="linkish" id="dlRemove" hidden>Disconnect</button>
-            <p class="hint" id="dlMsg" style="margin:6px 0 0"></p>
+            <p class="hint" id="dlMsg"></p>
           </section>
-          <section class="set setrow">
-            <div><div class="pop-title">Layout</div><p class="lead" style="margin:2px 0 0">Drag a column by its header to move it.</p></div>
-            <button class="secondary" id="resetLayout" style="flex:none;padding:7px 12px">Reset columns</button>
-          </section>
-          <section class="set setrow">
-            <div class="pop-title">Theme</div>
-            <span class="qtyset themeset" id="themeSet" role="group" aria-label="Theme"><button type="button" data-theme="dark">🌙 Dark</button><button type="button" data-theme="light">☀️ Light</button></span>
-          </section>
-          <section class="set">
-            <div class="pop-title">🖼 Background</div>
-            <p class="lead">A picture behind drop mode. It stays on this PC.</p>
-            <div class="bgprev" id="bgPrev">No picture</div>
-            <div class="row">
-              <label class="secondary filebtn" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-weight:600;font-size:14px">Choose a picture…<input type="file" id="bgFile" accept="image/*" hidden></label>
-              <button class="linkish" id="bgRemove" hidden>Remove</button>
+
+          <section class="setpane" data-pane="look" role="tabpanel" hidden>
+            <div class="setgrid">
+              <div>
+                <div class="sethead">Background</div>
+                <div class="bgprev" id="bgPrev">No picture</div>
+                <select id="bgPick" aria-label="Background picture"></select>
+                <div class="row">
+                  <input type="text" id="bgUrl" placeholder="Or paste a picture's link" autocomplete="off" spellcheck="false">
+                  <button class="secondary" id="bgUrlGo">Use it</button>
+                </div>
+                <div class="row" style="margin-top:8px">
+                  <label class="secondary filebtn btnlike">Upload a picture…<input type="file" id="bgFile" accept="image/*" hidden></label>
+                  <button class="linkish" id="bgRemove" hidden>Delete this picture</button>
+                </div>
+                <p class="hint" id="bgMsg"></p>
+              </div>
+              <div>
+                <div class="sethead">Theme</div>
+                <span class="qtyset themeset" id="themeSet" role="group" aria-label="Theme"><button type="button" data-theme="dark">🌙 Dark</button><button type="button" data-theme="light">☀️ Light</button></span>
+                <label class="vol" id="bgSee">See-through <input type="range" id="panelA" min="0" max="100" step="1" aria-label="How see-through the panels are"><span id="panelVal"></span></label>
+                <p class="hint" id="bgSeeHint">0% is solid panels; 100% is fully see-through.</p>
+                <div class="sethead" style="margin-top:16px">Layout</div>
+                <p class="hint">Drag a column by its header to move it.</p>
+                <button class="secondary" id="resetLayout" style="padding:7px 12px">Reset columns</button>
+              </div>
             </div>
-            <p class="hint" id="bgMsg" style="margin:6px 0 0"></p>
-            <label class="vol" id="bgSee">See-through <input type="range" id="panelA" min="0" max="100" step="1" aria-label="How see-through the panels are"><span id="panelVal"></span></label>
-            <p class="hint" id="bgSeeHint" style="margin:4px 0 0">0% is solid panels; 100% is fully see-through (just the blur behind the text).</p>
           </section>
         </div>
       </div>
@@ -951,6 +1016,16 @@ window.addEventListener("blur", () => setTimeout(() => {
   if ($("player").contains(f)) soundDone = true; // you're running the player
   else if ($("chat").contains(f)) restartWithSound(); // (a click in the chat counts as a click on the page)
 }));
+
+// ---------- ⚙ settings: one tab at a time ----------
+function setTab(name) {
+  if (!document.querySelector(`.setpane[data-pane="${name}"]`)) name = "sound";
+  document.querySelectorAll(".settabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
+  document.querySelectorAll(".setpane").forEach((p) => { p.hidden = p.dataset.pane !== name; });
+  try { localStorage.setItem("dropSetTab", name); } catch {}
+}
+document.querySelectorAll(".settabs [data-tab]").forEach((b) => b.onclick = () => setTab(b.dataset.tab));
+try { setTab(localStorage.getItem("dropSetTab") || "sound"); } catch { setTab("sound"); }
 
 // ---------- small pop-up menus (⚙ settings, ＋ add a shop) ----------
 // Open on click; close on a click anywhere else, or Esc.
@@ -1596,12 +1671,15 @@ $("interval").onchange = () => {
 $("stopBtn").onclick = () => api("/api/stop", {});
 
 // ---------- background picture ----------
-async function loadBackground() {
-  const r = await api("/api/background");
+// One of your pictures (kept on this PC), picked from the dropdown; or add one: upload it, or paste its link
+async function loadBackground(r) {
+  r = r || await api("/api/background");
   const root = document.documentElement;
   root.classList.toggle("has-bg", r.has);
   if (r.has) root.style.setProperty("--bg-url", `url("/background?v=${r.v}")`);
   try { if (r.has) localStorage.setItem("dropBg", r.v); else localStorage.removeItem("dropBg"); } catch {}
+  $("bgPick").innerHTML = `<option value="">No picture</option>` + (r.choices || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  $("bgPick").value = r.chosen || "";
   $("bgPrev").style.backgroundImage = r.has ? `url("/background?v=${r.v}")` : "";
   $("bgPrev").textContent = r.has ? "" : "No picture";
   $("bgRemove").hidden = !r.has;
@@ -1618,11 +1696,32 @@ $("bgFile").onchange = async () => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  const r = await api("/api/background", { data: btoa(bin) });
+  const r = await api("/api/background", { data: btoa(bin), name: file.name });
   $("bgMsg").textContent = r.error || "";
-  loadBackground();
+  if (!r.error) loadBackground(r);
 };
-$("bgRemove").onclick = async () => { await api("/api/background/remove", {}); loadBackground(); };
+$("bgPick").onchange = async () => {
+  $("bgMsg").textContent = "";
+  const r = await api("/api/background/choose", { id: $("bgPick").value });
+  if (r.error) $("bgMsg").textContent = r.error;
+  loadBackground(r.error ? null : r);
+};
+$("bgUrlGo").onclick = async () => {
+  const url = $("bgUrl").value.trim();
+  if (!url) { $("bgUrl").focus(); return; }
+  $("bgMsg").textContent = "Getting it…";
+  const r = await api("/api/background", { url });
+  $("bgMsg").textContent = r.error || "";
+  if (r.error) return;
+  $("bgUrl").value = "";
+  loadBackground(r);
+};
+$("bgUrl").onkeydown = (e) => { if (e.key === "Enter") $("bgUrlGo").click(); };
+$("bgRemove").onclick = async () => {
+  const id = $("bgPick").value;
+  if (!id || !confirm(`Delete "${$("bgPick").selectedOptions[0].text}" from your pictures?`)) return;
+  loadBackground(await api("/api/background/remove", { id }));
+};
 $("panelA").oninput = () => {
   const see = +$("panelA").value;
   document.documentElement.style.setProperty("--panel-a", 1 - see / 100);
@@ -1734,7 +1833,7 @@ async function loadDiscord() {
   $("dcCheckout").checked = r.checkout; $("dcLock").checked = r.lock; $("dcLive").checked = r.live;
   if (document.activeElement !== $("dcUser")) $("dcUser").value = r.user || "";
   $("dcWho").textContent = r.user ? (r.user === r.botUser ? "That's you, from your stock-alert bot's settings, so the ping @mentions you." : "The ping @mentions this Discord user.") : "No @mention: it just posts in the channel.";
-  $("dcFriendsState").textContent = r.friendsSet ? `Friends' pings go to their own channel (${r.friendsHint}).` : r.set ? "Friends' pings go to the same channel as yours. To use a different one, paste its webhook:" : "Friends' pings need a webhook too (yours above, or one just for them):";
+  $("dcFriendsState").textContent = r.friendsSet ? `Friends' pings go to their own channel (${r.friendsHint}).` : r.set ? "Friends' pings go to the same channel as yours. To use a different one, paste its webhook:" : "Friends' pings need a webhook: yours (in the Discord tab), or one just for them:";
   $("dcFriendsHook").value = "";
   $("dcFriendsRemove").hidden = !r.friendsSet;
   showLists(r);

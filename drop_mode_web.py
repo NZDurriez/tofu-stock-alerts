@@ -19,7 +19,9 @@ import subprocess
 import threading
 import time
 import traceback
+import urllib.parse
 import webbrowser
+import zlib
 from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,20 +57,23 @@ YOU = "@you"    # you, among the people drop mode pings (your own watchlist: it 
 WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+(?:\?[\w=&-]*)?$")
 if os.environ.get("DROP_DISCORD_TEST") == "1":  # tests only: a pretend Discord on this PC
     WEBHOOK = re.compile(r"^http://127\.0\.0\.1:\d+/api/webhooks/\d+/[\w-]+$")
-# The page's background picture (yours, kept in the settings folder, not the code)
+# The page's background: one of your pictures, kept in the settings folder (not the code), picked in ⚙ Settings
 BG_TYPES = {".webp": "image/webp", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}
+BG_DIR = os.path.join(dm.SOUND_DIR, "backgrounds")      # the pictures (each file is one to pick)
+BG_FILE = os.path.join(dm.SOUND_DIR, "background.json")  # which one is on
+BG_MAX = 25 * 1024 * 1024
 # Pictures you've given watches the shop has no picture for (kept in the settings folder, not the code)
 PICTURES_DIR = os.path.join(dm.SOUND_DIR, "pictures")
 PICTURE_NAME = re.compile(r"^[0-9a-f]{12}\.(?:webp|jpg|png|gif)$")
 
 
-def download_picture(url):
-    """A picture from a link: (its bytes, or None and what went wrong). Web links only, up to 10 MB.
+def download_picture(url, limit=10 * 1024 * 1024):
+    """A picture from a link: (its bytes, or None and what went wrong). Web links only, up to limit (10 MB).
     Drop mode keeps its own copy, so the link breaking later doesn't matter."""
     if not re.match(r"^https?://\S+$", url, re.I):
         return None, "Paste a link that starts with http:// or https://."
     try:
-        res = subprocess.run(["curl", "-sS", "-L", "--max-time", "20", "--max-filesize", str(10 * 1024 * 1024),
+        res = subprocess.run(["curl", "-sS", "-L", "--max-time", "30", "--max-filesize", str(limit),
                               "--proto", "=http,https", "--proto-redir", "=http,https", "-A", dm.UA,
                               "-H", "Accept: image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5",
                               "-w", "\n%{http_code}", url], capture_output=True)
@@ -77,7 +82,7 @@ def download_picture(url):
     body, _, code = res.stdout.rpartition(b"\n")
     code = code.decode(errors="replace").strip()
     if res.returncode == 63:
-        return None, "That picture's too big (over 10 MB)."
+        return None, f"That picture's too big (over {limit // (1024 * 1024)} MB)."
     if res.returncode != 0 or not code.startswith("2"):
         return None, "Couldn't get that link" + (f" (the site said {code})." if res.returncode == 0 else ".")
     return body, None
@@ -99,14 +104,68 @@ def prune_pictures():
             pass
 
 
+def background_choices():
+    """Your background pictures: the files in the backgrounds folder, by name."""
+    try:
+        names = os.listdir(BG_DIR)
+    except OSError:
+        return []
+    return sorted((n for n in names if os.path.splitext(n)[1].lower() in BG_TYPES
+                   and os.path.isfile(os.path.join(BG_DIR, n))), key=lambda n: os.path.splitext(n)[0].lower())
+
+
+def background_chosen():
+    """The picture that's on ("" for none, or if it's been deleted)."""
+    try:
+        with open(BG_FILE, encoding="utf-8") as f:
+            name = str(json.load(f).get("chosen") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return name if name in background_choices() else ""
+
+
+def choose_background(name):
+    os.makedirs(dm.SOUND_DIR, exist_ok=True)
+    with open(BG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"chosen": name}, f)
+
+
 def background_file():
-    return next((os.path.join(dm.SOUND_DIR, "background" + ext) for ext in BG_TYPES
-                 if os.path.exists(os.path.join(dm.SOUND_DIR, "background" + ext))), None)
+    name = background_chosen()
+    return os.path.join(BG_DIR, name) if name else None
 
 
 def background_info():
-    path = background_file()
-    return {"has": bool(path), "v": int(os.path.getmtime(path)) if path else 0}
+    name = background_chosen()
+    path = os.path.join(BG_DIR, name) if name else None
+    # v changes with the picture (the page asks for /background?v=…, which it may keep for a year)
+    return {"has": bool(path), "v": int(os.path.getmtime(path)) * 1000 + zlib.crc32(name.encode()) % 1000 if path else 0,
+            "chosen": name, "choices": [{"id": n, "name": os.path.splitext(n)[0]} for n in background_choices()]}
+
+
+def background_name(raw, ext):
+    """A file name for a new background picture: its own name, tidied up (and made unique)."""
+    stem = re.sub(r"\s+", " ", re.sub(r"[^\w .()&'-]+", " ", raw or "")).strip(" .")[:60].strip() or "Picture"
+    taken = {n.lower() for n in background_choices()}
+    name, n = stem + ext, 2
+    while name.lower() in taken:
+        name, n = f"{stem} {n}{ext}", n + 1
+    return name
+
+
+def move_old_background():
+    """The one picture from before there was a choice of them: it joins your pictures (as "My picture"), still on."""
+    for ext in BG_TYPES:
+        old = os.path.join(dm.SOUND_DIR, "background" + ext)
+        if os.path.exists(old):
+            try:
+                os.makedirs(BG_DIR, exist_ok=True)
+                name = background_name("My picture", ext)
+                os.replace(old, os.path.join(BG_DIR, name))
+                if not background_chosen():
+                    choose_background(name)
+            except OSError:
+                pass
 
 
 def picture_type(data):
@@ -1811,18 +1870,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
             play_alert()
             self.send_json(sound_info())
-        elif path == "/api/background":  # a new background picture (the page sends the file)
-            data = base64.b64decode(data.get("data", ""))
-            ext = picture_type(data)
-            if not ext or len(data) > 25 * 1024 * 1024:
-                self.send_json({"error": "Pick a JPG, PNG, WebP or GIF picture (up to 25 MB)."}, 400)
+        elif path == "/api/background":  # a new background picture (a file the page sends, or a link it's
+            # downloaded from): it joins your pictures, and goes on
+            link = str(data.get("url") or "").strip()
+            raw, problem = download_picture(link, BG_MAX) if link else (base64.b64decode(data.get("data", "")), None)
+            ext = picture_type(raw) if raw else None
+            if problem or not ext or len(raw) > BG_MAX:
+                self.send_json({"error": problem or (
+                    "That link isn't a picture (a JPG, PNG, WebP or GIF). Right-click the picture, choose "
+                    "Copy image address, and paste that." if link else "Pick a JPG, PNG, WebP or GIF picture (up to 25 MB).")}, 400)
                 return
-            old = background_file()
-            if old:
-                os.remove(old)
-            os.makedirs(dm.SOUND_DIR, exist_ok=True)
-            with open(os.path.join(dm.SOUND_DIR, "background" + ext), "wb") as f:
-                f.write(data)
+            if link:  # (named after the link's file name)
+                stem = os.path.splitext(urllib.parse.unquote(urllib.parse.urlsplit(link).path.rsplit("/", 1)[-1]))[0]
+                name = background_name(stem or "Picture from a link", ext)
+            else:
+                name = background_name(os.path.splitext(str(data.get("name") or ""))[0] or "My picture", ext)
+            try:
+                os.makedirs(BG_DIR, exist_ok=True)
+                with open(os.path.join(BG_DIR, name), "wb") as f:
+                    f.write(raw)
+            except OSError:
+                self.send_json({"error": "Couldn't save that picture."}, 400)
+                return
+            choose_background(name)
+            self.send_json(background_info())
+        elif path == "/api/background/choose":  # one of your pictures (or "" for none)
+            name = str(data.get("id") or "")
+            if name and name not in background_choices():
+                self.send_json({"error": "That picture isn't there any more."}, 400)
+                return
+            choose_background(name)
             self.send_json(background_info())
         elif path == "/api/picture":  # a picture for a watch the shop has none for: uploaded (the page makes
             # it small first) or from a link (downloaded here; the page then makes it small too)
@@ -1839,10 +1916,13 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(PICTURES_DIR, name), "wb") as f:
                 f.write(raw)
             self.send_json({"picture": name})
-        elif path == "/api/background/remove":
-            old = background_file()
-            if old:
-                os.remove(old)
+        elif path == "/api/background/remove":  # delete one of your pictures (the one on, if none's named)
+            name = str(data.get("id") or background_chosen())
+            if name in background_choices():
+                try:
+                    os.remove(os.path.join(BG_DIR, name))
+                except OSError:
+                    pass
             self.send_json(background_info())
         elif path == "/api/sound/delete":  # remove one of your sound files
             sounds.delete_file(data.get("id", ""))
@@ -1913,6 +1993,7 @@ def main():
         time.sleep(8)
         return
     print(f"Drop mode is running at {url}  (close this window to stop)")
+    move_old_background()
     others = [w.name for w in WATCHERS.values() if w.id != "tofu"]
     if others:
         print("Shops: Mr Tofu, " + ", ".join(others))
