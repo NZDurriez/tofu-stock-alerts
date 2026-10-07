@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 5;
+const COMMANDS_VERSION = 6;
 const COMMANDS = [
   {
     name: "password",
@@ -93,6 +93,7 @@ const COMMANDS = [
       ],
     }],
   },
+  { name: "speed", description: "Drop mode's check speed for each shop (buttons)", default_member_permissions: "32" },
   {
     name: "wishlist",
     description: "Your own wishlist: get pinged in your private channel when something's in stock",
@@ -316,9 +317,61 @@ async function dropModeHelper(request, env, url) {
   const key = (env.DROP_MODE_KEY || "").trim();
   if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
   if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
-  if (url.pathname === "/dropmode/poll") return wishlistStore(env).fetch("https://wishlists/dm/poll" + url.search);
+  if (url.pathname === "/dropmode/poll") {
+    return request.method === "POST"
+      ? wishlistStore(env).fetch("https://wishlists/dm/poll", { method: "POST", body: await request.text() })
+      : wishlistStore(env).fetch("https://wishlists/dm/poll" + url.search);
+  }
   if (request.method !== "POST") return new Response("POST it", { status: 405 });
   return wishlistStore(env).fetch("https://wishlists/dm/done", { method: "POST", body: await request.text() });
+}
+
+// /speed's panel: each shop drop mode has, watching or not and how often, with buttons for one of them
+const SPEEDS = [0.5, 1, 2, 3, 5, 10];
+const every = (n) => (n === 0.5 ? "½s" : `${n}s`);
+function speedPanel(st, sel, note) {
+  const h = st.helper || {}, fresh = !!h.at && Date.now() - h.at < 45000, shops = h.shops || [];
+  const shop = shops.find((s) => s.id === sel) || shops[0];
+  let body;
+  if (!h.at) body = "The helper on your PC hasn't checked in yet. It starts when you log in to Windows.";
+  else if (!fresh) body = `Your PC's helper last checked in <t:${Math.floor(h.at / 1000)}:R>, so I can't reach drop mode. Is the PC on?`;
+  else if (!h.running) body = "Drop mode is closed. `/dropmode start` opens it.";
+  else body = shops.map((s) => `${s.running ? "🟢" : "⚪"} **${s.name}** · ${s.running ? `watching every ${every(s.interval)}` : `not watching${s.interval ? ` (set to ${every(s.interval)})` : ""}`}`).join("\n")
+    + (shops.length > 1 && shop ? `\n\nThe buttons are for **${shop.name}** (pick another shop below).` : "");
+  const components = [];
+  if (fresh && h.running && shop) {
+    if (shops.length > 1) components.push(row({ type: 3, custom_id: "dm:shop", options: shops.map((s) => ({ label: s.name, value: s.id, default: s.id === shop.id })) }));
+    const speed = (n) => ({ type: 2, style: shop.interval === n ? 3 : 2, label: every(n), custom_id: `dm:speed:${shop.id}:${n}` });
+    components.push(row(...SPEEDS.slice(0, 5).map(speed)));
+    components.push(row(speed(10),
+      shop.running ? { type: 2, style: 4, label: "Stop watching", emoji: { name: "⏹️" }, custom_id: `dm:unwatch:${shop.id}` }
+        : { type: 2, style: 1, label: "Start watching", emoji: { name: "▶️" }, custom_id: `dm:watch:${shop.id}` },
+      { type: 2, style: 2, label: "Refresh", emoji: { name: "🔄" }, custom_id: `dm:refresh:${shop.id}` }));
+  } else {
+    components.push(row({ type: 2, style: 2, label: "Refresh", emoji: { name: "🔄" }, custom_id: `dm:refresh:${(shop || {}).id || ""}` }));
+  }
+  return { content: "⚡ **Check speed**\n" + body + (note ? `\n\n${note}` : ""), components, allowed_mentions: { parse: [] } };
+}
+
+// A click on the panel: pick a shop, refresh, or ask the helper to change a speed or start or stop watching
+async function speedComponent(i, env, ctx, followUp) {
+  const [, what, sid, n] = String(i.data.custom_id).split(":");
+  const update = (data) => reply({ type: 7, data });
+  if (what === "shop") return update(speedPanel(await dropModeState(env), (i.data.values || [])[0]));
+  const st = await dropModeState(env), h = st.helper || {};
+  if (what === "refresh" || !h.at || Date.now() - h.at > 45000 || !h.running) return update(speedPanel(st, sid));
+  const action = what === "speed" ? "speed" : what === "watch" ? "watch" : "unwatch";
+  const job = await (await wishlistStore(env).fetch("https://wishlists/dm/request", {
+    method: "POST", body: JSON.stringify({ action, shop: sid, interval: action === "speed" ? Number(n) : undefined }) })).json();
+  ctx.waitUntil(followUp(async () => {
+    for (let k = 0; k < 12; k++) { // (the helper asks every few seconds)
+      await sleep(2000);
+      const s = await dropModeState(env);
+      if (s.result && s.result.id === job.id) return speedPanel(s, sid, (s.result.ok ? "✅ " : "⚠️ ") + s.result.message);
+    }
+    return speedPanel(await dropModeState(env), sid, "⏳ Sent to your PC, but it hasn't answered yet. Press Refresh in a moment.");
+  }));
+  return reply({ type: 6 }); // (the panel's edited when the helper answers)
 }
 
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
@@ -637,6 +690,9 @@ async function handleInteraction(request, env, ctx) {
     return deferred();
   }
 
+  if (i.type === 3 && String((i.data && i.data.custom_id) || "").startsWith("dm:")) return speedComponent(i, env, ctx, followUp);
+  if (name === "speed") return reply({ type: 4, data: { flags: EPHEMERAL, ...speedPanel(await dropModeState(env), "tofu") } });
+
   if (name === "dropmode") {
     const action = ((i.data.options || [])[0] || {}).value;
     const st = await dropModeState(env), helper = st.helper || null;
@@ -645,9 +701,10 @@ async function handleInteraction(request, env, ctx) {
     if (!helper) return say("The helper on your PC hasn't checked in yet. It starts when you log in to Windows.");
     if (action === "status") {
       if (!fresh) return say(`Your PC's helper last checked in ${ago(helper.at)}, so the PC may be off or asleep.`);
-      return say(helper.running ? (helper.watching ? "✅ Drop mode is running and watching."
-        : "🟡 Drop mode is open but not watching. `/dropmode start` starts watching.")
-        : "⚪ Drop mode is closed. `/dropmode start` opens it.");
+      const on = (helper.shops || []).filter((s) => s.running).map((s) => `${s.name} (every ${every(s.interval)})`);
+      return say(!helper.running ? "⚪ Drop mode is closed. `/dropmode start` opens it."
+        : on.length ? `✅ Drop mode is running, watching ${on.join(", ")}.`
+        : "🟡 Drop mode is open but not watching. `/dropmode start` starts watching.");
     }
     if (!fresh) return say(`Your PC's helper last checked in ${ago(helper.at)}, so I can't reach it. Is the PC on?`);
     const job = await (await wishlistStore(env).fetch("https://wishlists/dm/request", { method: "POST", body: JSON.stringify({ action }) })).json();
@@ -682,6 +739,12 @@ const VIEW_CHANNEL = 1n << 10n, SEND_MESSAGES = 1n << 11n, EMBED_LINKS = 1n << 1
 // straight away everywhere. (KV can take a minute to reach other parts of the world, and two people
 // changing the same list then could undo each other's change.) The first time, the lists kept in KV
 // before are brought over; KV keeps that old copy.
+// The shops the helper reports: [{ id, name, running, interval }]
+const cleanShops = (shops) => (Array.isArray(shops) ? shops : []).slice(0, 25).map((s) => ({
+  id: String(s.id || "").slice(0, 40), name: String(s.name || s.id || "").slice(0, 80),
+  running: !!s.running, interval: Number(s.interval) || null,
+})).filter((s) => s.id);
+
 export class WishlistStore {
   constructor(state) {
     this.state = state;
@@ -707,17 +770,19 @@ export class WishlistStore {
     if (!this.dm) this.dm = (await store.get("dm")) || {};
     const dm = this.dm, save = () => store.put("dm", dm);
     if (url.pathname === "/dm/request") {
-      const { action } = await request.json();
-      dm.pending = { id: crypto.randomUUID(), action, at: now };
+      const { action, shop, interval } = await request.json();
+      dm.pending = { id: crypto.randomUUID(), action, shop, interval, at: now };
       await save();
       return Response.json(dm.pending);
     }
     if (url.pathname === "/dm/poll") {
-      dm.helper = { at: now, running: url.searchParams.get("running") === "1", watching: url.searchParams.get("watching") === "1" };
+      const b = request.method === "POST" ? await request.json().catch(() => ({})) : {
+        running: url.searchParams.get("running") === "1", watching: url.searchParams.get("watching") === "1" };
+      dm.helper = { at: now, running: !!b.running, watching: !!b.watching, shops: cleanShops(b.shops) };
       let job = null;
       if (dm.pending && !dm.pending.taken && now - dm.pending.at < 120000) {
         dm.pending.taken = now;
-        job = { id: dm.pending.id, action: dm.pending.action };
+        job = { id: dm.pending.id, action: dm.pending.action, shop: dm.pending.shop, interval: dm.pending.interval };
         await save();
       } else if (now - (this.dmSaved || 0) > 60000) {
         this.dmSaved = now;
@@ -728,7 +793,7 @@ export class WishlistStore {
     if (url.pathname === "/dm/done") {
       const r = await request.json();
       dm.result = { id: String(r.id || ""), ok: !!r.ok, message: String(r.message || "").slice(0, 300), at: now };
-      dm.helper = { at: now, running: !!r.running, watching: !!r.watching };
+      dm.helper = { at: now, running: !!r.running, watching: !!r.watching, shops: cleanShops(r.shops) };
       if (dm.pending && dm.pending.id === dm.result.id) {
         if (dm.pending.action === "stop" && r.ok) dm.stoppedAt = now; // (closed on purpose: no "it's stopped" warning)
         dm.pending = null;

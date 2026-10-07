@@ -1727,7 +1727,7 @@ def add_store(link, name):
 
 def store_list():
     return [{"id": w.id, "name": w.name, "host": w.site.host, "shop": w.site.shop, "collection": w.site.collection,
-             "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running}
+             "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running, "interval": w.interval}
             for w in list(WATCHERS.values())]
 
 
@@ -1736,7 +1736,7 @@ for _s in load_stores():
     WATCHERS[_s["id"]] = make_watcher(_s)
 # What each tab asks about (?store=...). The rest (sound, background, the list of shops) is shared.
 STORE_PATHS = {"/api/products", "/api/categories", "/api/password", "/api/match", "/api/events", "/api/watchlist",
-               "/api/watchinfo", "/api/start", "/api/logout", "/api/stop", "/api/login", "/api/events/clear"}
+               "/api/watchinfo", "/api/start", "/api/logout", "/api/stop", "/api/login", "/api/events/clear", "/api/remote"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1908,8 +1908,22 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/stop":
             W.stop()
             self.send_json({"ok": True})
+        elif path == "/api/remote":  # from Discord's /speed (through the helper): this shop's speed, watching or not
+            iv = max(0.5, float(data["interval"])) if data.get("interval") else None
+            if data.get("watch") is False:
+                if W.running:
+                    W.stop()
+            elif data.get("watch") and not W.running:
+                W.resume(iv or W.interval)
+            elif iv and W.running:
+                if iv != W.interval:
+                    W.resume(iv)
+            elif iv:
+                W.interval = iv  # (not watching: it's the speed next time it starts from Discord)
+            self.send_json({"name": W.name, "running": W.running, "interval": W.interval})
         elif path == "/api/resume":  # watch what was being watched last time (/dropmode start, through the helper)
-            saved = load_watching() or {"tofu": None}
+            saved = load_watching()
+            saved.setdefault("tofu", None)  # (Mr Tofu's always, plus any others that were watching)
             for sid, interval in saved.items():
                 w = WATCHERS.get(sid)
                 if w and not w.running:

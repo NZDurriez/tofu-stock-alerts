@@ -7,6 +7,7 @@ there's anything to do:
   /dropmode start   opens drop mode (Start Drop Mode.bat, as the desktop shortcut does) if it's closed, then
                     watches what it was watching last time (your saved watchlist, at your speed)
   /dropmode stop    closes drop mode
+  /speed            each shop's check speed, and watching or not (it reports your shops for that)
 
 It uses drop mode's own key for the bot (⚙ Settings > Bot), read from drop mode's settings folder, and it
 only ever does those two things. What it did goes in helper.log in that folder.
@@ -65,13 +66,19 @@ def ask(url, data=None, headers=None, timeout=15):
 
 
 def drop_state():
-    """(is drop mode running, is it watching Mr Tofu's shop)."""
-    r = ask(f"{DROP}/api/events?since=999999999&store=tofu", timeout=4)
-    return (r is not None, bool(r and r.get("running")))
+    """(is drop mode running, is it watching Mr Tofu's shop, [its shops: id, name, watching, speed]).
+    (From the list of shops, not the page's news feed: asking that would tell drop mode its page is open,
+    and then it wouldn't open checkout itself when the page is closed.)"""
+    r = ask(f"{DROP}/api/stores", timeout=4)
+    if r is None:
+        return False, False, []
+    shops = [{"id": s.get("id"), "name": s.get("name"), "running": bool(s.get("running")), "interval": s.get("interval")}
+             for s in r.get("stores", []) if s.get("id")]
+    return True, any(s["running"] for s in shops if s["id"] == "tofu"), shops
 
 
 def start():
-    up, watching = drop_state()
+    up = drop_state()[0]
     opened = False
     if not up:
         log("Opening drop mode.")
@@ -88,6 +95,21 @@ def start():
     if not shops:
         return False, ("Drop mode's open" if opened else "Drop mode was already open") + ", but it couldn't start watching."
     return True, ("Drop mode's open" if opened else "Drop mode was already open") + " and watching " + ", ".join(shops) + "."
+
+
+def remote(job):
+    """/speed: one shop's speed, or start or stop watching it."""
+    up, _, shops = drop_state()
+    if not up:
+        return False, "Drop mode is closed. Use `/dropmode start` first."
+    body = {"interval": job.get("interval")} if job["action"] == "speed" else {"watch": job["action"] == "watch"}
+    r = ask(f"{DROP}/api/remote?store={job.get('shop') or 'tofu'}", body)
+    if not r:
+        return False, "Drop mode didn't take that. Restart it, then try again."
+    every = "½ second" if r["interval"] == 0.5 else f"{r['interval']:g} second" + ("" if r["interval"] == 1 else "s")
+    if job["action"] == "speed":
+        return True, f"{r['name']} now checks every {every}" + ("." if r["running"] else " (when it's watching).")
+    return True, f"{r['name']}: " + (f"watching every {every}." if r["running"] else "stopped watching.")
 
 
 def listening_pid():
@@ -141,17 +163,17 @@ def main():
         try:
             key = bot_key()
             if key:
-                up, watching = drop_state()
+                up, watching, shops = drop_state()
                 auth = {"Authorization": f"Bearer {key}"}
-                r = ask(f"{BOT_URL}/dropmode/poll?running={int(up)}&watching={int(watching)}", headers=auth)
+                r = ask(f"{BOT_URL}/dropmode/poll", {"running": up, "watching": watching, "shops": shops}, headers=auth)
                 job = (r or {}).get("job")
-                if job and job.get("action") in ("start", "stop"):
-                    log(f"/dropmode {job['action']}")
-                    ok, message = start() if job["action"] == "start" else stop()
+                if job and job.get("action") in ("start", "stop", "speed", "watch", "unwatch"):
+                    log(f"/dropmode {job['action']} {job.get('shop') or ''} {job.get('interval') or ''}".rstrip())
+                    ok, message = (start() if job["action"] == "start" else stop() if job["action"] == "stop" else remote(job))
                     log(("Done: " if ok else "Problem: ") + message)
-                    up, watching = drop_state()
+                    up, watching, shops = drop_state()
                     ask(f"{BOT_URL}/dropmode/done", {"id": job.get("id"), "ok": ok, "message": message,
-                                                      "running": up, "watching": watching}, headers=auth)
+                                                      "running": up, "watching": watching, "shops": shops}, headers=auth)
         except Exception as exc:  # (keep going whatever happens)
             log(f"Something went wrong: {exc!r}")
         time.sleep(EVERY)
