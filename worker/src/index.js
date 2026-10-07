@@ -336,7 +336,7 @@ async function dropModeHelper(request, env, url) {
 // Drop mode's controls (/speed, and the panel /dropmode-panel posts): how it is, start and close it, and each
 // shop's speed and watching, with buttons for one shop at a time. Only the owner can use the buttons.
 const SPEEDS = [0.5, 1, 2, 3, 5, 10];
-const every = (n) => (n === 0.5 ? "½s" : `${n}s`);
+const every = (n) => (n === 0.5 ? "½s" : n ? `${n}s` : "? (restart drop mode to show it)");
 function controlPanel(st, sel, note) {
   const h = st.helper || {}, fresh = !!h.at && Date.now() - h.at < 45000, shops = h.shops || [];
   const shop = shops.find((s) => s.id === sel) || shops[0];
