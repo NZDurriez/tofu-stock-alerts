@@ -133,6 +133,11 @@ export default {
     const run = { ...env, STATE: withMemory(env.STATE) };
     ctx.waitUntil((async () => {
       await registerCommands(run);
+      try {
+        await watchDropMode(run);
+      } catch (err) {
+        console.log("Couldn't look for drop mode:", String(err));
+      }
       const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
       for (let k = 0; k < n; k++) {
@@ -289,6 +294,28 @@ async function runCheck(env, opts = {}) {
     `Checked ${Object.keys(current).length} products (${inStock} in stock)${via}: ` +
     (found.length ? `${found.length} alert${found.length > 1 ? "s" : ""} sent to the channel.` : "nothing new.")
   );
+}
+
+// Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for a
+// few minutes (DROP_MODE_QUIET_SECONDS, normally 3 minutes), say so in the stock-alerts channel, once, with
+// a ping, and again when it's back.
+async function watchDropMode(env) {
+  if (!env.WISHLISTS || !(env.DROP_MODE_KEY || "").trim()) return;
+  const seen = ((await (await wishlistStore(env).fetch("https://wishlists/seen")).json()) || {}).seen || 0;
+  if (!seen) return; // (it's never connected)
+  const meta = await getMeta(env), now = Date.now();
+  const quiet = now - seen > (parseInt(env.DROP_MODE_QUIET_SECONDS || "180", 10) || 180) * 1000;
+  const at = Math.floor(seen / 1000), ping = (env.DISCORD_PING || "").trim();
+  if (quiet && !meta.dropModeDown) {
+    meta.dropModeDown = seen;
+    await env.STATE.put("meta", JSON.stringify(meta));
+    await notify(env, `${ping} ⚠️ **Drop mode has stopped.** It last checked in at <t:${at}:t> (<t:${at}:R>), so wishlist pings and checkouts on your PC aren't happening. I'll say here when it's back.`.trim());
+  } else if (!quiet && meta.dropModeDown) {
+    const mins = Math.max(1, Math.round((now - meta.dropModeDown) / 60000));
+    delete meta.dropModeDown;
+    await env.STATE.put("meta", JSON.stringify(meta));
+    await notify(env, `✅ Drop mode is back (it was off for about ${mins} minute${mins === 1 ? "" : "s"}).`);
+  }
 }
 
 async function recordFailure(env, meta, err) {
@@ -608,11 +635,25 @@ export class WishlistStore {
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/seen") return Response.json({ seen: this.seen || (await this.state.storage.get("seen")) || 0 });
     if (request.method === "PUT") {
       await this.state.storage.put("data", await request.json());
       return new Response("ok");
     }
+    if (url.searchParams.has("seen")) await this.markSeen();
     return Response.json((await this.state.storage.get("data")) ?? null);
+  }
+
+  // When drop mode last read the lists (it does every few seconds while it's running): kept in memory,
+  // saved at most once a minute (the bot only looks once a minute)
+  async markSeen() {
+    const now = Date.now();
+    this.seen = now;
+    if (now - (this.saved || 0) > 60000) {
+      this.saved = now;
+      await this.state.storage.put("seen", now);
+    }
   }
 }
 
@@ -620,9 +661,9 @@ const wishlistStore = (env) => env.WISHLISTS.get(env.WISHLISTS.idFromName("wishl
 
 // (Throws if the lists can't be read, rather than handing back an empty record that saving would
 // write over everyone's lists with.)
-async function getWishlists(env) {
+async function getWishlists(env, seen = false) {
   if (!env.WISHLISTS) return JSON.parse((await env.STATE.get("wishlists")) || "{}");
-  const res = await wishlistStore(env).fetch("https://wishlists/");
+  const res = await wishlistStore(env).fetch(seen ? "https://wishlists/?seen=1" : "https://wishlists/"); // (seen: drop mode asking)
   if (!res.ok) throw new Error(`the wishlists couldn't be read (${res.status})`);
   const data = await res.json();
   if (data) return data;
@@ -1001,7 +1042,7 @@ async function wishlistFeed(request, env) {
   const key = (env.DROP_MODE_KEY || "").trim();
   if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
   if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
-  const data = await getWishlists(env);
+  const data = await getWishlists(env, true);
   const people = Object.entries(data.people || {}).filter(([, p]) => p.hook).map(([id, p]) => feedPerson(id, p));
   return Response.json({ version: data.version || 0, people }, { headers: { "Cache-Control": "no-store" } });
 }
