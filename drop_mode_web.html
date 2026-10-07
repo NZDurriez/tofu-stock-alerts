@@ -206,8 +206,7 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
   #kwBody .kwbox{flex:1;display:flex;flex-direction:column;min-height:0}
   #kwBody .kwbox>input{flex:none} /* (the text box keeps its height; the stats get the room) */
-  #kwBody .kwprev.fresh{flex:1 1 0;min-height:110px;display:flex;flex-direction:column}
-  #kwBody .kwprev.fresh .sugs{flex:1 1 0;min-height:0;overflow:auto}
+  #kwBody .kwprev.fresh{flex:none;display:flex;flex-direction:column} /* (the drop stats show in full) */
 }
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr}
@@ -1612,8 +1611,7 @@ async function justAdded(el) {
       <input type="search" id="trackFind" placeholder="Find one of Mr Tofu's products to track" autocomplete="off">
       <div class="sugs dresults" id="trackResults"></div>
     </div>
-    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing yet: the bot's only just started noting when things go up. Check back in a week or two.")}</div>`}</div>
-    <div class="pv-note" style="margin-top:6px">From the bot, which watches his shop all day${st.since ? ` (since ${new Date(st.since).toLocaleDateString([], { day: "numeric", month: "short" })})` : ""}. The times get surer each week.</div>`;
+    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing yet: the bot's only just started noting when things go up. Check back in a week or two.")}</div>`}</div>`;
   el.querySelectorAll(".dstat").forEach((b) => b.onclick = (e) => {
     const un = e.target.closest(".duntrack");
     if (un) return trackChange(el, un.dataset.id, "", false);
