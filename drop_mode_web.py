@@ -1702,7 +1702,7 @@ for _s in load_stores():
     WATCHERS[_s["id"]] = make_watcher(_s)
 # What each tab asks about (?store=...). The rest (sound, background, the list of shops) is shared.
 STORE_PATHS = {"/api/products", "/api/categories", "/api/password", "/api/match", "/api/events", "/api/watchlist",
-               "/api/watchinfo", "/api/start", "/api/logout", "/api/stop", "/api/login"}
+               "/api/watchinfo", "/api/start", "/api/logout", "/api/stop", "/api/login", "/api/events/clear"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1873,6 +1873,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
         elif path == "/api/stop":
             W.stop()
+            self.send_json({"ok": True})
+        elif path == "/api/events/clear":  # this shop's activity log, emptied (new lines carry on numbering)
+            with W.lock:
+                W.events.clear()
             self.send_json({"ok": True})
         elif path == "/api/sound":  # pick a built-in sound and/or the volume
             s = sounds.load()

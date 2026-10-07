@@ -125,6 +125,7 @@ details.how[open] summary{margin-bottom:4px}
 .pop.actpop{left:0;right:0;width:auto;padding:14px}
 .actpop .acthead{display:flex;align-items:center;gap:8px;margin:0 0 10px}
 .actpop .acthead .hint{margin:0 0 0 auto;font-size:12.5px}
+.actpop .acthead .actclear{padding:0 2px;font-size:12.5px}
 .actpop .feed{height:min(72vh,720px)} /* (tall, so plenty of lines show; it scrolls for more) */
 /* Step 2: watch for keywords, or select an exact product (one at a time) */
 .modeset{display:flex;width:100%;margin:0 0 14px}
@@ -479,7 +480,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
       <div class="popwrap actwrap">
         <button class="theme cogbtn actbtn" id="actBtn" data-pop="actPop" aria-expanded="false" aria-haspopup="true" title="Everything drop mode sees, for the shop on show"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>Activity<span class="actdot" id="actDot" hidden></span></button>
         <div class="pop actpop" id="actPop" hidden>
-          <div class="acthead"><span class="pop-title">Activity log</span><span class="col-shop" hidden></span><span class="hint">Newest at the bottom</span></div>
+          <div class="acthead"><span class="pop-title">Activity log</span><span class="col-shop" hidden></span><span class="hint">Newest at the bottom</span><button class="linkish actclear" id="actClear" title="Empty the activity log for this shop">Clear</button></div>
           <div class="feed" id="feed"><div class="ev empty-ev">Nothing yet.</div></div>
         </div>
       </div>
@@ -1057,6 +1058,12 @@ $("actBtn").addEventListener("click", () => {
   $("actDot").hidden = true;
   $("feed").scrollTop = $("feed").scrollHeight;
 });
+// Clear: the shop on show's log is emptied, in drop mode too (so it stays clear after a refresh); new lines carry on
+$("actClear").onclick = async () => {
+  try { await api("/api/events/clear", {}); } catch {}
+  $("feed").innerHTML = '<div class="ev empty-ev">Nothing yet.</div>';
+  $("actDot").hidden = true;
+};
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePops(); });
 
 // ---------- step 1 ----------
