@@ -350,7 +350,7 @@ select option[value="__add"]{color:var(--muted)}
 .wl-row .more li+li{margin-top:2px}
 .wl-row .more .warnline,.wl-row .more .limline,.wl-row .more .picline{display:block;margin-top:6px}
 .wl-row .more .picline{color:var(--muted)}
-.card:has(.sum:hover),.card:has(.sum:focus){position:relative;z-index:40} /* (above the next panel) */
+.card:has(.sum:hover),.card:has(.sum:focus){position:relative;z-index:20} /* (above the next panel, under the top bar's Activity and Settings) */
 .b-warn{background:var(--bad-soft);color:var(--bad)}
 input.maxin{width:120px;padding:7px 10px;font-size:14px;-moz-appearance:textfield;appearance:textfield}
 input.maxin::-webkit-outer-spin-button,input.maxin::-webkit-inner-spin-button{-webkit-appearance:none;margin:0} /* no up/down arrows eating the space */
@@ -394,7 +394,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
 .count~.tipicon{margin-left:0} /* (after "2 items", which already takes the space) */
 .watchctl{margin:0 0 14px}
 .tipicon:hover .tiptext,.tipicon:focus .tiptext{display:block}
-.card:has(.tipicon:hover),.card:has(.tipicon:focus){position:relative;z-index:40} /* keep an open tip above the next panel */
+.card:has(.tipicon:hover),.card:has(.tipicon:focus){position:relative;z-index:20} /* keep an open tip above the next panel (under the top bar's panels) */
 
 .feed{height:380px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--field);padding:6px 0}
 .ev{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:10px;align-items:start;padding:7px 14px;font-size:14px;color:var(--text)}
@@ -1846,6 +1846,29 @@ async function toWav(bytes) {
   return btoa(bin);
 }
 
+// The tab's title flashes when something needs you (a checkout opened, a shop locked) until you're back on
+// this tab, then goes back to normal. (If you're on it already, a few flashes.) One flash at a time, so two
+// alerts close together can't leave the alert as the title.
+const pageTitle = document.title;
+let titleFlash = null;
+function flashTitle(text) {
+  clearInterval(titleFlash);
+  let n = 0;
+  document.title = text;
+  titleFlash = setInterval(() => {
+    document.title = ++n % 2 ? pageTitle : text;
+    if (n >= 20 && document.hasFocus()) stopTitleFlash();
+  }, 700);
+}
+function stopTitleFlash() {
+  if (titleFlash === null) return;
+  clearInterval(titleFlash);
+  titleFlash = null;
+  document.title = pageTitle;
+}
+window.addEventListener("focus", stopTitleFlash);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && document.hasFocus()) stopTitleFlash(); });
+
 function openCheckout(ev, sid = STORE) {
   const what = ev.text.replace(/^⚡ Opening checkout: /, "");
   const title = "🎯 Your pick is live" + (stores.length > 1 ? ` at ${storeOf(sid).name}` : "");
@@ -1859,8 +1882,7 @@ function openCheckout(ev, sid = STORE) {
     $("alertText").textContent = what;
     $("alert").classList.toggle("show", !win);        // blocked? show the button instead
   }
-  let n = 0; const orig = document.title;
-  const flash = setInterval(() => { document.title = n++ % 2 ? orig : title; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
+  flashTitle(title);
   if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
     const note = new Notification(title, { body: what });
     note.onclick = () => { window.open(ev.url, "_blank"); note.close(); };
@@ -1876,8 +1898,7 @@ function showLockAlert(sid = STORE) {
   $("lockPw").value = sid === STORE ? $("pw").value : "";
   $("lockAlert").classList.add("show");
   setTimeout(() => $("lockPw").focus(), 50);
-  let n = 0; const orig = document.title;
-  const flash = setInterval(() => { document.title = n++ % 2 ? orig : "🔒 Shop locked: password needed"; if (n > 20) { clearInterval(flash); document.title = orig; } }, 700);
+  flashTitle("🔒 Shop locked: password needed");
   if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
     new Notification(`🔒 ${name} just locked the shop`, { body: "Enter the password in drop mode to keep watching." });
   }
