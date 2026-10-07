@@ -1747,6 +1747,29 @@ def drop_stats():
     return _STATS["data"] or {"families": [], "error": "Couldn't reach the bot for the drop stats."}
 
 
+def track_product(pid, name, on):
+    """Track (or stop tracking) one of Mr Tofu's products in the drop stats. Returns the stats, or an error."""
+    if not DISCORD.bot_key:
+        return {"error": "Connect to the bot first (⚙ Settings → Bot)."}
+    body = json.dumps({"id": str(pid), "name": str(name)[:200], "on": bool(on)})
+    try:  # (the key goes to curl on stdin)
+        res = subprocess.run(["curl", "-sS", "--max-time", "20", "-X", "POST", "-H", "@-", "-H", "Content-Type: application/json",
+                              "--data-binary", body, "-w", "\n%{http_code}", f"{BOT_URL}/stats/track"],
+                             input=f"Authorization: Bearer {DISCORD.bot_key}\n".encode(), capture_output=True)
+    except OSError:
+        return {"error": "Couldn't reach the bot."}
+    text, _, code = res.stdout.decode("utf-8", errors="replace").rpartition("\n")
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if not code.strip().startswith("2") or not isinstance(data, dict) or "families" not in data:
+        said = data.get("error") if isinstance(data, dict) else None
+        return {"error": said or "The bot didn't take that (it may need updating)."}
+    _STATS.update(at=time.time(), data=data)
+    return data
+
+
 def store_list():
     return [{"id": w.id, "name": w.name, "host": w.site.host, "shop": w.site.shop, "collection": w.site.collection,
              "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running, "interval": w.interval,
@@ -2062,6 +2085,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/discord/test":
             ok, why = DISCORD.post(DISCORD.test_message())
             self.send_json({"ok": ok, "message": why})
+        elif path == "/api/stats/track":  # track (or stop tracking) one of Mr Tofu's products in the drop stats
+            self.send_json(track_product(data.get("id", ""), data.get("name", ""), data.get("on", True)))
         elif path == "/api/stores/add":  # another Shopify shop as its own tab
             w, error = add_store(data.get("link", ""), data.get("name", ""))
             if error:

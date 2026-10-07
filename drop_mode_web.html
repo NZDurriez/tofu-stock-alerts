@@ -325,6 +325,13 @@ input[type=search]:focus{border-color:var(--accent)}
 .dstat .dname{font-weight:600;font-size:14px}
 .dstat .dline{font-size:13px}
 .dstat .dmuted{color:var(--muted)}
+.dstat .dpin{font-size:12px;font-weight:500;color:var(--accent)}
+.dstat .duntrack{font-size:12px;font-weight:500;color:var(--muted);text-decoration:underline;cursor:pointer;margin-left:4px}
+.dstat .duntrack:hover{color:var(--bad)}
+.pv-head .dtrack{padding:0;font-size:13px}
+.dpick{margin:0 0 10px}
+.dpick input{width:100%;margin-bottom:6px}
+.dpick .dresults{max-height:260px;overflow:auto}
 .sug-more{width:100%;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:8px;color:var(--accent);font:600 13px Inter,sans-serif}
 .sug-more:hover{background:var(--surface2)}
 .divider{border-top:1px solid var(--line);margin:22px 0 16px}
@@ -1595,19 +1602,44 @@ async function justAdded(el) {
   const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
   const rows = (st.families || []).map((f) => `
     <button type="button" class="sug dstat" data-title="${esc(f.name)}" title="Watch for it (uses its name as the keywords)">
-      <span class="dname">${esc(f.name)}</span>
-      <span class="dline">🕘 Usually <b>${esc(f.usual.day)} ~${clock(f.usual.min)}</b> <span class="dmuted">(${f.usual.of} of ${f.usual.total})</span></span>
+      <span class="dname">${esc(f.name)}${f.tracked ? ` <span class="dpin">📌 Tracked</span> <a class="duntrack" data-id="${esc(f.tracked)}" role="button" tabindex="0">Untrack</a>` : ""}</span>
+      ${f.usual ? `<span class="dline">🕘 Usually <b>${esc(f.usual.day)} ~${clock(f.usual.min)}</b> <span class="dmuted">(${f.usual.of} of ${f.usual.total})</span></span>` : `<span class="dline dmuted">No drops recorded yet: the bot notes the next one.</span>`}
       ${f.next ? `<span class="dline">⏭️ Next ~${when(f.next)} · <b>${away(f.next)}</b></span>` : ""}
-      <span class="dline dmuted">Last up ${when(f.last)}${f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : ""}</span>
+      ${f.last ? `<span class="dline dmuted">Last up ${when(f.last)}${f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : ""}</span>` : ""}
     </button>`).join("");
-  el.innerHTML = `<div class="pv-head"><span>📊 <b>When Mr Tofu puts things up</b></span><span>Click one to watch for it</span></div>
+  el.innerHTML = `<div class="pv-head"><span>📊 <b>When Mr Tofu puts things up</b></span><button type="button" class="linkish dtrack" id="trackOpen">📌 Track a product</button></div>
+    <div class="dpick" id="trackPick" hidden>
+      <input type="search" id="trackFind" placeholder="Find one of Mr Tofu's products to track" autocomplete="off">
+      <div class="sugs dresults" id="trackResults"></div>
+    </div>
     <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing yet: the bot's only just started noting when things go up. Check back in a week or two.")}</div>`}</div>
     <div class="pv-note" style="margin-top:6px">From the bot, which watches his shop all day${st.since ? ` (since ${new Date(st.since).toLocaleDateString([], { day: "numeric", month: "short" })})` : ""}. The times get surer each week.</div>`;
-  el.querySelectorAll(".dstat").forEach((b) => b.onclick = () => {
+  el.querySelectorAll(".dstat").forEach((b) => b.onclick = (e) => {
+    const un = e.target.closest(".duntrack");
+    if (un) return trackChange(el, un.dataset.id, "", false);
     $("kwInput").value = nameAsKeywords(b.dataset.title);
     kwChanged(0);
     $("kwInput").focus();
   });
+  // 📌 Track a product: search Mr Tofu's shop (sold out ones too), click one to track it
+  $("trackOpen").onclick = () => { $("trackPick").hidden = !$("trackPick").hidden; if (!$("trackPick").hidden) { $("trackFind").focus(); findToTrack(); } };
+  let findTimer;
+  $("trackFind").oninput = () => { clearTimeout(findTimer); findTimer = setTimeout(findToTrack, 250); };
+}
+async function findToTrack() {
+  const q = $("trackFind").value.trim();
+  const r = await api("/api/products?all=1&sort=new&filter=" + encodeURIComponent(q), null, {}, "tofu");
+  const items = (r.items || []).slice(0, 8);
+  $("trackResults").innerHTML = items.map((it) => `
+    <button type="button" class="sug" data-id="${esc(it.id)}" data-title="${esc(it.title)}" title="Track this in the drop stats">
+      ${thumb(it)}<span class="nm">${esc(it.title)}</span>${pill(it)}
+    </button>`).join("") || `<div class="pv-note" style="padding:10px">Nothing in Mr Tofu's shop matches that.</div>`;
+  $("trackResults").querySelectorAll(".sug").forEach((b) => b.onclick = () => trackChange($("kwPrev"), b.dataset.id, b.dataset.title, true));
+}
+async function trackChange(el, id, name, on) {
+  const r = await api("/api/stats/track", { id, name, on });
+  if (r.error) { alert(r.error); return; }
+  justAdded(el);
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }

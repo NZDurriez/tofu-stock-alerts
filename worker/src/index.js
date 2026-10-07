@@ -182,6 +182,7 @@ export default {
     if (edit && request.method === "POST") return wishlistEdit(request, env, ctx, edit[1]);
     if (url.pathname === "/test-alert" && request.method === "POST") return testAlert(request, env);
     if (url.pathname === "/stats" && request.method === "GET") return Response.json(await dropStats(env), { headers: { "Cache-Control": "no-store" } });
+    if (url.pathname === "/stats/track" && request.method === "POST") return trackProduct(request, env);
     if (url.pathname === "/dropmode/poll" || url.pathname === "/dropmode/done") return dropModeHelper(request, env, url);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
@@ -447,6 +448,18 @@ async function recordEvents(env, previous, current, found) {
   if (add.length || seeded) await store.fetch("https://wishlists/events", { method: "POST", body: JSON.stringify({ add, titles, seeded }) });
 }
 
+// Drop mode's "Track a product" (with DROP_MODE_KEY): { id, name, on }
+async function trackProduct(request, env) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  const b = await request.json().catch(() => ({})), id = String(b.id || "").replace(/\D/g, "");
+  if (!id) return Response.json({ error: "Which product?" }, { status: 400 });
+  await wishlistStore(env).fetch("https://wishlists/events", { method: "POST",
+    body: JSON.stringify(b.on === false ? { untrack: id } : { track: { id, name: b.name } }) });
+  return Response.json(await dropStats(env));
+}
+
 async function seedFromShop(env) {
   const add = [], titles = {};
   for (const p of await fetchProducts((await env.STATE.get("cookie")) || null)) {
@@ -476,7 +489,7 @@ async function dropStats(env) {
       console.log("Couldn't get the shop's publish dates:", String(err));
     }
   }
-  const list = (ev.list || []).slice().sort((a, b) => a[0] - b[0]), titles = ev.titles || {};
+  const list = (ev.list || []).slice().sort((a, b) => a[0] - b[0]), titles = ev.titles || {}, tracked = ev.tracked || {};
   const fams = new Map();
   for (const [at, kind, id] of list) {
     const [title, handle] = titles[id] || [];
@@ -489,10 +502,21 @@ async function dropStats(env) {
     else if (!f.ups.length || at - f.ups[f.ups.length - 1].at > 30 * 60000) f.ups.push({ at, id, from: kind === "p" ? "shop" : "seen" });
   }
   const now = Date.now(), out = [];
+  for (const [id, name] of Object.entries(tracked)) { // (chosen in drop mode: shown even before anything's recorded)
+    if (![...fams.values()].some((f) => f.ids.has(id))) {
+      const [title, handle] = titles[id] || [name];
+      fams.set("tracked:" + id, { name: title || name, handle, ups: [], outs: [], ids: new Set([id]) });
+    }
+  }
   for (const f of fams.values()) {
-    // (a regular: the Madness bundles, or something the bot's seen come on sale twice or more. Two listings
-    // with the same name, each published once, aren't a pattern)
-    if (!f.ups.length || !(/madness/i.test(f.name) || f.ups.filter((u) => u.from === "seen").length >= 2)) continue;
+    f.tracked = [...f.ids].find((id) => tracked[id]) || null;
+    if (f.tracked && !f.ups.length) {
+      out.push({ name: f.name, handle: f.handle, tracked: f.tracked, last: null, times: [], usual: null, next: null, sellsOut: null });
+      continue;
+    }
+    // (a regular: the Madness bundles, or something the bot's seen come on sale twice or more, or one you're
+    // tracking. Two listings with the same name, each published once, aren't a pattern)
+    if (!f.ups.length || !(f.tracked || /madness/i.test(f.name) || f.ups.filter((u) => u.from === "seen").length >= 2)) continue;
     const times = f.ups.map((u) => ({ ...u, ...nzTime(u.at) }));
     const perDay = new Map();
     for (const x of times) perDay.set(x.day, (perDay.get(x.day) || 0) + 1);
@@ -511,21 +535,22 @@ async function dropStats(env) {
       if (sold) lasted.push(Math.round((sold[0] - u.at) / 1000));
     }
     out.push({
-      name: f.name, handle: f.handle, last: f.ups[f.ups.length - 1].at, times: f.ups.slice(-6).reverse().map((u) => u.at),
+      name: f.name, handle: f.handle, tracked: f.tracked, last: f.ups[f.ups.length - 1].at, times: f.ups.slice(-6).reverse().map((u) => u.at),
       usual: { day: DAYS[day], min: usualMin, of, total: f.ups.length, window: [Math.min(...mins), Math.max(...mins)] }, next,
       sellsOut: lasted.length ? { median: median(lasted), fastest: Math.min(...lasted), n: lasted.length } : null,
     });
   }
-  out.sort((a, b) => (/madness/i.test(b.name) - /madness/i.test(a.name)) || b.last - a.last);
-  return { since: list.length ? list.find((e) => e[1] !== "p")?.[0] || null : null, families: out.slice(0, 12) };
+  const rank = (f) => (/madness/i.test(f.name) ? 2 : f.tracked ? 1 : 0);
+  out.sort((a, b) => rank(b) - rank(a) || (b.last || 0) - (a.last || 0));
+  return { since: list.length ? list.find((e) => e[1] !== "p")?.[0] || null : null, families: out.slice(0, 20) };
 }
 
 const clock = (min) => `${((Math.floor(min / 60) + 11) % 12) + 1}:${String(min % 60).padStart(2, "0")} ${min < 720 ? "am" : "pm"}`;
 const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
 function statsText(st) {
   if (!st.families.length) return "📊 Nothing to show yet: I've only just started noting when things go up. Give it a week or two.";
-  return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + st.families.slice(0, 8).map((f) =>
-    `\n**${f.name}**\nUsually ${f.usual.day} ~${clock(f.usual.min)} (${f.usual.of} of ${f.usual.total})`
+  return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + st.families.slice(0, 10).map((f) => !f.usual
+    ? `\n**${f.name}** 📌\nNo drops recorded yet.` : `\n**${f.name}**${f.tracked ? " 📌" : ""}\nUsually ${f.usual.day} ~${clock(f.usual.min)} (${f.usual.of} of ${f.usual.total})`
     + (f.next ? ` · next ~<t:${Math.floor(f.next / 1000)}:f> (<t:${Math.floor(f.next / 1000)}:R>)` : "")
     + `\nLast up <t:${Math.floor(f.last / 1000)}:f>` + (f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : "")).join("\n");
 }
@@ -944,6 +969,8 @@ export class WishlistStore {
       if (Array.isArray(b.add) && b.add.length) this.ev.list = this.ev.list.concat(b.add).slice(-4000);
       if (b.titles) this.ev.titles = { ...this.ev.titles, ...b.titles };
       if (b.seeded) this.ev.seeded = true;
+      if (b.track) this.ev.tracked = { ...(this.ev.tracked || {}), [b.track.id]: String(b.track.name || "").slice(0, 200) };
+      if (b.untrack && this.ev.tracked) delete this.ev.tracked[b.untrack];
       await store.put("events", this.ev);
       return Response.json({ ok: true });
     }
