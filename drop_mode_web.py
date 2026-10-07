@@ -1731,6 +1731,22 @@ def add_store(link, name):
     return w, None
 
 
+_STATS = {"at": 0.0, "data": None}
+
+
+def drop_stats():
+    """The bot's drop stats (kept for a minute)."""
+    if _STATS["data"] is None or time.time() - _STATS["at"] > 60:
+        try:
+            res = subprocess.run(["curl", "-sS", "--max-time", "15", f"{BOT_URL}/stats"], capture_output=True)
+            data = json.loads(res.stdout or b"null")
+            if isinstance(data, dict) and isinstance(data.get("families"), list):
+                _STATS.update(at=time.time(), data=data)
+        except (OSError, ValueError):
+            pass
+    return _STATS["data"] or {"families": [], "error": "Couldn't reach the bot for the drop stats."}
+
+
 def store_list():
     return [{"id": w.id, "name": w.name, "host": w.site.host, "shop": w.site.shop, "collection": w.site.collection,
              "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running, "interval": w.interval,
@@ -1880,6 +1896,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "max-age=31536000, immutable")  # (a new picture gets a new name)
             self.end_headers()
             self.wfile.write(body)
+        elif path == "/api/stats":  # when Mr Tofu puts things up (the bot notes it all day)
+            self.send_json(drop_stats())
         elif path == "/api/stores":
             self.send_json({"stores": store_list()})
         elif path == "/api/discord":

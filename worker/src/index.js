@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 7;
+const COMMANDS_VERSION = 8;
 const COMMANDS = [
   {
     name: "password",
@@ -80,6 +80,7 @@ const COMMANDS = [
     }],
   },
   { name: "status", description: "What the stock watcher can see right now" },
+  { name: "stats", description: "When Mr Tofu usually puts things up (Midweek Madness, Friday Madness and more)" },
   {
     name: "dropmode",
     description: "Start, stop or check drop mode on your PC",
@@ -180,6 +181,7 @@ export default {
     const edit = url.pathname.match(/^\/wishlists\/(\d{15,25})$/);
     if (edit && request.method === "POST") return wishlistEdit(request, env, ctx, edit[1]);
     if (url.pathname === "/test-alert" && request.method === "POST") return testAlert(request, env);
+    if (url.pathname === "/stats" && request.method === "GET") return Response.json(await dropStats(env), { headers: { "Cache-Control": "no-store" } });
     if (url.pathname === "/dropmode/poll" || url.pathname === "/dropmode/done") return dropModeHelper(request, env, url);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
@@ -299,6 +301,14 @@ async function runCheck(env, opts = {}) {
     await send(env, alertMessages(found, kw, lockNote), found.some(([, i]) => watched(i, kw)));
   }
 
+  if (!firstRun) {
+    try {
+      await recordEvents(env, previous, current, found);
+    } catch (err) {
+      console.log("Couldn't record the changes:", String(err));
+    }
+  }
+
   // Only write when something changed: KV's free plan allows 1,000 writes/day
   const snap = JSON.stringify(compact(current));
   if (snap !== rawPrev) {
@@ -408,6 +418,116 @@ async function refreshPanel(env) {
   const [s] = await bot(env, "PATCH", `/channels/${st.panel.channel}/messages/${st.panel.message}`, panel);
   if (s === 404) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ clear: true }) });
   else if (s < 300) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ last: sig }) });
+}
+
+// ---------- Drop stats: when Mr Tofu puts things up, from what the bot sees (every few seconds, all day) ----------
+// Each shop change it notices is noted: what came on sale (new, or back in stock) and what sold out. The first
+// time, each product's last publish date (from the shop) gives a head start.
+async function recordEvents(env, previous, current, found) {
+  const now = Date.now(), idOf = new Map(Object.entries(current).map(([id, it]) => [it, id]));
+  const add = [], titles = {};
+  for (const [kind, item] of found) {
+    if (kind !== "new" && kind !== "restock") continue;
+    const id = idOf.get(item);
+    if (id) { add.push([now, kind === "new" ? "n" : "r", id]); titles[id] = [item.title, item.handle]; }
+  }
+  for (const [id, was] of Object.entries(previous)) {
+    const it = current[id];
+    if (was[0] && it && !it.available) { add.push([now, "s", id]); titles[id] = [it.title, it.handle]; }
+  }
+  const store = wishlistStore(env), ev = await (await store.fetch("https://wishlists/events")).json();
+  let seeded = false;
+  if (!ev.seeded) {
+    for (const [id, it] of Object.entries(current)) {
+      const at = Date.parse(it.published || "");
+      if (at) { add.unshift([at, "p", id]); titles[id] = titles[id] || [it.title, it.handle]; }
+    }
+    seeded = true;
+  }
+  if (add.length || seeded) await store.fetch("https://wishlists/events", { method: "POST", body: JSON.stringify({ add, titles, seeded }) });
+}
+
+async function seedFromShop(env) {
+  const add = [], titles = {};
+  for (const p of await fetchProducts((await env.STATE.get("cookie")) || null)) {
+    const it = summarise(p), at = Date.parse(it.published || "");
+    if (at) { add.push([at, "p", String(p.id)]); titles[p.id] = [it.title, it.handle]; }
+  }
+  await wishlistStore(env).fetch("https://wishlists/events", { method: "POST", body: JSON.stringify({ add, titles, seeded: true }) });
+}
+
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function nzTime(at) { // the day of the week and minutes past midnight, in New Zealand
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "Pacific/Auckland", weekday: "long", hour: "numeric", minute: "numeric", hourCycle: "h23" })
+    .formatToParts(new Date(at)).map((x) => [x.type, x.value]));
+  return { day: DAYS.indexOf(p.weekday), min: (+p.hour % 24) * 60 + +p.minute };
+}
+const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+// The drops worth knowing about: the weekly "Madness" bundles, and anything that's come on sale a few times.
+// For each: when it usually goes up (day and time), its last times, how fast it sells out, when it's next due.
+async function dropStats(env) {
+  let ev = await (await wishlistStore(env).fetch("https://wishlists/events")).json();
+  if (!ev.seeded) { // (the head start, if no change has happened since the bot started noting them)
+    try {
+      await seedFromShop(env);
+      ev = await (await wishlistStore(env).fetch("https://wishlists/events")).json();
+    } catch (err) {
+      console.log("Couldn't get the shop's publish dates:", String(err));
+    }
+  }
+  const list = (ev.list || []).slice().sort((a, b) => a[0] - b[0]), titles = ev.titles || {};
+  const fams = new Map();
+  for (const [at, kind, id] of list) {
+    const [title, handle] = titles[id] || [];
+    if (!title) continue;
+    const key = title.replace(/\((pre-?order)\)/ig, "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (!fams.has(key)) fams.set(key, { name: title, handle, ups: [], outs: [], ids: new Set() });
+    const f = fams.get(key);
+    f.ids.add(id);
+    if (kind === "s") f.outs.push([at, id]);
+    else if (!f.ups.length || at - f.ups[f.ups.length - 1].at > 30 * 60000) f.ups.push({ at, id, from: kind === "p" ? "shop" : "seen" });
+  }
+  const now = Date.now(), out = [];
+  for (const f of fams.values()) {
+    // (a regular: the Madness bundles, or something the bot's seen come on sale twice or more. Two listings
+    // with the same name, each published once, aren't a pattern)
+    if (!f.ups.length || !(/madness/i.test(f.name) || f.ups.filter((u) => u.from === "seen").length >= 2)) continue;
+    const times = f.ups.map((u) => ({ ...u, ...nzTime(u.at) }));
+    const perDay = new Map();
+    for (const x of times) perDay.set(x.day, (perDay.get(x.day) || 0) + 1);
+    const [day, of] = [...perDay.entries()].sort((a, b) => b[1] - a[1])[0];
+    const mins = times.filter((x) => x.day === day).map((x) => x.min), usualMin = median(mins);
+    let next = null;
+    if (of >= 2 || /madness/i.test(f.name)) { // (next due: that day of the week at that time)
+      const nz = nzTime(now);
+      next = Math.floor(now / 60000) * 60000 + ((((day - nz.day + 7) % 7) * 1440 + usualMin - nz.min) * 60000);
+      if (next <= now) next += 7 * 86400000;
+    }
+    const lasted = [];
+    for (const u of f.ups) {
+      if (u.from !== "seen") continue;
+      const sold = f.outs.find(([at, id]) => id === u.id && at > u.at);
+      if (sold) lasted.push(Math.round((sold[0] - u.at) / 1000));
+    }
+    out.push({
+      name: f.name, handle: f.handle, last: f.ups[f.ups.length - 1].at, times: f.ups.slice(-6).reverse().map((u) => u.at),
+      usual: { day: DAYS[day], min: usualMin, of, total: f.ups.length, window: [Math.min(...mins), Math.max(...mins)] }, next,
+      sellsOut: lasted.length ? { median: median(lasted), fastest: Math.min(...lasted), n: lasted.length } : null,
+    });
+  }
+  out.sort((a, b) => (/madness/i.test(b.name) - /madness/i.test(a.name)) || b.last - a.last);
+  return { since: list.length ? list.find((e) => e[1] !== "p")?.[0] || null : null, families: out.slice(0, 12) };
+}
+
+const clock = (min) => `${((Math.floor(min / 60) + 11) % 12) + 1}:${String(min % 60).padStart(2, "0")} ${min < 720 ? "am" : "pm"}`;
+const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
+function statsText(st) {
+  if (!st.families.length) return "📊 Nothing to show yet: I've only just started noting when things go up. Give it a week or two.";
+  return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + st.families.slice(0, 8).map((f) =>
+    `\n**${f.name}**\nUsually ${f.usual.day} ~${clock(f.usual.min)} (${f.usual.of} of ${f.usual.total})`
+    + (f.next ? ` · next ~<t:${Math.floor(f.next / 1000)}:f> (<t:${Math.floor(f.next / 1000)}:R>)` : "")
+    + `\nLast up <t:${Math.floor(f.last / 1000)}:f>` + (f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : "")).join("\n");
 }
 
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
@@ -635,7 +755,7 @@ async function handleInteraction(request, env, ctx) {
   const user = (i.member && i.member.user) || i.user || {};
   const owner = (env.DISCORD_OWNER_ID || "").trim();
   const name = i.data && i.data.name;
-  if (name !== "wishlist" && (!owner || user.id !== owner)) {
+  if (name !== "wishlist" && name !== "stats" && (!owner || user.id !== owner)) {
     return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
   }
 
@@ -742,6 +862,8 @@ async function handleInteraction(request, env, ctx) {
     return deferred();
   }
 
+  if (name === "stats") return reply({ type: 4, data: { flags: EPHEMERAL, content: statsText(await dropStats(env)), allowed_mentions: { parse: [] } } });
+
   if (name === "dropmode") {
     const action = ((i.data.options || [])[0] || {}).value;
     const st = await dropModeState(env), helper = st.helper || null;
@@ -803,12 +925,29 @@ export class WishlistStore {
     const url = new URL(request.url);
     if (url.pathname === "/seen") return Response.json({ seen: this.seen || (await this.state.storage.get("seen")) || 0 });
     if (url.pathname.startsWith("/dm/")) return this.dropMode(url, request);
+    if (url.pathname === "/events") return this.events(request);
     if (request.method === "PUT") {
       await this.state.storage.put("data", await request.json());
       return new Response("ok");
     }
     if (url.searchParams.has("seen")) await this.markSeen();
     return Response.json((await this.state.storage.get("data")) ?? null);
+  }
+
+  // The shop's history, for /stats: [time, kind, product id] (n new, r back in stock, s sold out, p when the
+  // shop says it was published: the head start), and each product's [title, handle]. The latest 4,000.
+  async events(request) {
+    const store = this.state.storage;
+    if (!this.ev) this.ev = (await store.get("events")) || { list: [], titles: {}, seeded: false };
+    if (request.method === "POST") {
+      const b = await request.json();
+      if (Array.isArray(b.add) && b.add.length) this.ev.list = this.ev.list.concat(b.add).slice(-4000);
+      if (b.titles) this.ev.titles = { ...this.ev.titles, ...b.titles };
+      if (b.seeded) this.ev.seeded = true;
+      await store.put("events", this.ev);
+      return Response.json({ ok: true });
+    }
+    return Response.json(this.ev);
   }
 
   // /dropmode: a command waits here for the helper on the owner's PC, which asks every few seconds (and says

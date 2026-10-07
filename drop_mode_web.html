@@ -205,6 +205,7 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   #exactBody .list{flex:1 1 0;min-height:max(380px,50vh);max-height:none} /* (at least half the window: room to browse) */
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
   #kwBody .kwbox{flex:1;display:flex;flex-direction:column;min-height:0}
+  #kwBody .kwbox>input{flex:none} /* (the text box keeps its height; the stats get the room) */
   #kwBody .kwprev.fresh{flex:1 1 0;min-height:110px;display:flex;flex-direction:column}
   #kwBody .kwprev.fresh .sugs{flex:1 1 0;min-height:0;overflow:auto}
 }
@@ -320,6 +321,10 @@ input[type=search]:focus{border-color:var(--accent)}
 .sug .thumb{width:36px;height:36px;border-radius:8px}
 .sug .nm{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sug .badge{flex:none}
+.sug.dstat{flex-direction:column;align-items:flex-start;gap:3px;padding:10px 12px}
+.dstat .dname{font-weight:600;font-size:14px}
+.dstat .dline{font-size:13px}
+.dstat .dmuted{color:var(--muted)}
 .sug-more{width:100%;background:none;border:0;border-top:1px solid var(--line);border-radius:0;padding:8px;color:var(--accent);font:600 13px Inter,sans-serif}
 .sug-more:hover{background:var(--surface2)}
 .divider{border-top:1px solid var(--line);margin:22px 0 16px}
@@ -1574,35 +1579,35 @@ async function kwPreview() {
   const more = $("kwMore");
   if (more) more.onclick = () => { kwShowAll = !kwShowAll; kwPreview(); };
 }
-// With nothing typed: the shop's newest listings you can buy (and coming soon), to watch for. Sold-out ones
-// only on request. Click one to use its name as the keywords.
-let jaSold = false;
+// With nothing typed: when Mr Tofu usually puts things up (the weekly Madness bundles and the like), from the
+// bot, which watches his shop all day. Click one to watch for it.
 async function justAdded(el) {
   el.classList.remove("fresh");
-  if (!lastProducts) { el.innerHTML = ""; return; }
-  const sid = STORE;
-  const [buy, every] = await Promise.all([api("/api/products?sort=new"), api("/api/products?sort=new&all=1")]); // (in stock; and everything)
-  if (sid !== STORE || cleanKw($("kwInput").value)) return; // (switched tabs, or started typing)
-  const all = every.items || [], sold = all.filter((it) => it.state === "soldout");
-  const live = (buy.items || []).concat(all.filter((it) => it.state === "soon")).sort((a, b) => (Date.parse(b.listed) || 0) - (Date.parse(a.listed) || 0));
-  const items = (jaSold ? live.concat(sold) : live).slice(0, jaSold ? 40 : 20);
-  if (!all.length) { el.innerHTML = ""; return; }
+  let st;
+  try { st = await api("/api/stats"); } catch { st = null; }
+  if (cleanKw($("kwInput").value)) return; // (started typing)
+  if (!st) { el.innerHTML = ""; return; }
   el.classList.add("fresh");
-  const inStock = live.filter((it) => it.state === "buyable").length;
-  el.innerHTML = `<div class="pv-head"><span>🆕 <b>Just added to the shop</b> · ${inStock} in stock</span><span>Click one to watch for it</span></div>
-    <div class="sugs">${items.map((it) => `
-      <button type="button" class="sug" data-title="${esc(it.title)}" title="Use this product's name as the keywords">
-        ${thumb(it)}<span class="nm">${esc(it.title)}</span>${pill(it)}
-      </button>`).join("") || `<div class="pv-note" style="padding:10px">Nothing new is in stock right now.</div>`}
-      ${sold.length ? `<button type="button" class="sug-more" id="jaSold">${jaSold ? "Hide the sold-out ones" : `Show ${sold.length} sold out too`}</button>` : ""}
-    </div>`;
-  el.querySelectorAll(".sug").forEach((b) => b.onclick = () => {
+  const when = (at) => new Date(at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  const clock = (min) => new Date(2000, 0, 1, Math.floor(min / 60), min % 60).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const away = (at) => { const d = Math.round((at - Date.now()) / 86400000), h = Math.round((at - Date.now()) / 3600000);
+    return h < 1 ? "any minute" : h < 24 ? `in ${h} hour${h === 1 ? "" : "s"}` : d === 1 ? "tomorrow" : `in ${d} days`; };
+  const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
+  const rows = (st.families || []).map((f) => `
+    <button type="button" class="sug dstat" data-title="${esc(f.name)}" title="Watch for it (uses its name as the keywords)">
+      <span class="dname">${esc(f.name)}</span>
+      <span class="dline">🕘 Usually <b>${esc(f.usual.day)} ~${clock(f.usual.min)}</b> <span class="dmuted">(${f.usual.of} of ${f.usual.total})</span></span>
+      ${f.next ? `<span class="dline">⏭️ Next ~${when(f.next)} · <b>${away(f.next)}</b></span>` : ""}
+      <span class="dline dmuted">Last up ${when(f.last)}${f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : ""}</span>
+    </button>`).join("");
+  el.innerHTML = `<div class="pv-head"><span>📊 <b>When Mr Tofu puts things up</b></span><span>Click one to watch for it</span></div>
+    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing yet: the bot's only just started noting when things go up. Check back in a week or two.")}</div>`}</div>
+    <div class="pv-note" style="margin-top:6px">From the bot, which watches his shop all day${st.since ? ` (since ${new Date(st.since).toLocaleDateString([], { day: "numeric", month: "short" })})` : ""}. The times get surer each week.</div>`;
+  el.querySelectorAll(".dstat").forEach((b) => b.onclick = () => {
     $("kwInput").value = nameAsKeywords(b.dataset.title);
     kwChanged(0);
     $("kwInput").focus();
   });
-  const more = $("jaSold");
-  if (more) more.onclick = () => { jaSold = !jaSold; justAdded(el); };
 }
 let kwTimer;
 function kwChanged(delay = 300) { renderKwActs(); clearTimeout(kwTimer); kwTimer = setTimeout(kwPreview, delay); }
