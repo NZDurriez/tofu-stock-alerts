@@ -384,6 +384,56 @@ input.maxin::placeholder{color:var(--faint)}
 .warnline{color:var(--bad);width:100%}
 .popwrap{position:relative}
 .pop{position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:min(370px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+/* Mr Tofu's rip queue: a panel beside the stream (placed by placeRips), the list scrolls inside it */
+.pop.rippop{position:fixed;top:0;right:auto;left:0;z-index:45;width:460px;padding:0;display:flex;flex-direction:column;overflow:hidden}
+.pop.rippop[hidden]{display:none}
+.riphead{display:flex;align-items:center;gap:10px;padding:14px 16px 8px}
+.riptitle{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.ripdate{font-size:12.5px;color:var(--muted)}
+.ripstatus{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.ripstatus i{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.ripstatus.err i{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.ripstatus.wait i{background:var(--faint);box-shadow:none}
+.ripx{flex:none;width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+.ripx:hover{background:var(--surface2);color:var(--text)}
+.ripsum{padding:2px 16px 12px}
+.ripfacts{display:flex;gap:18px;font-size:13px;color:var(--muted)}
+.ripfacts b{display:block;font-size:20px;line-height:1.1;color:var(--text)}
+.ripbar{height:6px;margin-top:10px;border-radius:99px;background:var(--surface2);overflow:hidden}
+.ripbar i{display:block;height:100%;border-radius:99px;background:var(--accent);transition:width .3s}
+.ripfind{padding:0 16px 10px}
+.ripfind input{width:100%;padding:8px 12px;font-size:14px}
+.ripmine{margin:0 16px 10px;padding:9px 12px;border-radius:10px;background:var(--info-soft);font-size:13.5px;line-height:1.45}
+.ripmine b{color:var(--info)}
+.riplist{position:relative;flex:1;min-height:120px;overflow:auto;list-style:none;margin:0;padding:4px 10px 10px;border-top:1px solid var(--line)}
+.riplist li{display:flex;align-items:center;gap:12px;margin-top:4px;padding:8px 10px;border-radius:10px;cursor:pointer;outline:none}
+.riplist li:hover,.riplist li:focus-visible{background:var(--surface2)}
+.riplist .n{flex:none;min-width:36px;height:26px;padding:0 7px;border-radius:999px;display:grid;place-items:center;background:var(--surface2);color:var(--muted);font:600 12.5px Inter,sans-serif;white-space:nowrap}
+.riplist .who{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.riplist .name{font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.riplist .what{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.riplist .boxes{flex:none;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 9px;white-space:nowrap}
+.riplist li.done{opacity:.55}
+.riplist li.done .name{text-decoration:line-through;text-decoration-color:var(--faint)}
+.riplist li.done .n{background:var(--ok-soft);color:var(--ok)}
+.riplist li.part{background:linear-gradient(90deg,var(--ok-soft) var(--p),transparent var(--p))}
+.riplist li.now{margin:8px 0;padding:12px;background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.riplist li.now .n{background:var(--accent);color:var(--accent-ink)}
+.riplist li.now .name{font-size:16px}
+.riplist .nowtag{font:700 10.5px Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.riplist li.mine{box-shadow:inset 3px 0 0 var(--info)}
+.riplist li.mine .name{color:var(--info)}
+.riplist li.now.mine{box-shadow:inset 3px 0 0 var(--accent),inset 6px 0 0 var(--info)}
+.riplist .ripempty{display:block;cursor:default;color:var(--muted);padding:24px 10px;text-align:center}
+.ripitems{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.ripitem{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 9px 3px 3px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:12.5px}
+.ripitem b{font-weight:700}
+.ripitem img,.ripitem .ph{flex:none;width:30px;height:30px;border-radius:7px;object-fit:cover;background:var(--surface2);display:grid;place-items:center;font-size:15px}
+.ripfoot{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;padding:10px 16px 12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.ripfoot .spacer{flex:1}
+.ripfoot a{color:var(--muted)}
+.ripfoot a:hover{color:var(--text)}
+.ripfoot .linkish{padding:0;font-size:12.5px}
 .pop-title{font-weight:600;font-size:15px}
 button.col-link{background:none;font:500 13px Inter,sans-serif}
 .pop .lead{font-size:13px;margin:2px 0 12px}
@@ -631,6 +681,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     <div class="col-head">
       <span class="grip" aria-hidden="true">⠿</span><span class="col-title">Live stream</span><span class="livebadge" id="liveBadge" hidden title="Mr Tofu is live on Twitch">LIVE</span><span class="spacer"></span>
       <button class="col-link" id="soundOn" title="The stream is muted, so your browser pauses it whenever you switch to another tab. This turns the sound on so it keeps playing (drop mode also does it on your first click). For quiet, turn Twitch's volume down instead of muting, or right-click the tab and Mute site.">🔊 Sound on</button>
+      <button class="col-link" id="ripBtn" data-pop="ripPop" aria-expanded="false" aria-haspopup="true" title="Mr Tofu's pack opening queue: who's next, from his sheet">📦 Rip queue</button>
       <a class="col-link" id="popChat" href="https://www.twitch.tv/popout/mrtofulive/chat?popout=" target="_blank" rel="noopener" title="Open Twitch chat in its own window">Pop out chat ↗</a>
     </div>
     <div class="stream-body">
@@ -719,6 +770,21 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
     </div>
   </section>
  </div>
+</div>
+
+<div class="popwrap ripwrap">
+  <div class="pop rippop" id="ripPop" role="dialog" aria-label="Rip queue" hidden>
+    <div class="riphead">
+      <div class="riptitle"><span class="pop-title">📦 Rip queue</span><span class="ripdate" id="ripDate"></span></div>
+      <span class="ripstatus wait" id="ripStatus"><i></i><span>Loading…</span></span>
+      <button class="ripx" id="ripClose" aria-label="Close the rip queue">✕</button>
+    </div>
+    <div class="ripsum" id="ripSum"></div>
+    <div class="ripfind"><input type="text" id="ripFind" placeholder="Your name on the sheet, to find your boxes" autocomplete="off" spellcheck="false"></div>
+    <div class="ripmine" id="ripMine" hidden></div>
+    <ol class="riplist" id="ripList"></ol>
+    <div class="ripfoot" id="ripFoot"></div>
+  </div>
 </div>
 
 <div id="lockAlert"><div class="box">
@@ -1028,6 +1094,223 @@ window.addEventListener("blur", () => setTimeout(() => {
   else if ($("chat").contains(f)) restartWithSound(); // (a click in the chat counts as a click on the page)
 }));
 
+// ---------- Mr Tofu's rip queue (his pack opening order, from his public sheet) ----------
+// As on the tofu-rips page: column E is the order boxes are opened in (a name per box), columns A and B say
+// who bought what ("2 x KOTH"), G1 is the stream's date. Back-to-back boxes for one person are one row.
+// Click a row to tick it off as he opens it (kept in this browser, per stream). Refreshes every 15s while open.
+const RIP_SHEET = "https://docs.google.com/spreadsheets/d/1k-P9obZW_sr27We5wXntHBwLrRLQva69NbOwpRYtIDs/gviz/tq?tqx=out:csv&headers=0&gid=0";
+const RIP_SHEET_VIEW = "https://docs.google.com/spreadsheets/d/1k-P9obZW_sr27We5wXntHBwLrRLQva69NbOwpRYtIDs/edit";
+const RIP_PAGE = "https://nzdurriez.github.io/tofu-rips/";
+const RIP_IMG = "https://mrtofu.store/cdn/shop/files/";
+// Tofu types short names ("KOTH", "Storm E"); these turn them into the shop's products (with their pictures)
+const RIP_CATALOG = [
+  { name: "King of the Hill", sub: "Pokémon Storm Emeralda · Wheel of Fate", img: "kingofthehillStormEmeralda.png?v=1787236327", keys: ["koth", "kingofthehill"] },
+  { name: "King of the Pirates", sub: "One Piece OP-16 · Wheel of Fate", img: "KOTPOP16J.png?v=1781340126", keys: ["kotp", "kingofthepirates"] },
+  { name: "Storm Emeralda", sub: "Pokémon Japanese booster pack", img: "StormEmeralda_BoosterPack_1500x_b0608301-d59a-4f53-a4ef-c34a1a64ed1e.webp?v=1787300452", keys: ["storm", "storme", "stormemeralda", "stormemerald", "emeralda"] },
+  { name: "Mega Brave", sub: "Pokémon Japanese booster pack", img: "MegaBraveBoosterPack.webp?v=1755143664", keys: ["megabrave", "megab"] },
+  { name: "Mega Symphonia", sub: "Pokémon Japanese booster pack", img: "MegaSymphoniaBoosterPack.png?v=1755143746", keys: ["megas", "megasymphonia", "symphonia"] },
+  { name: "Mega Dream", sub: "Pokémon Japanese booster box", img: "MegaDreamBoosterBox_a4ccadfd-a7a5-4501-8bda-728baeeceaa4.webp?v=1764642028", keys: ["megadream", "megad"] },
+  { name: "Battle Partners", sub: "Pokémon Japanese booster pack", img: "image-removebg-preview_26.png?v=1742266115", keys: ["battlepartners", "battlepartner", "battle", "bp"] },
+  { name: "Abyss Eye", sub: "Pokémon Japanese booster pack", img: "Abyss-Eye-Booster-Pack.webp?v=1779689177", keys: ["abysseye"] },
+  { name: "Ninja Spinner", sub: "Pokémon Japanese booster pack", img: "ninja-spinner-booster-pack.jpg?v=1773910547", keys: ["ninjaspinner"] },
+  { name: "Nihil Zero", sub: "Pokémon Japanese booster pack", img: "nihil-zero-booster-pack-jp.webp?v=1769663505", keys: ["nihilzero"] },
+  { name: "Friday Bundle", sub: "Friday Madness · Pokémon Bounty Bundle", img: "30thCelebrationperfectorder.png?v=1789289964", keys: ["fridaybundle", "friday", "fridaymadness", "fridaymadnessbundle", "bountybundle", "bounty"] },
+  { name: "OP-14 Azure Sea’s Seven", sub: "One Piece Japanese booster box", img: "OP14-Japanese.webp?v=1768808140", keys: ["op14"] },
+  { name: "OP-15 Adventure on KAMI’s Island", sub: "One Piece Japanese booster box", img: "OP15JapaneseBox_d531f72f-4d0f-4c7c-a526-452472af259d.webp?v=1773043567", keys: ["op15"] },
+  { name: "OP-16 The Time of Battle", sub: "One Piece Japanese booster box", img: "OP16BBJP.webp?v=1788417826", keys: ["op16"] },
+  { name: "OP-18", sub: "One Piece English booster box", img: "one_piece_card_game_op_18_booster_box_84646.webp?v=1790837846", keys: ["op18"] },
+  { name: "PRB-02 The Best Vol.2", sub: "One Piece Japanese premium booster", img: "PRB02BoosterBox.webp?v=1754260509", keys: ["prb02", "prb2"] },
+  { name: "Blissful Eternity", sub: "Final Fantasy TCG Opus XXIX", img: "blissful-eternity.webp?v=1786053481", keys: ["blissfuleternity", "blissful", "opusxxix"] },
+  { name: "Pixar", sub: "Weiss Schwarz Japanese booster pack", img: "PixarJapaneseBoosterPack_68b6c4f9-d72c-4692-9712-441d4189302d.jpg?v=1754533642", keys: ["pixar"] },
+  { name: "Disney 100", sub: "Weiss Schwarz booster pack", img: "Weiss-Schwarz-Disney-100JapaneseBoosterPack.webp?v=1754533862", keys: ["disney", "disney100"] },
+  { name: "Harry Potter", sub: "Letogoods Sorcerer’s Stone booster pack", img: "652_e505889ff33d4d7692464e564169c7be.jpg?v=1785741440", keys: ["harrypotter", "hp"] },
+  { name: "Star Wars", keys: ["starwars", "starwas", "starwar"] },
+  { name: "Midweek Bundle", keys: ["midweekbundle", "midweek"] },
+];
+const ripKey = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const RIP_BY_KEY = new Map(RIP_CATALOG.flatMap((p) => p.keys.map((k) => [k, p])));
+const ripNorm = (s) => String(s || "").replace(/\s+/g, " ").trim(); // ("Liam  E" is "Liam E")
+const ripSame = (a, b) => ripNorm(a).toLowerCase() === ripNorm(b).toLowerCase();
+const ripRange = (a, b) => (a === b ? `${a}` : `${a}–${b}`);
+function ripSpots(idx) { // [0,1,2,7] -> "#1–3, #8"
+  const out = []; let s = null, p = null;
+  for (const x of idx.map((i) => i + 1)) { if (s === null) s = p = x; else if (x === p + 1) p = x; else { out.push("#" + ripRange(s, p)); s = p = x; } }
+  if (s !== null) out.push("#" + ripRange(s, p));
+  return out.join(", ");
+}
+function ripParse(text) { // CSV, with quoted fields
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(f); f = ""; }
+    else if (c === "\n") { row.push(f); rows.push(row); row = []; f = ""; }
+    else if (c !== "\r") f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+// The order log is at the top; below a bare heading row ("KOTH") Tofu lists them again by product: not counted
+function ripBuild(rows) {
+  const orders = [], queue = [];
+  let inLog = true;
+  for (const r of rows) {
+    const name = ripNorm(r[0]), item = ripNorm(r[1]), q = ripNorm(r[4]);
+    if (q) queue.push(q);
+    if (!inLog) continue;
+    if (!name && item && !/^\d+\s*x\s+/i.test(item)) { inLog = false; continue; }
+    if (!item && !name) continue;
+    const m = item.match(/^(\d+)\s*x\s+(.+)$/i);
+    const prod = RIP_BY_KEY.get(ripKey(m ? m[2] : item || "TBC")) || { name: m ? m[2] : item || "TBC" };
+    orders.push({ name: name || "Tofu", house: !name, qty: m ? +m[1] : item ? 1 : 0, product: prod.name, info: prod });
+  }
+  const seen = {}; // a box's id ("JJ F#2" = JJ F's second box), so ticks survive Tofu adding or moving names
+  const qkeys = queue.map((n) => { const k = n.toLowerCase(); seen[k] = (seen[k] || 0) + 1; return k + "#" + seen[k]; });
+  return { orders, queue, qkeys, date: ripNorm((rows[0] || [])[6]) };
+}
+let rips = null, ripGroups = [], ripTicks = new Set(), ripTicksFor = null, ripTimer = null, ripScrolledTo = null;
+const ripTickKey = () => "dropRipTicks:" + (rips.date || new Date().toDateString());
+function ripLoadTicks() {
+  const k = ripTickKey();
+  if (k === ripTicksFor) return;
+  ripTicksFor = k;
+  try { ripTicks = new Set(JSON.parse(localStorage.getItem(k) || "[]")); } catch { ripTicks = new Set(); }
+}
+function ripSaveTicks() { try { localStorage.setItem(ripTickKey(), JSON.stringify([...ripTicks])); } catch {} }
+const ripThumb = (info) => (info.img
+  ? `<img src="${RIP_IMG}${esc(info.img)}&width=120" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'ph',textContent:'📦'}))">`
+  : `<span class="ph">📦</span>`);
+const ripItemsHtml = (its) => (its.length
+  ? `<span class="ripitems">${its.map((it) => `<span class="ripitem" title="${esc(it.info.sub || it.product)}">${ripThumb(it.info)}<b>${it.qty}×</b>${esc(it.product)}</span>`).join("")}</span>` : "");
+function ripStatus(kind, text) {
+  $("ripStatus").className = "ripstatus" + (kind ? " " + kind : "");
+  $("ripStatus").lastChild.textContent = text;
+}
+async function loadRips() {
+  try {
+    const r = await fetch(RIP_SHEET + "&t=" + Date.now());
+    if (!r.ok) throw new Error(r.status);
+    rips = ripBuild(ripParse(await r.text()));
+    ripLoadTicks();
+    ripStatus("", "Updated " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+  } catch {
+    ripStatus("err", rips ? "Can't reach Tofu's sheet, retrying" : "Can't reach Tofu's sheet");
+  }
+  renderRips();
+}
+function renderRips() {
+  if (!rips) {
+    $("ripList").innerHTML = `<li class="ripempty">Loading Tofu's rip order…</li>`;
+    return;
+  }
+  const { orders, queue, qkeys } = rips;
+  const items = new Map(); // what each person is ripping: their orders added up
+  for (const o of orders) {
+    if (o.house) continue;
+    const k = o.name.toLowerCase(), list = items.get(k) || [];
+    let it = list.find((x) => x.product === o.product);
+    if (!it) { it = { product: o.product, info: o.info, qty: 0 }; list.push(it); }
+    it.qty += o.qty;
+    items.set(k, list);
+  }
+  ripGroups = [];
+  queue.forEach((n, i) => {
+    const last = ripGroups[ripGroups.length - 1];
+    if (last && ripSame(last.name, n)) last.idx.push(i); else ripGroups.push({ name: n, idx: [i] });
+  });
+  const nowBox = qkeys.findIndex((k) => !ripTicks.has(k));
+  const term = ripNorm($("ripFind").value).toLowerCase();
+  const hit = (n) => !!term && n.toLowerCase().includes(term);
+  const opened = qkeys.filter((k) => ripTicks.has(k)).length;
+  const people = new Set(queue.map((n) => n.toLowerCase())).size;
+  $("ripDate").textContent = rips.date || new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  $("ripSum").innerHTML = queue.length ? `<div class="ripfacts">
+      <span><b>${queue.length}</b>box${queue.length === 1 ? "" : "es"}</span>
+      <span><b>${people}</b>${people === 1 ? "person" : "people"}</span>
+      <span><b>${opened}</b>opened</span>
+      <span><b>${queue.length - opened}</b>to go</span>
+    </div><div class="ripbar"><i style="width:${Math.round((opened / queue.length) * 100)}%"></i></div>` : "";
+  // Your boxes: where they are, and how many to go before them
+  const spots = term ? queue.map((n, i) => (hit(n) ? i : -1)).filter((i) => i >= 0) : [];
+  $("ripMine").hidden = !term;
+  if (term) {
+    const open = spots.filter((i) => !ripTicks.has(qkeys[i]));
+    const ahead = open.length ? qkeys.slice(0, open[0]).filter((k) => !ripTicks.has(k)).length : null;
+    const names = [...new Set(spots.map((i) => queue[i]))].join(" / ");
+    $("ripMine").innerHTML = spots.length
+      ? `<b>${esc(names)}</b> · box${spots.length === 1 ? "" : "es"} ${ripSpots(spots)} · ${ahead === null ? "all opened ✓" : ahead === 0 ? "<b>you're up now!</b>" : `${ahead} box${ahead === 1 ? "" : "es"} to go before yours`}`
+      : `No boxes for “${esc($("ripFind").value.trim())}” in the rip order (yet).`;
+  }
+  $("ripList").innerHTML = ripGroups.map((g, gi) => {
+    const doneN = g.idx.filter((i) => ripTicks.has(qkeys[i])).length;
+    const done = doneN === g.idx.length, part = doneN > 0 && !done, now = g.idx.includes(nowBox), mine = hit(g.name);
+    const its = items.get(g.name.toLowerCase()) || [];
+    const what = its.map((it) => `${it.qty}× ${it.product}`).join(" · ");
+    return `<li class="${done ? "done" : ""} ${part ? "part" : ""} ${now ? "now" : ""} ${mine ? "mine" : ""}" data-g="${gi}"${part ? ` style="--p:${Math.round((doneN / g.idx.length) * 100)}%"` : ""} role="button" tabindex="0" aria-pressed="${done}" title="${done ? "Opened: click to undo" : "Click when Tofu opens it"}">
+      <span class="n">${done ? "✓" : ripRange(g.idx[0] + 1, g.idx[g.idx.length - 1] + 1)}</span>
+      <span class="who">${now ? `<span class="nowtag">${doneN ? "Opening now" : "Up next"}</span>` : ""}<span class="name">${esc(g.name)}</span>${now || mine ? ripItemsHtml(its) : what ? `<span class="what">${esc(what)}</span>` : ""}</span>
+      ${g.idx.length > 1 ? `<span class="boxes">${part ? `${doneN} of ${g.idx.length}` : `${g.idx.length} boxes`}</span>` : ""}
+    </li>`;
+  }).join("") || `<li class="ripempty">Tofu hasn't posted the rip order yet.<br>It shows up here when he does.</li>`;
+  $("ripFoot").innerHTML = `${queue.length ? (opened ? `<span>${opened} ticked off</span><button class="linkish" id="ripReset">Reset</button>` : "<span>Click a name when Tofu opens it</span>") : ""}
+    <span class="spacer"></span><a href="${RIP_SHEET_VIEW}" target="_blank" rel="noopener">Tofu's sheet ↗</a><a href="${RIP_PAGE}" target="_blank" rel="noopener">Full rip tracker ↗</a>`;
+  const reset = $("ripReset");
+  if (reset) reset.onclick = () => { ripTicks.clear(); ripSaveTicks(); renderRips(); };
+  if (nowBox !== ripScrolledTo) { // keep the box being opened in view (a couple of opened ones above it)
+    ripScrolledTo = nowBox;
+    const li = $("ripList").querySelector("li.now");
+    $("ripList").scrollTop = li ? Math.max(0, li.offsetTop - 70) : 0;
+  }
+}
+function ripToggle(gi) {
+  const g = ripGroups[gi];
+  if (!g) return;
+  const keys = g.idx.map((i) => rips.qkeys[i]), all = keys.every((k) => ripTicks.has(k));
+  keys.forEach((k) => (all ? ripTicks.delete(k) : ripTicks.add(k)));
+  ripSaveTicks();
+  renderRips();
+}
+// Beside the stream (so it stays in view): on whichever side has room; over it if neither has
+function placeRips() {
+  const pop = $("ripPop"), col = document.querySelector(".col-stream").getBoundingClientRect();
+  const w = Math.min(460, innerWidth - 24), gap = 12;
+  let left;
+  if (innerWidth - col.right >= w + gap + 8) left = col.right + gap;
+  else if (col.left >= w + gap + 8) left = col.left - gap - w;
+  else left = Math.max(12, Math.min(col.left, innerWidth - w - 12));
+  const top = Math.min(Math.max(12, col.top), innerHeight - 340);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  pop.style.width = w + "px";
+  pop.style.height = Math.max(340, Math.min(col.bottom > top ? col.bottom - top : 0, innerHeight - top - 12)) + "px";
+}
+$("ripBtn").addEventListener("click", () => setTimeout(() => { // (once the pop-up code below has opened or closed it)
+  clearInterval(ripTimer);
+  ripTimer = null;
+  if ($("ripPop").hidden) return;
+  placeRips();
+  ripScrolledTo = null;
+  renderRips();
+  loadRips();
+  ripTimer = setInterval(() => {
+    if ($("ripPop").hidden) { clearInterval(ripTimer); ripTimer = null; } else loadRips();
+  }, 15000);
+}, 0));
+$("ripClose").onclick = () => closePops();
+$("ripList").addEventListener("click", (e) => { const li = e.target.closest("li[data-g]"); if (li) ripToggle(+li.dataset.g); });
+$("ripList").addEventListener("keydown", (e) => {
+  const li = e.target.closest("li[data-g]");
+  if (li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); ripToggle(+li.dataset.g); }
+});
+try { $("ripFind").value = localStorage.getItem("dropRipName") || ""; } catch {}
+$("ripFind").addEventListener("input", () => {
+  try { localStorage.setItem("dropRipName", $("ripFind").value); } catch {}
+  renderRips();
+});
+addEventListener("resize", () => { if (!$("ripPop").hidden) placeRips(); });
+addEventListener("scroll", () => { if (!$("ripPop").hidden) placeRips(); }, { passive: true });
+
 // ---------- ⚙ settings: one tab at a time ----------
 function setTab(name) {
   if (!document.querySelector(`.setpane[data-pane="${name}"]`)) name = "sound";
@@ -1050,7 +1333,11 @@ document.querySelectorAll("[data-pop]").forEach((btn) => btn.onclick = () => {
   pop.hidden = !open;
   btn.setAttribute("aria-expanded", String(open));
 });
-document.addEventListener("click", (e) => { if (!e.target.closest(".popwrap")) closePops(); });
+// (The click's path as it happened: a row that redraws itself when clicked is gone from the page by now.
+// And a button can sit apart from its pop-up: 📦 Rip queue)
+document.addEventListener("click", (e) => {
+  if (!e.composedPath().some((n) => n instanceof Element && n.matches(".popwrap, [data-pop]"))) closePops();
+});
 // The activity log (⚙'s neighbour): a dot on it when something new comes in while it's closed
 function newActivity() { if ($("actPop").hidden) $("actDot").hidden = false; }
 $("actBtn").addEventListener("click", () => {
