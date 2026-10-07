@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 6;
+const COMMANDS_VERSION = 7;
 const COMMANDS = [
   {
     name: "password",
@@ -93,7 +93,13 @@ const COMMANDS = [
       ],
     }],
   },
-  { name: "speed", description: "Drop mode's check speed for each shop (buttons)", default_member_permissions: "32" },
+  { name: "speed", description: "Drop mode's controls: start, stop, and each shop's check speed", default_member_permissions: "32" },
+  {
+    name: "dropmode-panel",
+    description: "Post drop mode's controls in this channel (only you can use them; it keeps itself up to date)",
+    default_member_permissions: "32",
+    contexts: [0],
+  },
   {
     name: "wishlist",
     description: "Your own wishlist: get pinged in your private channel when something's in stock",
@@ -149,6 +155,7 @@ export default {
       await registerCommands(run);
       try {
         await watchDropMode(run);
+        await refreshPanel(run);
       } catch (err) {
         console.log("Couldn't look for drop mode:", String(err));
       }
@@ -326,52 +333,81 @@ async function dropModeHelper(request, env, url) {
   return wishlistStore(env).fetch("https://wishlists/dm/done", { method: "POST", body: await request.text() });
 }
 
-// /speed's panel: each shop drop mode has, watching or not and how often, with buttons for one of them
+// Drop mode's controls (/speed, and the panel /dropmode-panel posts): how it is, start and close it, and each
+// shop's speed and watching, with buttons for one shop at a time. Only the owner can use the buttons.
 const SPEEDS = [0.5, 1, 2, 3, 5, 10];
 const every = (n) => (n === 0.5 ? "½s" : `${n}s`);
-function speedPanel(st, sel, note) {
+function controlPanel(st, sel, note) {
   const h = st.helper || {}, fresh = !!h.at && Date.now() - h.at < 45000, shops = h.shops || [];
   const shop = shops.find((s) => s.id === sel) || shops[0];
-  let body;
-  if (!h.at) body = "The helper on your PC hasn't checked in yet. It starts when you log in to Windows.";
-  else if (!fresh) body = `Your PC's helper last checked in <t:${Math.floor(h.at / 1000)}:R>, so I can't reach drop mode. Is the PC on?`;
-  else if (!h.running) body = "Drop mode is closed. `/dropmode start` opens it.";
-  else body = shops.map((s) => `${s.running ? "🟢" : "⚪"} **${s.name}** · ${s.running ? `watching every ${every(s.interval)}` : `not watching${s.interval ? ` (set to ${every(s.interval)})` : ""}`}`).join("\n")
-    + (shops.length > 1 && shop ? `\n\nThe buttons are for **${shop.name}** (pick another shop below).` : "");
+  const on = shops.filter((s) => s.running);
+  let status;
+  if (!h.at) status = "⚪ The helper on your PC hasn't checked in yet (it starts when you log in to Windows).";
+  else if (!fresh) status = `🔴 Can't reach your PC: its helper last checked in <t:${Math.floor(h.at / 1000)}:R>. Is it on?`;
+  else if (!h.running) status = "⚪ **Closed**";
+  else status = on.length ? "🟢 **Running and watching**" : "🟡 **Open, but not watching**";
+  let body = status;
+  if (fresh && h.running && shops.length) {
+    body += "\n" + shops.map((s) => `${s.running ? "🟢" : "⚪"} ${s.name} · ${s.running ? `every ${every(s.interval)}` : `not watching${s.interval ? ` (set to ${every(s.interval)})` : ""}`}`).join("\n");
+    if (shops.length > 1 && shop) body += `\n\nThe speed buttons are for **${shop.name}**.`;
+  }
+  const button = (style, label, emoji, custom_id) => ({ type: 2, style, label, emoji: { name: emoji }, custom_id });
   const components = [];
-  if (fresh && h.running && shop) {
+  const reach = fresh && h.at;
+  components.push(row(
+    ...(reach && !(h.running && on.length) ? [button(3, h.running ? "Start watching" : "Start drop mode", "▶️", "dm:start")] : []),
+    ...(reach && h.running ? [button(4, "Close drop mode", "⏹️", "dm:stop")] : []),
+    button(2, "Refresh", "🔄", `dm:refresh:${(shop || {}).id || ""}`)));
+  if (reach && h.running && shop) {
     if (shops.length > 1) components.push(row({ type: 3, custom_id: "dm:shop", options: shops.map((s) => ({ label: s.name, value: s.id, default: s.id === shop.id })) }));
     const speed = (n) => ({ type: 2, style: shop.interval === n ? 3 : 2, label: every(n), custom_id: `dm:speed:${shop.id}:${n}` });
     components.push(row(...SPEEDS.slice(0, 5).map(speed)));
-    components.push(row(speed(10),
-      shop.running ? { type: 2, style: 4, label: "Stop watching", emoji: { name: "⏹️" }, custom_id: `dm:unwatch:${shop.id}` }
-        : { type: 2, style: 1, label: "Start watching", emoji: { name: "▶️" }, custom_id: `dm:watch:${shop.id}` },
-      { type: 2, style: 2, label: "Refresh", emoji: { name: "🔄" }, custom_id: `dm:refresh:${shop.id}` }));
-  } else {
-    components.push(row({ type: 2, style: 2, label: "Refresh", emoji: { name: "🔄" }, custom_id: `dm:refresh:${(shop || {}).id || ""}` }));
+    components.push(row(speed(10), shop.running ? button(2, `Stop watching ${shop.name}`.slice(0, 80), "⏸️", `dm:unwatch:${shop.id}`)
+      : button(1, `Watch ${shop.name}`.slice(0, 80), "▶️", `dm:watch:${shop.id}`)));
   }
-  return { content: "⚡ **Check speed**\n" + body + (note ? `\n\n${note}` : ""), components, allowed_mentions: { parse: [] } };
+  return { content: "🎛️ **Drop mode**\n" + body + (note ? `\n\n${note}` : ""), components, allowed_mentions: { parse: [] } };
 }
+const panelSig = (panel) => JSON.stringify([panel.content, panel.components]);
 
-// A click on the panel: pick a shop, refresh, or ask the helper to change a speed or start or stop watching
-async function speedComponent(i, env, ctx, followUp) {
+// A click on the controls: pick a shop, refresh, or ask the helper to start or close drop mode, change a speed,
+// or start or stop watching a shop. (On the posted panel, the shop picked is remembered for its updates.)
+async function controlClick(i, env, ctx, followUp) {
   const [, what, sid, n] = String(i.data.custom_id).split(":");
-  const update = (data) => reply({ type: 7, data });
-  if (what === "shop") return update(speedPanel(await dropModeState(env), (i.data.values || [])[0]));
   const st = await dropModeState(env), h = st.helper || {};
-  if (what === "refresh" || !h.at || Date.now() - h.at > 45000 || !h.running) return update(speedPanel(st, sid));
-  const action = what === "speed" ? "speed" : what === "watch" ? "watch" : "unwatch";
+  const posted = st.panel && i.message && i.message.id === st.panel.message;
+  const show = async (panel, sel) => { // (and keep the posted panel's record in step)
+    if (posted) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ sel, last: panelSig(panel) }) });
+    return panel;
+  };
+  if (what === "shop") {
+    const sel = (i.data.values || [])[0];
+    return reply({ type: 7, data: await show(controlPanel(st, sel), sel) });
+  }
+  const sel = sid || (posted && st.panel.sel) || "tofu";
+  if (what === "refresh" || !h.at || Date.now() - h.at > 45000) return reply({ type: 7, data: await show(controlPanel(st, sel), sel) });
   const job = await (await wishlistStore(env).fetch("https://wishlists/dm/request", {
-    method: "POST", body: JSON.stringify({ action, shop: sid, interval: action === "speed" ? Number(n) : undefined }) })).json();
+    method: "POST", body: JSON.stringify({ action: what, shop: sid, interval: what === "speed" ? Number(n) : undefined }) })).json();
   ctx.waitUntil(followUp(async () => {
-    for (let k = 0; k < 12; k++) { // (the helper asks every few seconds)
+    for (let k = 0; k < 13; k++) { // (the helper asks every few seconds; opening drop mode takes a few more)
       await sleep(2000);
       const s = await dropModeState(env);
-      if (s.result && s.result.id === job.id) return speedPanel(s, sid, (s.result.ok ? "✅ " : "⚠️ ") + s.result.message);
+      if (s.result && s.result.id === job.id) return show(controlPanel(s, sel, `${s.result.ok ? "✅" : "⚠️"} ${s.result.message} · <t:${Math.floor(Date.now() / 1000)}:T>`), sel);
     }
-    return speedPanel(await dropModeState(env), sid, "⏳ Sent to your PC, but it hasn't answered yet. Press Refresh in a moment.");
+    return show(controlPanel(await dropModeState(env), sel, "⏳ Sent to your PC, but it hasn't answered yet. Press Refresh in a moment."), sel);
   }));
   return reply({ type: 6 }); // (the panel's edited when the helper answers)
+}
+
+// The posted panel keeps itself up to date: each minute, if what it would show has changed, it's edited.
+// (A note from a click stays until then.) A deleted panel is forgotten.
+async function refreshPanel(env) {
+  const st = await dropModeState(env);
+  if (!st.panel || !st.panel.message) return;
+  const panel = controlPanel(st, st.panel.sel), sig = panelSig(panel);
+  if (sig === st.panel.last) return;
+  const [s] = await bot(env, "PATCH", `/channels/${st.panel.channel}/messages/${st.panel.message}`, panel);
+  if (s === 404) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ clear: true }) });
+  else if (s < 300) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ last: sig }) });
 }
 
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
@@ -690,8 +726,21 @@ async function handleInteraction(request, env, ctx) {
     return deferred();
   }
 
-  if (i.type === 3 && String((i.data && i.data.custom_id) || "").startsWith("dm:")) return speedComponent(i, env, ctx, followUp);
-  if (name === "speed") return reply({ type: 4, data: { flags: EPHEMERAL, ...speedPanel(await dropModeState(env), "tofu") } });
+  if (i.type === 3 && String((i.data && i.data.custom_id) || "").startsWith("dm:")) return controlClick(i, env, ctx, followUp);
+  if (name === "speed") return reply({ type: 4, data: { flags: EPHEMERAL, ...controlPanel(await dropModeState(env), "tofu") } });
+  if (name === "dropmode-panel") {
+    if (!i.guild_id || !i.channel_id) return reply({ type: 4, data: { flags: EPHEMERAL, content: "Use this in a channel in your server." } });
+    ctx.waitUntil(followUp(async () => {
+      const panel = controlPanel(await dropModeState(env), "tofu");
+      const [s, msg] = await bot(env, "POST", `/channels/${i.channel_id}/messages`, panel);
+      if (s === 403) return { content: "I'm not allowed to post in this channel. Give me **Send Messages** here, then try again." };
+      if (s >= 300 || !msg || !msg.id) return { content: `Couldn't post the panel (Discord said ${s}).` };
+      await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST",
+        body: JSON.stringify({ channel: i.channel_id, message: msg.id, sel: "tofu", last: panelSig(panel) }) });
+      return { content: "Posted drop mode's controls. Only you can use the buttons, and it keeps itself up to date (each minute). Pin it if you like: right-click it, then **Pin Message**." };
+    }));
+    return deferred();
+  }
 
   if (name === "dropmode") {
     const action = ((i.data.options || [])[0] || {}).value;
@@ -798,6 +847,13 @@ export class WishlistStore {
         if (dm.pending.action === "stop" && r.ok) dm.stoppedAt = now; // (closed on purpose: no "it's stopped" warning)
         dm.pending = null;
       }
+      await save();
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/dm/panel") { // where the posted panel is: { channel, message, sel, last }, or changes to it
+      const b = await request.json();
+      dm.panel = b.channel ? { channel: b.channel, message: b.message, sel: b.sel || "tofu", last: b.last || "" }
+        : b.clear ? null : { ...(dm.panel || {}), ...b };
       await save();
       return Response.json({ ok: true });
     }
