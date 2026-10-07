@@ -90,6 +90,10 @@ def start():
         else:
             return False, "Drop mode didn't open within a minute. Have a look at your PC."
         opened = True
+    for _ in range(30):  # (and wait for it to load the shop, so watching starts from the shop as it is)
+        if any(s.get("products") for s in (ask(f"{DROP}/api/stores", timeout=4) or {}).get("stores", []) if s.get("id") == "tofu"):
+            break
+        time.sleep(1)
     r = ask(f"{DROP}/api/resume", {}) or {}
     shops = r.get("watching") or []
     if not shops:

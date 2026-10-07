@@ -836,6 +836,12 @@ class Watcher:
             current, self.left_out = dm.summarise_all(body)
             current = self.without_events(current)
             self.etag = etag or None
+            if not self.products:  # (watching began before the shop had loaded: this is the starting point, not a
+                # list of changes, so it's what starting to watch does: in stock already opens checkout, pings, once)
+                self.products = current
+                self.checkout(self.ready_items())
+                self.ping_friends({}, current, first=True)
+                return 0.0
             ready = self.went_live(self.products, current)
             self.ping_friends(self.products, current, sold_out=recent)
             self.products = current
@@ -1727,7 +1733,8 @@ def add_store(link, name):
 
 def store_list():
     return [{"id": w.id, "name": w.name, "host": w.site.host, "shop": w.site.shop, "collection": w.site.collection,
-             "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running, "interval": w.interval}
+             "builtin": w.id == "tofu", "categories": bool(w.cat_cfg), "running": w.running, "interval": w.interval,
+             "products": len(w.products)}
             for w in list(WATCHERS.values())]
 
 
