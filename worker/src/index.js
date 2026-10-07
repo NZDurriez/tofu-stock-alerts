@@ -112,11 +112,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // KV reads can be up to a minute stale at the edge, so within one run keep
 // our own writes in memory and read those first. Stops repeat alerts between
-// the several checks a run makes.
+// the several checks a run makes. What's read is kept too (a run lasts a minute),
+// so checking every few seconds stays well inside the free plan's daily KV reads.
 function withMemory(kv) {
   const mem = new Map();
   return {
-    get: async (k) => (mem.has(k) ? mem.get(k) : kv.get(k)),
+    get: async (k) => {
+      if (!mem.has(k)) mem.set(k, await kv.get(k));
+      return mem.get(k);
+    },
     put: async (k, v) => { mem.set(k, v); await kv.put(k, v); },
     delete: async (k) => { mem.set(k, null); await kv.delete(k); },
   };
@@ -129,7 +133,7 @@ export default {
     const run = { ...env, STATE: withMemory(env.STATE) };
     ctx.waitUntil((async () => {
       await registerCommands(run);
-      const n = Math.max(1, Math.min(6, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
+      const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
       for (let k = 0; k < n; k++) {
         const wait = start + (k * 60000) / n - Date.now();

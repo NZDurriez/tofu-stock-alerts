@@ -8,8 +8,8 @@ workers_dev = true
 crons = ["* * * * *"]
 
 [vars]
-# Checks per cron run (cron fires every minute): 4 = every 15 seconds. Max 6.
-CHECKS_PER_MINUTE = "4"
+# Checks per cron run (cron fires every minute): 12 = every 5 seconds. Max 12.
+CHECKS_PER_MINUTE = "12"
 DISCORD_PING = "<@147963835339243521>"
 DISCORD_OWNER_ID = "147963835339243521"
 # Discord app for slash commands (both values are public; the bot token is a secret)
