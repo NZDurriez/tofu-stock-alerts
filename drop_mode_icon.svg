@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Drop Mode: a pug, with a lightning bolt (fast checkout) -->
+  <!-- Drop Mode: a pug with a lightning-bolt scar, and a lightning bolt (fast checkout) -->
   <g stroke="#2b2a26" stroke-width="2.4" stroke-linejoin="round">
     <path d="M14 17 Q4 15 3.5 27 Q4 31 8 31 Q12 26 18 23 Z" fill="#3d342b"/>
     <path d="M50 17 Q60 15 60.5 27 Q60 31 56 31 Q52 26 46 23 Z" fill="#3d342b"/>
@@ -10,6 +10,7 @@
     <path d="M25 22 Q32 19 39 22"/>
     <path d="M27 26.5 Q32 24.5 37 26.5"/>
   </g>
+  <path d="M30.5 16.5 L26.5 22.2 L30.2 22.8 L26.2 28.5" fill="none" stroke="#c4504a" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="21" cy="35" r="6" fill="#2b2a26"/>
   <circle cx="43" cy="35" r="6" fill="#2b2a26"/>
   <circle cx="23" cy="33" r="1.9" fill="#fff"/>
