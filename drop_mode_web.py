@@ -745,6 +745,7 @@ class Watcher:
         right now goes straight to checkout (once); the rest opens the moment
         it's added to the shop or comes back in stock."""
         self.picks, self.words = self.parse_wanted(picks, watches)
+        updating = self.running
         interval = max(0.5, float(interval or 3))
         faster_or_slower, self.interval = interval != self.interval, interval
         save_watching(self.id, interval)
@@ -773,8 +774,9 @@ class Watcher:
             summary.append(f"wishlists from Discord ({keepers} {'person' if keepers == 1 else 'people'}, "
                            f"{kept} thing{'' if kept == 1 else 's'})")
         self.log("info", "Watching every %gs for: %s" % (self.interval, "; ".join(summary) if summary else "nothing yet (announcing changes only)"))
-        if open_now:
-            self.checkout(self.ready_items())
+        if open_now:  # (in stock already: no drop to time, so the log says why it opened straight away)
+            self.checkout(self.ready_items(), " · ⏱️ straight away: it was already in stock when you "
+                          + ("added it" if updating else "started watching"))
         self.ping_friends({}, self.products, first=True)
 
     def went_live(self, old, current, quiet=False):
@@ -870,7 +872,7 @@ class Watcher:
             if not self.products:  # (watching began before the shop had loaded: this is the starting point, not a
                 # list of changes, so it's what starting to watch does: in stock already opens checkout, pings, once)
                 self.products = current
-                self.checkout(self.ready_items())
+                self.checkout(self.ready_items(), " · ⏱️ straight away: it was already in stock when the shop loaded")
                 self.ping_friends({}, current, first=True)
                 return 0.0
             ready = self.went_live(self.products, current)
