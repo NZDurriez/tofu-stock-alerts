@@ -169,9 +169,17 @@ export default {
       }
       const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
+      const every = Math.max(1, Math.round(n / 4)); // (and is drop mode still there? about every 15 seconds)
       for (let k = 0; k < n; k++) {
         const wait = start + (k * 60000) / n - Date.now();
         if (wait > 0) await sleep(wait);
+        if (k && k % every === 0) {
+          try {
+            await watchDropMode(run);
+          } catch (err) {
+            console.log("Couldn't look for drop mode:", String(err));
+          }
+        }
         try {
           await runCheck(run);
         } catch (err) {
@@ -614,15 +622,15 @@ async function refreshStatsPanel(env) {
 
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
 
-// Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for a
-// few minutes (DROP_MODE_QUIET_SECONDS, normally 3 minutes), say so in the stock-alerts channel, once, with
-// a ping, and again when it's back.
+// Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for
+// DROP_MODE_QUIET_SECONDS (normally 30; it's looked at about every 15 seconds, so it's said within a minute),
+// say so in the stock-alerts channel, once, with a ping, and again when it's back.
 async function watchDropMode(env) {
   if (!env.WISHLISTS || !(env.DROP_MODE_KEY || "").trim()) return;
   const seen = ((await (await wishlistStore(env).fetch("https://wishlists/seen")).json()) || {}).seen || 0;
   if (!seen) return; // (it's never connected)
   const meta = await getMeta(env), now = Date.now();
-  const quiet = now - seen > (parseInt(env.DROP_MODE_QUIET_SECONDS || "180", 10) || 180) * 1000;
+  const quiet = now - seen > (parseInt(env.DROP_MODE_QUIET_SECONDS || "30", 10) || 30) * 1000;
   const at = Math.floor(seen / 1000), ping = (env.DISCORD_PING || "").trim();
   if (quiet && !meta.dropModeDown) {
     const st = await dropModeState(env);
@@ -1109,11 +1117,11 @@ export class WishlistStore {
   }
 
   // When drop mode last read the lists (it does every few seconds while it's running): kept in memory,
-  // saved at most once a minute (the bot only looks once a minute)
+  // saved at most every 10 seconds (so a restart of this store can't make it look stopped)
   async markSeen() {
     const now = Date.now();
     this.seen = now;
-    if (now - (this.saved || 0) > 60000) {
+    if (now - (this.saved || 0) > 10000) {
       this.saved = now;
       await this.state.storage.put("seen", now);
     }

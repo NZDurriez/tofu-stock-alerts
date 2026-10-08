@@ -2514,10 +2514,13 @@ function alertFor(ev, sid) {
   if (ev.alert === "open" && lockStore === sid) $("lockAlert").classList.remove("show");
   if (sid !== STORE && (ev.kind === "checkout" || ev.alert === "lock")) unseen[sid] = (unseen[sid] || 0) + 1; // a number on its tab
 }
+let boot = null; // which run of drop mode this page is talking to: when it's been closed and started again, reload
 async function pollOnce(sid) {
   const gen = viewGen;
   try {
     const r = await api("/api/events?since=" + (sid === STORE ? lastId : (seen[sid] || 0)), null, {}, sid);
+    if (r.boot && boot && r.boot !== boot) { location.reload(); return; }
+    if (r.boot) boot = r.boot;
     if (r.error === "no such shop") { // removed in another window
       await loadStores();
       if (!stores.some((s) => s.id === STORE)) switchStore("tofu"); else applyStore();

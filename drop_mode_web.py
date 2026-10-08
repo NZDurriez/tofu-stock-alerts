@@ -49,6 +49,9 @@ DISCORD_FILE = os.path.join(dm.SOUND_DIR, "discord.json")      # your Discord pi
 FRIENDS_FILE = os.path.join(dm.SOUND_DIR, "friends.json")      # friends with their own wishlists (pinged, never opened here)
 PINGED_FILE = os.path.join(dm.SOUND_DIR, "pinged.json")        # what friends were pinged about (so a restart doesn't ping again)
 ALERTS_FILE = os.path.join(dm.SOUND_DIR, "alerts.json")        # those pings' messages (deleted when it sells out)
+PAGE_FILE = os.path.join(dm.SOUND_DIR, "page.json")  # was the page open when drop mode last ran? (to reuse that tab)
+BOOT = f"{time.time():.3f}"  # this run (an open page reloads itself when it changes)
+PAGE_SEEN = {"last": 0.0}  # when the page last asked for events
 WATCHING_FILE = os.path.join(dm.SOUND_DIR, "watching.json")    # which shops were being watched, how often (to resume)
 # The stock-alert bot, where people keep wishlists of their own with /wishlist (drop mode reads them with your key)
 BOT_URL = (os.environ.get("DROP_BOT_URL") or "https://tofu-stock-watch.alex-mangin35.workers.dev").rstrip("/")
@@ -1896,13 +1899,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/events":
-            W.last_poll = time.time()
+            W.last_poll = PAGE_SEEN["last"] = time.time()
             since = int(params.get("since", "0") or 0)
             with W.lock:
                 evs = [e for e in W.events if e["id"] > since]
             self.send_json({"events": evs, "running": W.running, "loggedIn": W.logged_in,
                             "shopState": W.shop_state, "passwordSaved": bool(W.password),
-                            "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval,
+                            "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval, "boot": BOOT,
                             "wlVersion": W.wl_version, "live": LIVE.on, "lists": LISTS.seq})
         elif path == "/api/watchlist":
             self.send_json({"items": W.watchlist, "version": W.wl_version})
@@ -2104,6 +2107,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, 404)
 
 
+def note_page():
+    """Every 10 seconds: when the page last asked for events, and that drop mode's still running. Next time,
+    that says whether a tab was open when it closed."""
+    while True:
+        try:
+            os.makedirs(dm.SOUND_DIR, exist_ok=True)
+            with open(PAGE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"page": PAGE_SEEN["last"], "alive": time.time()}, f)
+        except OSError:
+            pass
+        time.sleep(10)
+
+
+def open_page(url, before):
+    """Open the page in the browser, unless a tab from last time is still open: that reloads itself once drop
+    mode's back (within a second, or up to a minute if the browser's slowed that tab down), so wait for it."""
+    start = time.time()
+    was_open = before.get("page", 0) > 0 and before.get("alive", 0) - before.get("page", 0) < 75  # (a slowed-down tab asks once a minute)
+    while was_open and time.time() - start < 65:
+        if PAGE_SEEN["last"] >= start:
+            return
+        time.sleep(0.5)
+    if PAGE_SEEN["last"] < start:
+        webbrowser.open(url)
+
+
 class Server(ThreadingHTTPServer):
     # On Windows, "reuse address" lets a second copy of drop mode quietly share
     # the port (two copies watching at once). Without it, a second copy can't
@@ -2135,8 +2164,14 @@ def main():
         w.load_soon()
     threading.Thread(target=LIVE.watch, daemon=True).start()  # is Tofu live? (for the heads-up ping)
     threading.Thread(target=LISTS.watch, daemon=True).start()  # the wishlists people keep in Discord
+    try:
+        with open(PAGE_FILE, encoding="utf-8") as f:
+            before = json.load(f)
+    except (OSError, ValueError):
+        before = {}
+    threading.Thread(target=note_page, daemon=True).start()
     if os.environ.get("DROP_WEB_NO_BROWSER") != "1":
-        webbrowser.open(url)
+        threading.Thread(target=open_page, args=(url, before if isinstance(before, dict) else {}), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
