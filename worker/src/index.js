@@ -394,7 +394,7 @@ async function controlClick(i, env, ctx, followUp) {
   const st = await dropModeState(env), h = st.helper || {};
   const posted = st.panel && i.message && i.message.id === st.panel.message;
   const show = async (panel, sel) => { // (and keep the posted panel's record in step)
-    if (posted) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ sel, last: panelSig(panel) }) });
+    if (posted) await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST", body: JSON.stringify({ sel, last: panelSig(panel), ...(i.guild_id ? { guild: i.guild_id } : {}) }) });
     return panel;
   };
   if (what === "shop") {
@@ -625,10 +625,15 @@ async function watchDropMode(env) {
   const quiet = now - seen > (parseInt(env.DROP_MODE_QUIET_SECONDS || "180", 10) || 180) * 1000;
   const at = Math.floor(seen / 1000), ping = (env.DISCORD_PING || "").trim();
   if (quiet && !meta.dropModeDown) {
-    if (((await dropModeState(env)).stoppedAt || 0) >= seen - 60000) return; // (closed with /dropmode stop: not news)
+    const st = await dropModeState(env);
+    if ((st.stoppedAt || 0) >= seen - 60000) return; // (closed with /dropmode stop: not news)
     meta.dropModeDown = seen;
     await env.STATE.put("meta", JSON.stringify(meta));
-    await notify(env, `${ping} ⚠️ **Drop mode has stopped.** It last checked in at <t:${at}:t> (<t:${at}:R>), so wishlist pings and checkouts on your PC aren't happening. I'll say here when it's back.`.trim());
+    const p = st.panel && st.panel.message ? st.panel : null;
+    const again = !p ? "To start it again, use `/dropmode start`."
+      : p.guild ? `To start it again, press **Start drop mode** on [the drop mode panel](https://discord.com/channels/${p.guild}/${p.channel}/${p.message}) (or use \`/dropmode start\`).`
+      : `To start it again, press **Start drop mode** on the drop mode panel in <#${p.channel}> (or use \`/dropmode start\`).`;
+    await notify(env, `${ping} ⚠️ **Drop mode has stopped.** It last checked in at <t:${at}:t> (<t:${at}:R>), so wishlist pings and checkouts on your PC aren't happening. I'll say here when it's back.\n${again}`.trim());
   } else if (!quiet && meta.dropModeDown) {
     const mins = Math.max(1, Math.round((now - meta.dropModeDown) / 60000));
     delete meta.dropModeDown;
@@ -938,7 +943,7 @@ async function handleInteraction(request, env, ctx) {
       if (s === 403) return { content: "I'm not allowed to post in this channel. Give me **Send Messages** here, then try again." };
       if (s >= 300 || !msg || !msg.id) return { content: `Couldn't post the panel (Discord said ${s}).` };
       await wishlistStore(env).fetch("https://wishlists/dm/panel", { method: "POST",
-        body: JSON.stringify({ channel: i.channel_id, message: msg.id, sel: "tofu", last: panelSig(panel) }) });
+        body: JSON.stringify({ guild: i.guild_id, channel: i.channel_id, message: msg.id, sel: "tofu", last: panelSig(panel) }) });
       return { content: "Posted drop mode's controls. Only you can use the buttons, and it keeps itself up to date (each minute). Pin it if you like: right-click it, then **Pin Message**." };
     }));
     return deferred();
@@ -1095,7 +1100,7 @@ export class WishlistStore {
     }
     if (url.pathname === "/dm/panel") { // where the posted panel is: { channel, message, sel, last }, or changes to it
       const b = await request.json();
-      dm.panel = b.channel ? { channel: b.channel, message: b.message, sel: b.sel || "tofu", last: b.last || "" }
+      dm.panel = b.channel ? { guild: b.guild || null, channel: b.channel, message: b.message, sel: b.sel || "tofu", last: b.last || "" }
         : b.clear ? null : { ...(dm.panel || {}), ...b };
       await save();
       return Response.json({ ok: true });
