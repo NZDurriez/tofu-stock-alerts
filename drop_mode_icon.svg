@@ -1,14 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Tofu Drop Mode: a happy block of tofu with a lightning bolt (fast checkout) -->
-  <g stroke="#2b2a26" stroke-width="2.6" stroke-linejoin="round">
-    <path d="M8 24 L20 12 H54 L42 24 Z" fill="#fffaf0"/>
-    <path d="M42 24 L54 12 V46 L42 58 Z" fill="#e2d5b4"/>
-    <rect x="8" y="24" width="34" height="34" rx="4" fill="#f4ecd6"/>
+  <!-- Drop Mode: a pug, with a lightning bolt (fast checkout) -->
+  <g stroke="#2b2a26" stroke-width="2.4" stroke-linejoin="round">
+    <path d="M14 17 Q4 15 3.5 27 Q4 31 8 31 Q12 26 18 23 Z" fill="#3d342b"/>
+    <path d="M50 17 Q60 15 60.5 27 Q60 31 56 31 Q52 26 46 23 Z" fill="#3d342b"/>
+    <ellipse cx="32" cy="37" rx="23" ry="21" fill="#e6bf86"/>
+    <ellipse cx="32" cy="46" rx="13.5" ry="10.5" fill="#3d342b"/>
   </g>
-  <circle cx="19" cy="39" r="2.7" fill="#2b2a26"/>
-  <circle cx="31" cy="39" r="2.7" fill="#2b2a26"/>
-  <ellipse cx="14.5" cy="45" rx="3" ry="2" fill="#f2a6a0"/>
-  <ellipse cx="35.5" cy="45" rx="3" ry="2" fill="#f2a6a0"/>
-  <path d="M22 45.5 Q25 49 28 45.5" fill="none" stroke="#2b2a26" stroke-width="2.3" stroke-linecap="round"/>
-  <path d="M49 1.5 L39 20 H46.5 L41.5 34 L58 13.5 H50 L55 1.5 Z" fill="#e8a83e" stroke="#2b2a26" stroke-width="2.4" stroke-linejoin="round"/>
+  <g fill="none" stroke="#a9834f" stroke-width="2" stroke-linecap="round">
+    <path d="M25 22 Q32 19 39 22"/>
+    <path d="M27 26.5 Q32 24.5 37 26.5"/>
+  </g>
+  <circle cx="21" cy="35" r="6" fill="#2b2a26"/>
+  <circle cx="43" cy="35" r="6" fill="#2b2a26"/>
+  <circle cx="23" cy="33" r="1.9" fill="#fff"/>
+  <circle cx="45" cy="33" r="1.9" fill="#fff"/>
+  <ellipse cx="32" cy="41.5" rx="5" ry="3.3" fill="#141210"/>
+  <path d="M32 44.5 V47.5 M26.5 48 Q29.2 51 32 47.5 Q34.8 51 37.5 48" fill="none" stroke="#141210" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M30 50 Q30 55.5 32 55.5 Q34 55.5 34 50 Z" fill="#f08a8a" stroke="#141210" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M53 1.5 L44.5 17 H51 L47 28.5 L60.5 11.5 H54 L58 1.5 Z" fill="#e8a83e" stroke="#2b2a26" stroke-width="2.2" stroke-linejoin="round"/>
 </svg>
