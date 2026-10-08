@@ -624,7 +624,7 @@ const dropModeState = async (env) => (await (await wishlistStore(env).fetch("htt
 
 // Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for
 // DROP_MODE_QUIET_SECONDS (normally 30; it's looked at about every 15 seconds, so it's said within a minute),
-// say so in the stock-alerts channel, once, with a ping, and again when it's back.
+// say so in the alerts channel, once, with a ping, and again when it's back.
 async function watchDropMode(env) {
   if (!env.WISHLISTS || !(env.DROP_MODE_KEY || "").trim()) return;
   const seen = ((await (await wishlistStore(env).fetch("https://wishlists/seen")).json()) || {}).seen || 0;
@@ -1650,13 +1650,13 @@ function embed(kind, item, note, kw) {
   return e;
 }
 
-// A test alert in the stock-alerts channel (drop mode's "Send a test alert", with DROP_MODE_KEY): something
+// A test alert in the alerts channel (drop mode's "Send a test alert", with DROP_MODE_KEY): something
 // that's in stock now, laid out exactly like a real alert, marked as a test (and pinging nobody)
 async function testAlert(request, env) {
   const key = (env.DROP_MODE_KEY || "").trim();
   if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
   if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
-  if (!env.DISCORD_WEBHOOK_URL) return Response.json({ error: "The bot hasn't got a stock-alerts channel yet (its DISCORD_WEBHOOK_URL)." }, { status: 400 });
+  if (!env.DISCORD_WEBHOOK_URL) return Response.json({ error: "The bot hasn't got an alerts channel yet (its DISCORD_WEBHOOK_URL)." }, { status: 400 });
   let items = [];
   try {
     items = (await fetchProducts((await env.STATE.get("cookie")) || null)).map(summarise);
@@ -1675,7 +1675,7 @@ async function testAlert(request, env) {
   try {
     await postWebhook(env, payload);
   } catch (err) {
-    return Response.json({ error: `Couldn't post in the stock-alerts channel (${err.message}). Check the bot's DISCORD_WEBHOOK_URL.` }, { status: 502 });
+    return Response.json({ error: `Couldn't post in the alerts channel (${err.message}). Check the bot's DISCORD_WEBHOOK_URL.` }, { status: 502 });
   }
   return Response.json({ ok: true, item: item ? item.title : null });
 }

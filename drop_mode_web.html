@@ -209,9 +209,9 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   .col-watch>.stack>.card:last-child{display:flex;flex-direction:column}
   #watchlist{flex:1 1 0;min-height:0;overflow:auto;align-content:start;padding-right:4px;margin-right:-4px}
   .wrap{padding-bottom:12px} /* (closer to the bottom of the window) */
-  #watchlist.more-below{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent)} /* (more below: it fades out rather than looking cut off) */
+  #watchlist.more-below,#addCard.more-below{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent)} /* (more below: it fades out rather than looking cut off) */
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
-  #exactBody .list{flex:1 1 0;min-height:max(380px,50vh);max-height:none} /* (at least half the window: room to browse) */
+  #exactBody .list{flex:1 1 0;min-height:160px;max-height:none} /* (the product list takes the rest of its panel, and scrolls in it) */
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
   #kwBody .kwbox{flex:1;display:flex;flex-direction:column;min-height:0}
   #kwBody .kwbox>input{flex:none} /* (the text box keeps its height; the stats get the room) */
@@ -270,6 +270,7 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert p{color:var(--muted);margin:0 0 16px;font-size:14.5px}
 #lockAlert .err{color:var(--bad);font-size:14px;margin-top:10px;min-height:1em}
 .list{margin-top:12px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px}
+#results.more-below{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent)} /* (more below: it fades out) */
 .item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
 .item.picked{background:var(--accent-soft)}
@@ -662,7 +663,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
                 <p class="hint" id="dlMsg"></p>
               </div>
               <div>
-                <div class="sethead">Stock alerts channel</div>
+                <div class="sethead">Alerts channel</div>
                 <p class="hint">The bot posts a test alert there, with something that's in stock now.</p>
                 <button class="secondary" id="dlTest">Send a test alert</button>
                 <p class="hint" id="dlTestMsg"></p>
@@ -1332,14 +1333,16 @@ $("ripFind").addEventListener("input", () => {
 addEventListener("resize", () => { if (!$("ripPop").hidden) placeRips(); });
 addEventListener("scroll", () => { if (!$("ripPop").hidden) placeRips(); }, { passive: true });
 
-// The watchlist scrolls in its panel (wide screens): while there's more below, its bottom fades out
-function wlFade() {
-  const w = $("watchlist");
-  w.classList.toggle("more-below", w.scrollHeight - w.scrollTop - w.clientHeight > 4);
+// The watchlist, the product list and step 2's panel scroll (wide screens): while there's more below, the
+// bottom fades out rather than looking cut off
+function fadeWhenMore(el) {
+  const fade = () => el.classList.toggle("more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  el.addEventListener("scroll", fade, { passive: true });
+  new MutationObserver(fade).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+  new ResizeObserver(fade).observe(el);
+  fade();
 }
-$("watchlist").addEventListener("scroll", wlFade, { passive: true });
-new MutationObserver(wlFade).observe($("watchlist"), { childList: true, subtree: true });
-new ResizeObserver(wlFade).observe($("watchlist"));
+["watchlist", "results", "addCard"].forEach((id) => fadeWhenMore($(id)));
 
 // ---------- ⚙ settings: one tab at a time ----------
 function setTab(name) {
@@ -2265,7 +2268,7 @@ $("dcSave").onclick = () => saveDiscord();
 $("dcHook").onkeydown = (e) => { if (e.key === "Enter") saveDiscord(); };
 $("dcCheckout").onchange = $("dcLock").onchange = $("dcLive").onchange = $("dcUser").onchange = () => saveDiscord();
 $("dcRemove").onclick = () => { if (confirm("Remove the Discord webhook? Drop mode stops pinging you.")) saveDiscord({ remove: true }); };
-$("dlTest").onclick = async () => { // (the bot posts it in its stock-alerts channel)
+$("dlTest").onclick = async () => { // (the bot posts it in its alerts channel)
   $("dlTestMsg").textContent = "Sending…";
   let r;
   try { r = await api("/api/bot/test", {}); } catch { r = { message: "Couldn't reach drop mode." }; }
