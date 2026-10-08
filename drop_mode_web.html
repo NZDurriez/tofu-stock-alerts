@@ -750,7 +750,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div id="exactBody" hidden>
           <div class="exactopts" style="margin-top:2px">
             <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
-            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button></span> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
+            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button><button type="button" data-sort="low" title="Price, low to high">Cheapest</button><button type="button" data-sort="high" title="Price, high to low">Priciest</button></span> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
           </div>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
@@ -974,9 +974,9 @@ $("showSold").onchange = () => {
   try { localStorage.setItem("dropShowSold", showSold ? "1" : "0"); } catch {}
   exactLead(); loadCats(); search();
 };
-// Sort: newest listings first (with when each went up), or in stock first then A to Z (remembered)
+// Sort: newest listings first (with when each went up), in stock first then A to Z, or by price (remembered)
 let sortBy = "new";
-try { if (localStorage.getItem("dropSort") === "az") sortBy = "az"; } catch {}
+try { const s = localStorage.getItem("dropSort"); if (["az", "low", "high"].includes(s)) sortBy = s; } catch {}
 function showSort() {
   $("sortSet").querySelectorAll("button").forEach((b) => { const on = b.dataset.sort === sortBy; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
 }
@@ -1695,7 +1695,7 @@ function renderResults() {
     html += `<div class="bridge"><span>Sold out or not listed yet? Catch it with keywords:</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
-    const order = sortBy === "new" ? "newest first" : showSold ? "in stock first, then A–Z" : "A–Z";
+    const order = { new: "newest first", low: "cheapest first", high: "priciest first" }[sortBy] || (showSold ? "in stock first, then A–Z" : "A–Z");
     html += where
       ? `<div class="resnote" style="border-top:0">${showSold ? `Everything in ${esc(where)}` : `In stock in ${esc(where)}`}, ${order}. Tick several to add them together.</div>`
       : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop" : "Everything in stock right now"}, ${order}. Type to search, or tick several to add them together.</div>`;

@@ -411,7 +411,8 @@ class Watcher:
         """The exact-product search: what you can buy right now (or with
         everything, sold-out and coming-soon ones too), optionally in one of
         Tofu's categories, and one game (for the live stream). Newest listings
-        first, or (sort "az") in stock first, then A to Z."""
+        first, or (sort "az") in stock first, then A to Z, or by price ("low":
+        cheapest first, "high": dearest first; anything without a price last)."""
         keys = keywords(flt)
         in_cat = self.categories.get(cat) if cat else None
         out = []
@@ -427,6 +428,15 @@ class Watcher:
             out.append(card(pid, it, self.site.shop))
         if sort == "az":
             out.sort(key=lambda x: ({"buyable": 0, "soon": 1}.get(x["state"], 2), x["title"]))  # in stock first
+        elif sort in ("low", "high"):
+            def price_of(x):
+                try:
+                    return float(x["price"])
+                except (TypeError, ValueError):
+                    return None
+            priced = [x for x in out if price_of(x) is not None]
+            priced.sort(key=lambda x: (price_of(x) * (-1 if sort == "high" else 1), x["title"]))
+            out = priced + sorted((x for x in out if price_of(x) is None), key=lambda x: x["title"])
         else:
             out.sort(key=lambda x: (-listed_at(x["listed"]), x["title"]))  # newest listings first
         return {"items": out[:limit], "total": len(out)}
