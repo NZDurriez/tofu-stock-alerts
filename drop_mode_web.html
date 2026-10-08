@@ -209,13 +209,13 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   .col-watch>.stack>.card:last-child{display:flex;flex-direction:column}
   #watchlist{flex:1 1 0;min-height:0;overflow:auto;align-content:start;padding-right:4px;margin-right:-4px}
   .wrap{padding-bottom:12px} /* (closer to the bottom of the window) */
-  #watchlist.more-below,#addCard.more-below{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent)} /* (more below: it fades out rather than looking cut off) */
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
   #exactBody .list{flex:1 1 0;min-height:160px;max-height:none} /* (the product list takes the rest of its panel, and scrolls in it) */
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
-  #kwBody .kwbox{flex:1;display:flex;flex-direction:column;min-height:0}
+  #kwBody .kwbox{flex:1 0 auto;display:flex;flex-direction:column} /* (never smaller than what's in it, so its border goes round all of it) */
   #kwBody .kwbox>input{flex:none} /* (the text box keeps its height; the stats get the room) */
-  #kwBody .kwprev.fresh{flex:none;display:flex;flex-direction:column} /* (the drop stats show in full) */
+  #kwBody .kwprev.fresh{flex:1 1 0;min-height:110px;display:flex;flex-direction:column} /* (the drop stats take the rest of the box) */
+  #kwBody .kwprev.fresh .dlist{flex:1 1 0;min-height:0;overflow:auto} /* (and their list scrolls in it) */
 }
 @media (max-width:1099px){
   .cols{grid-template-columns:1fr}
@@ -270,7 +270,10 @@ h3.sub{font-size:15px;font-weight:600;margin:0}
 #lockAlert p{color:var(--muted);margin:0 0 16px;font-size:14.5px}
 #lockAlert .err{color:var(--bad);font-size:14px;margin-top:10px;min-height:1em}
 .list{margin-top:12px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px}
-#results.more-below{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 64px),transparent)} /* (more below: it fades out) */
+/* Lists that scroll fade out at the bottom while there's more below, and at the top once scrolled down (rather than looking cut off) */
+.more-above{--fade-top:40px}
+.more-below{--fade-bottom:56px}
+.more-above,.more-below{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fade-top,0px),#000 calc(100% - var(--fade-bottom,0px)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--fade-top,0px),#000 calc(100% - var(--fade-bottom,0px)),transparent 100%)}
 .item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-top:1px solid var(--line)}
 .item:first-child{border-top:0}
 .item.picked{background:var(--accent-soft)}
@@ -1333,16 +1336,19 @@ $("ripFind").addEventListener("input", () => {
 addEventListener("resize", () => { if (!$("ripPop").hidden) placeRips(); });
 addEventListener("scroll", () => { if (!$("ripPop").hidden) placeRips(); }, { passive: true });
 
-// The watchlist, the product list and step 2's panel scroll (wide screens): while there's more below, the
-// bottom fades out rather than looking cut off
+// The watchlist, the product list and the drop stats scroll in their panels (wide screens): while there's more
+// below, the bottom fades out, and once scrolled down, the top does
 function fadeWhenMore(el) {
-  const fade = () => el.classList.toggle("more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  const fade = () => {
+    el.classList.toggle("more-above", el.scrollTop > 4);
+    el.classList.toggle("more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+  };
   el.addEventListener("scroll", fade, { passive: true });
   new MutationObserver(fade).observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
   new ResizeObserver(fade).observe(el);
   fade();
 }
-["watchlist", "results", "addCard"].forEach((id) => fadeWhenMore($(id)));
+["watchlist", "results"].forEach((id) => fadeWhenMore($(id)));
 
 // ---------- ⚙ settings: one tab at a time ----------
 function setTab(name) {
@@ -1629,7 +1635,8 @@ async function justAdded(el) {
       <input type="search" id="trackFind" placeholder="Find one of Mr Tofu's products to track" autocomplete="off">
       <div class="sugs dresults" id="trackResults"></div>
     </div>
-    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing tracked yet. Press 📌 Track a product to pick what to keep an eye on.")}</div>`}</div>`;
+    <div class="sugs dlist">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing tracked yet. Press 📌 Track a product to pick what to keep an eye on.")}</div>`}</div>`;
+  fadeWhenMore(el.querySelector(".dlist"));
   el.querySelectorAll(".dstat").forEach((b) => b.onclick = (e) => {
     const un = e.target.closest(".duntrack");
     if (un) return trackChange(el, un.dataset.id, "", false);
