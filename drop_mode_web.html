@@ -371,7 +371,8 @@ select option[value="__add"]{color:var(--muted)}
 .exactopts{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:0 0 10px}
 .exactopts .checkline{margin:0}
 .sortset{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
-.sortset .qtyset button{padding:4px 11px;min-width:0;font-size:13px}
+.sortset select{font:600 13px Inter,sans-serif;padding:4px 8px;border-radius:9px;cursor:pointer}
+.sortset select:hover{border-color:var(--faint)}
 .listed{font-size:12.5px;color:var(--faint)}
 #exactLead b{color:var(--text);font-weight:600}
 .kwtag{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:7px;padding:1px 8px;margin:2px 4px 2px 0;font-weight:600}
@@ -750,7 +751,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div id="exactBody" hidden>
           <div class="exactopts" style="margin-top:2px">
             <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
-            <span class="sortset">Sort <span class="qtyset" id="sortSet" role="group" aria-label="Sort"><button type="button" data-sort="new" title="Most recently listed first">Newest</button><button type="button" data-sort="az" title="In stock first, then A to Z">A–Z</button><button type="button" data-sort="low" title="Price, low to high">Cheapest</button><button type="button" data-sort="high" title="Price, high to low">Priciest</button></span> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
+            <span class="sortset"><label for="sortSel">Sort</label> <select id="sortSel"><option value="new">Newest first</option><option value="az">A–Z</option><option value="low">Price: low to high</option><option value="high">Price: high to low</option></select> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
           </div>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
           <div class="cats sub" id="subcats" role="group" aria-label="Live stream by game" hidden></div>
@@ -977,16 +978,12 @@ $("showSold").onchange = () => {
 // Sort: newest listings first (with when each went up), in stock first then A to Z, or by price (remembered)
 let sortBy = "new";
 try { const s = localStorage.getItem("dropSort"); if (["az", "low", "high"].includes(s)) sortBy = s; } catch {}
-function showSort() {
-  $("sortSet").querySelectorAll("button").forEach((b) => { const on = b.dataset.sort === sortBy; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
-}
-$("sortSet").querySelectorAll("button").forEach((b) => b.onclick = () => {
-  if (b.dataset.sort === sortBy) return;
-  sortBy = b.dataset.sort;
+$("sortSel").value = sortBy;
+$("sortSel").onchange = () => {
+  sortBy = $("sortSel").value;
   try { localStorage.setItem("dropSort", sortBy); } catch {}
-  showSort(); search();
-});
-showSort();
+  search();
+};
 // "3 Oct" (with the year if it's not this year)
 const listedDate = (iso) => {
   const d = new Date(iso);
