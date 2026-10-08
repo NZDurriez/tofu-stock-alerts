@@ -2503,7 +2503,8 @@ $("addGo").onclick = async () => {
 $("addLink").onkeydown = $("addName").onkeydown = (e) => { if (e.key === "Enter") $("addGo").click(); };
 
 // ---------- activity feed + status ----------
-// Every second, each shop's news. The shown shop's goes in the feed and the
+// Every second (4 times a second while a shop's being watched, so a checkout opens the moment it's
+// spotted), each shop's news. The shown shop's goes in the feed and the
 // status; a checkout or lock pops up whichever tab is on show.
 function alertFor(ev, sid) {
   if (ev.kind === "checkout") openCheckout(ev, sid);
@@ -2578,7 +2579,7 @@ layoutCols(); streamOn(); renderKwActs(); loadSound().catch(() => {}); loadBackg
 loadStores().then(() => {
   if (!stores.some((s) => s.id === STORE)) STORE = "tofu";
   applyStore(); renderWatchlist(); loadWatchlist().catch(() => {});
-  pollAll(); setInterval(pollAll, 1000);
+  (function tick() { pollAll(); setTimeout(tick, stores.some((s) => stat[s.id] && stat[s.id].running) ? 250 : 1000); })();
 });
 setInterval(() => { if (watchlist.length || discordPerson()) refreshInfo(); }, 10000); // keep stock levels fresh
 setInterval(async () => { // shops added or removed in another window
