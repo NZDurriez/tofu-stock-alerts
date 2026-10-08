@@ -1629,7 +1629,7 @@ async function justAdded(el) {
       <input type="search" id="trackFind" placeholder="Find one of Mr Tofu's products to track" autocomplete="off">
       <div class="sugs dresults" id="trackResults"></div>
     </div>
-    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing yet: the bot's only just started noting when things go up. Check back in a week or two.")}</div>`}</div>`;
+    <div class="sugs">${rows || `<div class="pv-note" style="padding:12px">${esc(st.error || "Nothing tracked yet. Press 📌 Track a product to pick what to keep an eye on.")}</div>`}</div>`;
   el.querySelectorAll(".dstat").forEach((b) => b.onclick = (e) => {
     const un = e.target.closest(".duntrack");
     if (un) return trackChange(el, un.dataset.id, "", false);

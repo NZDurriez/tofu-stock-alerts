@@ -523,7 +523,7 @@ async function dropStats(env) {
     }
     // (a regular: the Madness bundles, or something the bot's seen come on sale twice or more, or one you're
     // tracking. Two listings with the same name, each published once, aren't a pattern)
-    if (!f.ups.length || !(f.tracked || /madness/i.test(f.name) || f.ups.filter((u) => u.from === "seen").length >= 2)) continue;
+    if (!f.ups.length || !f.tracked) continue; // (only what the owner tracks; the rest is still noted, for later)
     const times = f.ups.map((u) => ({ ...u, ...nzTime(u.at) }));
     const perDay = new Map();
     for (const x of times) perDay.set(x.day, (perDay.get(x.day) || 0) + 1);
@@ -554,7 +554,7 @@ async function dropStats(env) {
 
 const clock = (min) => `${((Math.floor(min / 60) + 11) % 12) + 1}:${String(min % 60).padStart(2, "0")} ${min < 720 ? "am" : "pm"}`;
 const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
-const NO_STATS = "Nothing to show yet: I've only just started noting when things go up. Give it a week or two.";
+const NO_STATS = "Nothing's being tracked yet. Pick products with 📌 Track a product in drop mode.";
 function statsText(st) {
   if (!st.families.length) return "📊 " + NO_STATS;
   return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + statsList(st);
