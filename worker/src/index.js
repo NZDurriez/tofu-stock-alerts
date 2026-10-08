@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 9;
+const COMMANDS_VERSION = 10;
 const COMMANDS = [
   {
     name: "password",
@@ -80,7 +80,7 @@ const COMMANDS = [
     }],
   },
   { name: "status", description: "What the stock watcher can see right now" },
-  { name: "stats", description: "When Mr Tofu usually puts things up (Midweek Madness, Friday Madness and more)" },
+  { name: "stats", description: "When Mr Tofu usually puts things up (the products you track)", default_member_permissions: "32" },
   {
     name: "dropmode",
     description: "Start, stop or check drop mode on your PC",
@@ -837,7 +837,7 @@ async function handleInteraction(request, env, ctx) {
   const user = (i.member && i.member.user) || i.user || {};
   const owner = (env.DISCORD_OWNER_ID || "").trim();
   const name = i.data && i.data.name;
-  if (name !== "wishlist" && name !== "stats" && (!owner || user.id !== owner)) {
+  if (name !== "wishlist" && (!owner || user.id !== owner)) {
     return reply({ type: 4, data: { flags: EPHEMERAL, content: "Sorry, only the owner of this stock watcher can use its commands." } });
   }
 
