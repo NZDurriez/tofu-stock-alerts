@@ -60,7 +60,7 @@ function resolveFilter(text) {
 }
 
 // Bump when the command list changes; the cron re-registers them once.
-const COMMANDS_VERSION = 8;
+const COMMANDS_VERSION = 9;
 const COMMANDS = [
   {
     name: "password",
@@ -95,6 +95,12 @@ const COMMANDS = [
     }],
   },
   { name: "speed", description: "Drop mode's controls: start, stop, and each shop's check speed", default_member_permissions: "32" },
+  {
+    name: "stats-panel",
+    description: "Post the drop times in this channel for everyone (it keeps itself up to date)",
+    default_member_permissions: "32",
+    contexts: [0],
+  },
   {
     name: "dropmode-panel",
     description: "Post drop mode's controls in this channel (only you can use them; it keeps itself up to date)",
@@ -157,6 +163,7 @@ export default {
       try {
         await watchDropMode(run);
         await refreshPanel(run);
+        if (new Date().getUTCMinutes() % 5 === 0) await refreshStatsPanel(run);
       } catch (err) {
         console.log("Couldn't look for drop mode:", String(err));
       }
@@ -547,12 +554,62 @@ async function dropStats(env) {
 
 const clock = (min) => `${((Math.floor(min / 60) + 11) % 12) + 1}:${String(min % 60).padStart(2, "0")} ${min < 720 ? "am" : "pm"}`;
 const secs = (s) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
+const NO_STATS = "Nothing to show yet: I've only just started noting when things go up. Give it a week or two.";
 function statsText(st) {
-  if (!st.families.length) return "📊 Nothing to show yet: I've only just started noting when things go up. Give it a week or two.";
-  return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + st.families.slice(0, 10).map((f) => !f.usual
+  if (!st.families.length) return "📊 " + NO_STATS;
+  return "📊 **When Mr Tofu puts things up**" + (st.since ? ` (watching since <t:${Math.floor(st.since / 1000)}:D>)` : "") + "\n" + statsList(st);
+}
+const statsList = (st) => st.families.slice(0, 10).map((f) => !f.usual
     ? `\n**${f.name}** 📌\nNo drops recorded yet.` : `\n**${f.name}**${f.tracked ? " 📌" : ""}\nUsually ${f.usual.day} ~${clock(f.usual.min)} (${f.usual.of} of ${f.usual.total})`
     + (f.next ? ` · next ~<t:${Math.floor(f.next / 1000)}:f> (<t:${Math.floor(f.next / 1000)}:R>)` : "")
     + `\nLast up <t:${Math.floor(f.last / 1000)}:f>` + (f.sellsOut ? ` · sells out in ~${secs(f.sellsOut.median)} (fastest ${secs(f.sellsOut.fastest)})` : "")).join("\n");
+
+// A product's name as wishlist words (the same as drop mode's "watch for it"): no "(Pre-Order)", "limit 2 per
+// person" or punctuation, since every word has to be in the name
+const nameAsKeywords = (title) => String(title || "")
+  .replace(/\((?:pre[\s-]?order|pre[\s-]?release)\)/gi, " ")
+  .replace(/\(?\blimit(?:ed)?(?:\s+(?:of|to))?\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+per\s+(?:person|customer|order|household))?\)?/gi, " ")
+  .replace(/[:·•|—–]/g, " ").replace(/\s+-\s+/g, " ")
+  .replace(/\s+/g, " ").trim();
+
+// /stats-panel: the drop times, posted for everyone, with a menu to add one to your wishlist (so you're pinged
+// when it goes up). The bot keeps it up to date.
+function statsPanel(st) {
+  const fams = st.families.slice(0, 10);
+  const pick = fams.map((f) => ({ f, kw: nameAsKeywords(f.name).slice(0, 100) })).filter((x) => x.kw);
+  const seen = new Set(), options = [];
+  for (const { f, kw } of pick) {
+    if (seen.has(kw.toLowerCase())) continue;
+    seen.add(kw.toLowerCase());
+    options.push({ label: f.name.slice(0, 100), value: kw, emoji: { name: "🛒" },
+      description: (f.usual ? `Usually ${f.usual.day} ~${clock(f.usual.min)}` : "No drops recorded yet").slice(0, 100) });
+  }
+  return {
+    content: "",
+    embeds: [{
+      title: "📊 When Mr Tofu puts things up",
+      color: 0x3fbf6a,
+      description: (fams.length ? statsList(st).trim() : NO_STATS).slice(0, 4096),
+      footer: { text: "Times show in your own time zone · updates itself" + (st.since ? " · watching since" : "") },
+      ...(st.since ? { timestamp: new Date(st.since).toISOString() } : {}),
+    }],
+    components: [
+      ...(options.length ? [row({ type: 3, custom_id: "wl:stats", placeholder: "🔔 Get pinged when one of these goes up…", options })] : []),
+      row(addButton("Add something else"), listButton()),
+    ],
+    allowed_mentions: { parse: [] },
+  };
+}
+
+// Each 5 minutes, if what it would show has changed, the posted stats panel is edited. A deleted one's forgotten.
+async function refreshStatsPanel(env) {
+  const st = await dropModeState(env);
+  if (!st.statsPanel || !st.statsPanel.message) return;
+  const panel = statsPanel(await dropStats(env)), sig = panelSig(panel);
+  if (sig === st.statsPanel.last) return;
+  const [s] = await bot(env, "PATCH", `/channels/${st.statsPanel.channel}/messages/${st.statsPanel.message}`, panel);
+  if (s === 404) await wishlistStore(env).fetch("https://wishlists/dm/statspanel", { method: "POST", body: JSON.stringify({ clear: true }) });
+  else if (s < 300) await wishlistStore(env).fetch("https://wishlists/dm/statspanel", { method: "POST", body: JSON.stringify({ last: sig }) });
 }
 
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
@@ -888,6 +945,19 @@ async function handleInteraction(request, env, ctx) {
   }
 
   if (name === "stats") return reply({ type: 4, data: { flags: EPHEMERAL, content: statsText(await dropStats(env)), allowed_mentions: { parse: [] } } });
+  if (name === "stats-panel") {
+    if (!i.guild_id || !i.channel_id) return reply({ type: 4, data: { flags: EPHEMERAL, content: "Use this in a channel in your server." } });
+    ctx.waitUntil(followUp(async () => {
+      const panel = statsPanel(await dropStats(env));
+      const [s, msg] = await bot(env, "POST", `/channels/${i.channel_id}/messages`, panel);
+      if (s === 403) return { content: "I'm not allowed to post in this channel. Give me **Send Messages** and **Embed Links** here, then try again." };
+      if (s >= 300 || !msg || !msg.id) return { content: `Couldn't post the panel (Discord said ${s}).` };
+      await wishlistStore(env).fetch("https://wishlists/dm/statspanel", { method: "POST",
+        body: JSON.stringify({ channel: i.channel_id, message: msg.id, last: panelSig(panel) }) });
+      return { content: "Posted the drop times. Anyone can use its menu to add one to their wishlist, and it keeps itself up to date (every few minutes). Pin it if you like: right-click it, then **Pin Message**." };
+    }));
+    return deferred();
+  }
 
   if (name === "dropmode") {
     const action = ((i.data.options || [])[0] || {}).value;
@@ -1013,6 +1083,13 @@ export class WishlistStore {
         if (dm.pending.action === "stop" && r.ok) dm.stoppedAt = now; // (closed on purpose: no "it's stopped" warning)
         dm.pending = null;
       }
+      await save();
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/dm/statspanel") { // where the posted stats panel is: { channel, message, last }, or changes to it
+      const b = await request.json();
+      dm.statsPanel = b.channel ? { channel: b.channel, message: b.message, last: b.last || "" }
+        : b.clear ? null : { ...(dm.statsPanel || {}), ...b };
       await save();
       return Response.json({ ok: true });
     }
@@ -1274,6 +1351,26 @@ async function wishlistComponent(i, env, ctx, followUp) {
   const update = (data) => reply({ type: 7, data: { allowed_mentions: { parse: [] }, ...data } }); // change the reply they clicked in
   if (!i.guild_id) return mine({ content: "Use this in the server." });
   if (id === "wl:add") return reply({ type: 9, data: addForm() });
+  if (id === "wl:stats") { // (from the stats panel: the menu's put back as it was, and the answer's only for them)
+    const hook = `${discordApi(env)}/webhooks/${env.DISCORD_APP_ID}/${i.token}`;
+    ctx.waitUntil((async () => {
+      let data;
+      try {
+        const [list, person] = await personFor(env, i, user);
+        data = await addItem(env, i, user, list, person, String((i.data.values || [])[0] || ""), 1, null);
+      } catch (err) {
+        data = { content: `Something went wrong: ${err}` };
+      }
+      const { vanish, ...shown } = data;
+      const msg = await fetch(`${hook}?wait=true`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flags: EPHEMERAL, allowed_mentions: { parse: [] }, ...shown }) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!vanish || !msg || !msg.id) return;
+      await new Promise((done) => setTimeout(done, vanish * 1000));
+      const now = await fetch(`${hook}/messages/${msg.id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (now && now.content === shown.content) await fetch(`${hook}/messages/${msg.id}`, { method: "DELETE" });
+    })());
+    return reply(i.message && i.message.components ? { type: 7, data: { components: i.message.components } } : { type: 6 });
+  }
   if (id === "wl:addform") {
     const field = (name) => {
       for (const r of i.data.components || []) for (const c of r.components || (r.component ? [r.component] : [])) if (c.custom_id === name) return String(c.value || "").trim();
