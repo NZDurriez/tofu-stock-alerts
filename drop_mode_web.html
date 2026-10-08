@@ -2364,7 +2364,7 @@ window.addEventListener("focus", stopTitleFlash);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && document.hasFocus()) stopTitleFlash(); });
 
 function openCheckout(ev, sid = STORE) {
-  const what = ev.text.replace(/^⚡ Opening checkout: /, "");
+  const what = ev.text.replace(/^⚡ Opening checkout: /, "").replace(/ · ⏱️ .*$/, ""); // (the timing's for the log)
   const title = "🎯 Your pick is live" + (stores.length > 1 ? ` at ${storeOf(sid).name}` : "");
   $("alertTitle").textContent = title;
   $("alertGo").href = ev.url;

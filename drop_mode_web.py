@@ -449,7 +449,7 @@ class Watcher:
         }
 
     # ---- watching ----
-    def checkout(self, items):
+    def checkout(self, items, timing=""):
         if not items:
             return
         for vid, _, _ in items:
@@ -461,7 +461,7 @@ class Watcher:
         # browser has slowed down), open it here in the default browser straight
         # away, and tell the page so it doesn't open a second copy later.
         by_program = time.time() - self.last_poll > 3
-        self.log("checkout", f"⚡ Opening checkout: {names}", url, openedByProgram=by_program)
+        self.log("checkout", f"⚡ Opening checkout: {names}{timing}", url, openedByProgram=by_program)
         if by_program:
             webbrowser.open(url)
         play_alert()
@@ -796,6 +796,23 @@ class Watcher:
                 ready.append((fresh[0][0], self.limited(want[0], it), it["title"]))
         return ready
 
+    def reaction(self, ready, current, since):
+        """How soon after going on sale this checkout's opening (for the log, to judge the speed): after the
+        shop listed it, for something new (the shop says when, to the second), or else within the time since
+        the check before, when it wasn't on sale yet."""
+        now = time.time()
+        if not since or now - since > max(10.0, 4 * self.interval):  # (not a steady run of checks: can't say)
+            return ""
+        listed = []
+        for vid, _, _ in ready:
+            it = next((it for it in current.values() if vid in it["variants"]), None)
+            at = listed_at(it.get("published") or "") if it else 0.0
+            if at and since - 2 <= at <= now + 2:  # put up just now (not an old listing coming back in stock)
+                listed.append(at)
+        if listed:
+            return f" · ⏱️ {max(0.0, now - max(listed)):.1f}s after the shop listed it"
+        return f" · ⏱️ within {now - since:.1f}s of going on sale"
+
     def stop(self):
         self.running = False
         save_watching(self.id, None)
@@ -831,6 +848,7 @@ class Watcher:
         long to wait before starting a fresh one."""
         # (the last look at the shop is recent: so what's changed since happened just now, not while paused)
         recent = time.time() - self.checked_at <= max(10.0, 4 * self.interval)
+        before = self.checked_at  # (when it was last seen as it was: for how fast a checkout opened)
         if code in (200, 304, 401):
             self.slow_downs = 0
             if self.trouble:
@@ -856,9 +874,9 @@ class Watcher:
                 self.ping_friends({}, current, first=True)
                 return 0.0
             ready = self.went_live(self.products, current)
+            self.checkout(ready, self.reaction(ready, current, before) if ready else "")  # (yours first, then the pings)
             self.ping_friends(self.products, current, sold_out=recent)
             self.products = current
-            self.checkout(ready)
             return 0.0  # carry on, comparing against this new version
         if code == 401:
             if self.password and dm.login(self.password, self.site):
