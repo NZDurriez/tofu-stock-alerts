@@ -15,7 +15,9 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -2150,6 +2152,34 @@ def note_page():
         time.sleep(10)
 
 
+HELPER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drop_mode_helper.py")
+HELPER_LOCK = int(os.environ.get("DROP_HELPER_LOCK_PORT") or 8763)  # (the helper holds this while it runs)
+
+
+def keep_helper():
+    """The helper for /dropmode in Discord starts when you log in to Windows. If it's not running (Windows once
+    closed it, thinking it had hung), start it again: when drop mode starts, and each minute while it's open.
+    It's started on its own, not as part of drop mode, so closing drop mode doesn't close it too."""
+    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    while True:
+        probe = socket.socket()
+        try:
+            probe.bind(("127.0.0.1", HELPER_LOCK))
+            running = False
+        except OSError:
+            running = True
+        finally:
+            probe.close()
+        if not running and os.path.exists(HELPER):
+            try:  # (cmd's start: the helper isn't drop mode's child, so closing drop mode's window leaves it be)
+                subprocess.run(["cmd", "/c", "start", "", "/b", pythonw if os.path.exists(pythonw) else sys.executable, HELPER],
+                               cwd=os.path.dirname(HELPER), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=20)
+                print("(The /dropmode helper wasn't running, so drop mode started it again.)")
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"(Couldn't start the /dropmode helper: {exc})")
+        time.sleep(60)
+
+
 def open_page(url, before):
     """Open the page in the browser, unless a tab from last time is still open: that reloads itself once drop
     mode's back (within a second, or up to a minute if the browser's slowed that tab down), so wait for it."""
@@ -2200,6 +2230,8 @@ def main():
     except (OSError, ValueError):
         before = {}
     threading.Thread(target=note_page, daemon=True).start()
+    if PORT == 8765 or os.environ.get("DROP_KEEP_HELPER") == "1":  # (the helper works with drop mode on its usual port)
+        threading.Thread(target=keep_helper, daemon=True).start()
     if os.environ.get("DROP_WEB_NO_BROWSER") != "1":
         threading.Thread(target=open_page, args=(url, before if isinstance(before, dict) else {}), daemon=True).start()
     try:
