@@ -210,6 +210,13 @@ body.dragging iframe{pointer-events:none} /* (so dragging over the stream and ch
   #watchlist{flex:1 1 0;min-height:0;overflow:auto;align-content:start;padding-right:4px;margin-right:-4px}
   .wrap{padding-bottom:12px} /* (closer to the bottom of the window) */
   #exactBody{flex:1;display:flex;flex-direction:column;min-height:0}
+  /* Picking a product: the shop password step shrinks to its status, giving the product list the room (unless the shop's locked) */
+  .col-setup.picking #pwCard:not(.needs):not(.open) .row,.col-setup.picking #pwCard:not(.needs):not(.open) label.hint,
+  .col-setup.picking #pwCard:not(.needs):not(.open) .loginState,.col-setup.picking #pwCard:not(.needs):not(.open) .tipicon{display:none}
+  .col-setup.picking #pwCard:not(.needs):not(.open) label.hint{display:none!important} /* (it has its own display) */
+  .col-setup.picking #pwCard:not(.needs):not(.open){padding-top:14px;padding-bottom:14px}
+  .col-setup.picking #pwCard:not(.needs):not(.open) h2{margin:0}
+  .col-setup.picking #pwCard:not(.needs):not(.open) .pwmore,.col-setup.picking #pwCard:not(.needs):not(.open) .pwstate{display:inline}
   #exactBody .list{flex:1 1 0;min-height:160px;max-height:none} /* (the product list takes the rest of its panel, and scrolls in it) */
   #kwBody{flex:1;display:flex;flex-direction:column;min-height:0} /* (the keyword box fills its panel; "just added" takes the rest, and scrolls) */
   #kwBody .kwbox{flex:1 0 auto;display:flex;flex-direction:column} /* (never smaller than what's in it, so its border goes round all of it) */
@@ -248,6 +255,8 @@ button{font:600 14px Inter,sans-serif;border-radius:10px;padding:10px 16px;curso
 .danger:hover{background:var(--bad-soft)}
 button:disabled{opacity:.4;cursor:not-allowed}
 .linkish{background:none;border:0;color:var(--muted);padding:6px 4px;font-weight:500;text-decoration:underline;text-underline-offset:3px}
+.pwmore{display:none;margin-left:auto;font-size:13px;padding:0 4px}
+.pwstate{display:none;font-size:13px;font-weight:500;color:var(--ok)}
 .linkish:hover{color:var(--text)}
 
 .loginState{margin-top:14px;font-size:14px;padding:10px 12px;border-radius:10px;background:var(--surface2);color:var(--muted);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
@@ -722,8 +731,8 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
   <section class="col col-setup" data-col="setup">
     <div class="col-head"><span class="grip" aria-hidden="true">⠿</span><span class="col-title">Set up</span><span class="col-shop" hidden></span><span class="spacer"></span><button class="colbtn" data-col="setup">−</button></div>
     <div class="stack">
-      <section class="card">
-        <h2><span class="step">1</span>Shop password <span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Drop mode loads the shop by itself. Enter the password if the shop is locked, or ahead of time if you know it: it's kept and used the moment the shop locks. Log out forgets it.</span></span></h2>
+      <section class="card" id="pwCard">
+        <h2><span class="step">1</span>Shop password <span class="pwstate" id="pwState"></span><button type="button" class="linkish pwmore" id="pwMore" title="Show the password box">Enter a password</button><span class="tipicon" tabindex="0" aria-label="More info">i<span class="tiptext" role="tooltip">Drop mode loads the shop by itself. Enter the password if the shop is locked, or ahead of time if you know it: it's kept and used the moment the shop locks. Log out forgets it.</span></span></h2>
         <div class="row">
           <input type="text" id="pw" placeholder="Shop password (optional)" autocomplete="off">
           <button class="primary" id="loginBtn">Load shop</button>
@@ -1004,11 +1013,14 @@ function setAddMode(mode, focus) {
   try { localStorage.setItem("dropAddMode", mode); } catch {}
   $("kwBody").hidden = mode !== "kw";
   $("exactBody").hidden = mode !== "exact";
+  document.querySelector(".col-setup").classList.toggle("picking", mode === "exact"); // (the password step shrinks)
+  $("pwCard").classList.remove("open");
   $("addMode").querySelectorAll("button").forEach((b) => { const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); });
   if (changed && mode === "exact") { loadCats(); search(); }
   if (focus) (mode === "exact" ? $("search") : $("kwInput")).focus();
 }
 $("addMode").querySelectorAll("button").forEach((b) => b.onclick = () => setAddMode(b.dataset.mode, true));
+$("pwMore").onclick = () => { $("pwCard").classList.add("open"); $("pw").focus(); };
 setAddMode(addMode, false);
 
 // Tofu's menu headers as filters for the search (same categories as his site; other shops don't have them)
@@ -1442,6 +1454,8 @@ function loginLabel() {
 }
 function renderLoginState() {
   loginLabel();
+  $("pwCard").classList.toggle("needs", shopState === "locked" || shopState === "bad"); // (locked: the password box stays)
+  $("pwState").textContent = { open: "· ✓ Shop open", ok: "· ✓ Behind the password" }[shopState] || "· Loading…"; // (its one-line status, while picking)
   const sig = [STORE, shopState, loggedIn, passwordSaved].join("|");
   if (sig === loginSig) return; // only redraw when something changed (keeps the button clickable)
   loginSig = sig;
