@@ -267,6 +267,7 @@ class Watcher:
         self.page_checked = load_page_checks(self.page_file)  # product id -> [when looked at, in-store only?]
         self.page_todo = {}     # product id -> handle, still to look at
         self.page_busy = False
+        self.page_first = False  # look at a product's page before opening its checkout, if it hasn't been yet (Otakumart)
         self.watchlist = self.load_watchlist()  # what you're watching for (the page's list)
         self.wl_version = 1     # goes up on every change, so other open pages reload it
         self.categories = {}    # category id -> product ids in it (Tofu's menu)
@@ -390,6 +391,26 @@ class Watcher:
         if start:
             threading.Thread(target=self.page_check_run, daemon=True).start()
 
+    def not_in_store(self, items, products):
+        """Checkout items [(variant, qty, title)] less any whose page says in-store only, looking now at the pages
+        not yet looked at (about a second each, only the first time a product's seen)."""
+        where = {vid: pid for pid, it in products.items() for vid in it.get("variants", {})}
+        keep, gone = [], []
+        for item in items:
+            pid = where.get(item[0])
+            if pid and pid not in self.page_checked:
+                only = page_says_in_store(self.site, products[pid].get("handle", ""))
+                if only is not None:
+                    self.page_checked[pid] = [time.time(), only]
+            if pid and self.page_checked.get(pid, [0, False])[1]:
+                gone.append(item[2])
+            else:
+                keep.append(item)
+        if gone:
+            save_page_checks(self.page_file, self.page_checked)
+            self.log("info", f"Didn't open checkout for {'; '.join(x[:60] for x in gone)}: the shop's page says in-store only.")
+        return keep
+
     def page_check_run(self):
         """Look at the queued products' pages, gently (about two a second), then leave out any in-store only."""
         found = []
@@ -509,7 +530,9 @@ class Watcher:
         }
 
     # ---- watching ----
-    def checkout(self, items, timing=""):
+    def checkout(self, items, timing="", products=None):
+        if items and self.page_first:
+            items = self.not_in_store(items, products or self.products)
         if not items:
             return
         for vid, _, _ in items:
@@ -936,7 +959,7 @@ class Watcher:
                 self.ping_friends({}, current, first=True)
                 return 0.0
             ready = self.went_live(self.products, current)
-            self.checkout(ready, self.reaction(ready, current, before) if ready else "")  # (yours first, then the pings)
+            self.checkout(ready, self.reaction(ready, current, before) if ready else "", current)  # (yours first, then the pings)
             self.ping_friends(self.products, current, sold_out=recent)
             self.products = current
             return 0.0  # carry on, comparing against this new version
@@ -1841,13 +1864,16 @@ def load_stores():
 def save_stores():
     os.makedirs(dm.SOUND_DIR, exist_ok=True)
     with open(STORES_FILE, "w", encoding="utf-8") as f:
-        json.dump([{"id": w.id, "name": w.name, "shop": w.site.shop, "collection": w.site.collection}
+        json.dump([{"id": w.id, "name": w.name, "shop": w.site.shop, "collection": w.site.collection,
+                    **({"page_first": True} if w.page_first else {})}
                    for w in list(WATCHERS.values()) if w.id != "tofu"], f, indent=1)
 
 
 def make_watcher(s):
-    return Watcher(s["id"], s.get("name") or s["id"], dm.Site(s["shop"], s.get("collection", "")), [],
-                   os.path.join(dm.SOUND_DIR, f"watchlist-{s['id']}.json"))
+    w = Watcher(s["id"], s.get("name") or s["id"], dm.Site(s["shop"], s.get("collection", "")), [],
+                os.path.join(dm.SOUND_DIR, f"watchlist-{s['id']}.json"))
+    w.page_first = bool(s.get("page_first", w.site.host == "otakumart.co.nz"))
+    return w
 
 
 def add_store(link, name):
