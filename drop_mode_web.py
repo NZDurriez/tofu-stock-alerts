@@ -300,9 +300,19 @@ class Watcher:
         """Look at the shop in the background (when drop mode starts, or the shop is added)."""
         threading.Thread(target=self.login, args=(self.password,), daemon=True).start()
 
-    def login(self, password):
-        with self.login_lock:
-            return self._login(password)
+    def login(self, password, retry=0):
+        """Look at the shop (and log in, if there's a password). If it can't be reached (the connection timed
+        out, say), say so in one line and try again by itself: in 15 seconds, then 30, then each minute."""
+        try:
+            with self.login_lock:
+                return self._login(password)
+        except (OSError, RuntimeError, ValueError) as exc:
+            why = re.sub(r"^curl: \(\d+\)\s*", "", str(exc)).strip() or "no reply"
+            wait = (15, 30)[retry] if retry < 2 else 60
+            if retry in (0, 2) or retry % 10 == 0:  # (not every minute)
+                self.log("warn", f"Couldn't reach the shop ({why[:80]}). Trying again in {wait} seconds.")
+            threading.Timer(wait, self.login, args=(password, retry + 1)).start()
+            return False
 
     def _login(self, password):
         password = password.strip() or self.password  # an empty box keeps the saved password (Log out forgets it)
@@ -326,7 +336,7 @@ class Watcher:
             if ok:
                 self.log("info", f"Shop has {info} products{self.left_out_text()}.")
         if ok:
-            if info + sum(self.left_out.values()) >= 250:
+            if len(self.site.sections) <= 1 and info + sum(self.left_out.values()) >= 250:  # (several sections: each is read on its own)
                 self.log("warn", "That's as many as drop mode can read at once (250), so anything past them isn't watched."
                          + ("" if self.id == "tofu" else " To watch just one section, remove this tab and add the section's link (…/collections/…)."))
             self.load_categories_soon()
