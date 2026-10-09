@@ -267,6 +267,8 @@ class Watcher:
         self.page_checked = load_page_checks(self.page_file)  # product id -> [when looked at, in-store only?]
         self.page_todo = {}     # product id -> handle, still to look at
         self.page_busy = False
+        self.page_names = {}    # product id -> name (for saying which)
+        self.page_handles = {}  # product id -> handle, for the ones left out as in-store only (to look at again)
         self.page_first = False  # look at a product's page before opening its checkout, if it hasn't been yet (Otakumart)
         self.watchlist = self.load_watchlist()  # what you're watching for (the page's list)
         self.wl_version = 1     # goes up on every change, so other open pages reload it
@@ -377,12 +379,17 @@ class Watcher:
 
     # ---- in-store only, said on a product's own page ----
     def page_check_soon(self, products):
-        """Queue the products whose pages haven't been looked at (or not for a day) to be looked at."""
+        """Queue the products whose pages haven't been looked at, or not for a day (10 minutes for ones that said
+        in-store only: so one the shop switches to selling online is watched again quickly)."""
         if self.id == "tofu":  # (Mr Tofu says it in the name)
             return
         now = time.time()
+        stale = lambda seen: now - seen[0] > (600 if seen[1] else 86400)
         todo = {pid: it["handle"] for pid, it in products.items()
-                if it.get("handle") and now - self.page_checked.get(pid, [0, False])[0] > 86400}
+                if it.get("handle") and stale(self.page_checked.get(pid, [0, False]))}
+        # (the in-store ones aren't in the list any more, so they're looked for in what was left out)
+        todo.update({pid: h for pid, h in self.page_handles.items() if pid not in todo and stale(self.page_checked.get(pid, [0, False]))})
+        self.page_names.update({pid: products[pid]["title"] for pid in todo if pid in products and products[pid].get("title")})
         if not todo:
             return
         with self.lock:
@@ -413,7 +420,7 @@ class Watcher:
 
     def page_check_run(self):
         """Look at the queued products' pages, gently (about two a second), then leave out any in-store only."""
-        found = []
+        found, back = [], []
         try:
             while True:
                 with self.lock:
@@ -423,15 +430,22 @@ class Watcher:
                     pid, handle = self.page_todo.popitem()
                 only = page_says_in_store(self.site, handle)
                 if only is not None:
+                    was = self.page_checked.get(pid, [0, False])[1]
                     self.page_checked[pid] = [time.time(), only]
                     if only:
-                        found.append(pid)
+                        self.page_handles[pid] = handle
+                        if not was:
+                            found.append(pid)
+                    elif was:
+                        back.append(self.page_names.get(pid) or handle.replace("-", " "))
                 time.sleep(0.5)
         except Exception as exc:
             with self.lock:
                 self.page_busy = False
             print(f"(Couldn't look at {self.name}'s product pages: {exc})")
         save_page_checks(self.page_file, self.page_checked)
+        if back:  # (it's in the list again from the next check, and watched like anything else)
+            self.log("ok", f"No longer in-store only, so watching again: {'; '.join(n[:60] for n in back)}.")
         if found:
             gone = [self.products[pid]["title"] for pid in found if pid in self.products]
             self.products = {pid: it for pid, it in self.products.items() if pid not in found}
