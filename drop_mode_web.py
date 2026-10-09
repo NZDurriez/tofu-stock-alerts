@@ -11,6 +11,7 @@ extra tabs, each watched separately.
 Start it with the "Tofu Drop Mode" shortcut on the desktop.
 """
 import base64
+import html
 import json
 import os
 import re
@@ -260,6 +261,12 @@ class Watcher:
         self.checked_at = 0.0   # when the shop was last looked at successfully
         self.events_collection = events  # the shop's events section, if it has one (Mr Tofu's)
         self.event_ids = set()  # products in it (loaded with the menu headers)
+        # Some shops say a listing's in-store only on its own page, not in the list drop mode reads (Otakumart's
+        # new Pokémon releases): each product's page is looked at once, in the background, and remembered
+        self.page_file = os.path.join(dm.SOUND_DIR, f"instore-{sid}.json")
+        self.page_checked = load_page_checks(self.page_file)  # product id -> [when looked at, in-store only?]
+        self.page_todo = {}     # product id -> handle, still to look at
+        self.page_busy = False
         self.watchlist = self.load_watchlist()  # what you're watching for (the page's list)
         self.wl_version = 1     # goes up on every change, so other open pages reload it
         self.categories = {}    # category id -> product ids in it (Tofu's menu)
@@ -354,13 +361,64 @@ class Watcher:
 
     def without_events(self, products):
         """Leave out what's in the shop's events section (the description check in drop mode catches
-        new ones before the section's list is next loaded)."""
-        if not self.event_ids:
+        new ones before the section's list is next loaded), and what its page says is in-store only."""
+        self.page_check_soon(products)
+        instore = {pid for pid, (_, only) in list(self.page_checked.items()) if only}
+        if not self.event_ids and not instore:
             return products
-        keep = {pid: it for pid, it in products.items() if pid not in self.event_ids}
-        if len(keep) < len(products):
-            self.left_out["store events"] = self.left_out.get("store events", 0) + len(products) - len(keep)
+        keep = {pid: it for pid, it in products.items() if pid not in self.event_ids and pid not in instore}
+        shop_only = sum(1 for pid in products if pid in instore)
+        if shop_only:
+            self.left_out["in-store only"] = self.left_out.get("in-store only", 0) + shop_only
+        if len(keep) + shop_only < len(products):
+            self.left_out["store events"] = self.left_out.get("store events", 0) + len(products) - len(keep) - shop_only
         return keep
+
+    # ---- in-store only, said on a product's own page ----
+    def page_check_soon(self, products):
+        """Queue the products whose pages haven't been looked at (or not for a day) to be looked at."""
+        if self.id == "tofu":  # (Mr Tofu says it in the name)
+            return
+        now = time.time()
+        todo = {pid: it["handle"] for pid, it in products.items()
+                if it.get("handle") and now - self.page_checked.get(pid, [0, False])[0] > 86400}
+        if not todo:
+            return
+        with self.lock:
+            self.page_todo.update(todo)
+            start, self.page_busy = not self.page_busy, True
+        if start:
+            threading.Thread(target=self.page_check_run, daemon=True).start()
+
+    def page_check_run(self):
+        """Look at the queued products' pages, gently (about two a second), then leave out any in-store only."""
+        found = []
+        try:
+            while True:
+                with self.lock:
+                    if not self.page_todo:
+                        self.page_busy = False
+                        break
+                    pid, handle = self.page_todo.popitem()
+                only = page_says_in_store(self.site, handle)
+                if only is not None:
+                    self.page_checked[pid] = [time.time(), only]
+                    if only:
+                        found.append(pid)
+                time.sleep(0.5)
+        except Exception as exc:
+            with self.lock:
+                self.page_busy = False
+            print(f"(Couldn't look at {self.name}'s product pages: {exc})")
+        save_page_checks(self.page_file, self.page_checked)
+        if found:
+            gone = [self.products[pid]["title"] for pid in found if pid in self.products]
+            self.products = {pid: it for pid, it in self.products.items() if pid not in found}
+            if gone:
+                self.left_out["in-store only"] = self.left_out.get("in-store only", 0) + len(gone)
+                self.log("info", f"Leaving out {len(gone)} in-store only listing{'' if len(gone) == 1 else 's'} (the shop's "
+                                 (f"page says it can't" if len(gone) == 1 else "pages say they can't") + " be bought online): "
+                                 + "; ".join(x[:60] for x in gone[:8]) + (f"; and {len(gone) - 8} more" if len(gone) > 8 else ""))
 
     def left_out_text(self):
         bits = [f"{n} in-store only" if why == "in-store only" else f"{n} store event{'' if n == 1 else 's'}"
@@ -915,6 +973,52 @@ class Watcher:
             self.trouble = problem
             self.log("warn", f"Checks failing: {problem}. Still trying.")
         return None if code == 0 else (10.0 if code == 403 else 2.0)
+
+
+# A product page saying it can't be bought online ("available for in-store purchase only", "IN-STORE ONLY",
+# "not available online"). (Not "visit us in store", or "in-store pickup" as a delivery option.)
+PAGE_IN_STORE = re.compile(r"\b(?:in[- ]store\s+(?:purchase\s+)?only|available\s+(?:for\s+)?in[- ]store\s+(?:purchase\s+)?only"
+                           r"|not\s+available\s+(?:to\s+(?:buy|purchase)\s+|for\s+purchase\s+)?online)\b", re.I)
+
+
+def page_says_in_store(site, handle):
+    """Does the product say, on its own page, that it's in-store only? True/False, or None if it couldn't tell.
+    Its details first (small); the page itself only if it uses a page layout of its own (that's where a shop
+    like Otakumart puts the notice)."""
+    try:
+        code, _, body = dm.curl([f"{site.shop}/products/{handle}.json", "--compressed"], site.cookies)
+        if code != 200:
+            return None
+        p = json.loads(body).get("product") or {}
+        text = lambda h: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h or "")))
+        if PAGE_IN_STORE.search(text(p.get("body_html"))):
+            return True
+        if not (p.get("template_suffix") or "").strip():
+            return False
+        code, _, page = dm.curl([f"{site.shop}/products/{handle}", "--compressed"], site.cookies)
+        if code != 200:
+            return None
+        return bool(PAGE_IN_STORE.search(text(re.sub(r"(?s)<script.*?</script>|<style.*?</style>", " ", page))))
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def load_page_checks(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): v for k, v in data.items() if isinstance(v, list) and len(v) == 2} if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_page_checks(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
 
 
 def my_discord_id():
