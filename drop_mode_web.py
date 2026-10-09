@@ -417,7 +417,7 @@ class Watcher:
             if gone:
                 self.left_out["in-store only"] = self.left_out.get("in-store only", 0) + len(gone)
                 self.log("info", f"Leaving out {len(gone)} in-store only listing{'' if len(gone) == 1 else 's'} (the shop's "
-                                 (f"page says it can't" if len(gone) == 1 else "pages say they can't") + " be bought online): "
+                                 + ("page says it can't" if len(gone) == 1 else "pages say they can't") + " be bought online): "
                                  + "; ".join(x[:60] for x in gone[:8]) + (f"; and {len(gone) - 8} more" if len(gone) > 8 else ""))
 
     def left_out_text(self):
