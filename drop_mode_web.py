@@ -2010,7 +2010,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def oops(self, exc):
         """Something went wrong answering a page: show it (instead of an empty
-        reply) and log it, so it can be fixed."""
+        reply) and log it, so it can be fixed. (The browser hanging up before the answer's sent, say a page
+        reloading mid-request, isn't a problem: nothing's said.)"""
+        if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
         traceback.print_exc()
         sid = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p).get("store", "tofu")
         (WATCHERS.get(sid) or WATCHERS["tofu"]).log("warn", f"Drop mode couldn't answer {self.path.split('?')[0]}: {exc}")
