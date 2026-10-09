@@ -542,7 +542,7 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <button class="store add" id="addBtn" data-pop="addPop" aria-expanded="false" title="Watch another Shopify shop in its own tab">＋ Add a shop</button>
         <div class="pop left" id="addPop" hidden>
           <div class="pop-title">Watch another shop</div>
-          <p class="lead">Paste a link to a Shopify shop, or to one section of it (like its Pokémon page). It gets its own tab, watchlist and activity, and keeps watching while you're on another tab.</p>
+          <p class="lead">Paste a link to a Shopify shop, or to a section of it (like its Pokémon page). To watch several sections of one shop in one tab, paste all their links together. It gets its own tab, watchlist and activity, and keeps watching while you're on another tab.</p>
           <input type="text" id="addLink" placeholder="e.g. animalkingdoms.co.nz/collections/pokemon-tcg" autocomplete="off" style="width:100%">
           <div class="row" style="margin-top:8px">
             <input type="text" id="addName" placeholder="Tab name (optional)" autocomplete="off" maxlength="40">
@@ -2442,7 +2442,8 @@ function renderStores() {
   storesSig = sig;
   $("storeTabs").innerHTML = stores.map((s) => {
     const st = stat[s.id] || {}, locked = st.shopState === "locked" || st.shopState === "bad", on = s.id === STORE;
-    const where = s.host + (s.collection ? "/collections/" + s.collection : "");
+    const parts = (s.collection || "").split(",").filter(Boolean);
+    const where = s.host + (parts.length > 1 ? ` (${parts.length} sections: ${parts.join(", ")})` : parts.length ? "/collections/" + parts[0] : "");
     const doing = locked ? "shop locked" : st.running ? `watching every ${st.interval}s` : "not watching";
     return `<button type="button" class="store${on ? " on" : ""}${locked ? " locked" : st.running ? " watching" : ""}" role="tab" aria-selected="${on}" data-id="${esc(s.id)}" title="${esc(where + " · " + doing)}">`
       + `<i class="sdot"></i><span>${esc(s.name)}</span>`
@@ -2511,6 +2512,14 @@ $("addGo").onclick = async () => {
   }
 };
 $("addLink").onkeydown = $("addName").onkeydown = (e) => { if (e.key === "Enter") $("addGo").click(); };
+$("addLink").addEventListener("paste", (e) => { // (several links on separate lines: keep them apart, as a text box would join them up)
+  const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+  if (!/\s/.test(text.trim())) return;
+  e.preventDefault();
+  const box = $("addLink"), joined = text.trim().split(/\s+/).join(" ");
+  const before = box.value.slice(0, box.selectionStart), after = box.value.slice(box.selectionEnd);
+  box.value = before + (before && !before.endsWith(" ") ? " " : "") + joined + (after && !after.startsWith(" ") ? " " : "") + after;
+});
 
 // ---------- activity feed + status ----------
 // Every second (4 times a second while a shop's being watched, so a checkout opens the moment it's

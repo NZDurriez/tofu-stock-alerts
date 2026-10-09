@@ -1703,14 +1703,26 @@ def keyword_match(keys, title):
 
 
 def link_to_site(link):
-    """'animalkingdoms.co.nz/collections/pokemon-tcg' -> ('https://animalkingdoms.co.nz', 'pokemon-tcg')."""
-    link = link.strip()
-    if not re.match(r"^https?://", link, re.I):
-        link = "https://" + link
-    m = re.match(r"^(https?://[^/?#\s]+)(?:/collections/([^/?#\s]+))?", link, re.I)
-    if not m:
-        return None, None
-    return m.group(1).lower(), (m.group(2) or "").lower()
+    """'animalkingdoms.co.nz/collections/pokemon-tcg' -> ('https://animalkingdoms.co.nz', 'pokemon-tcg'). Several
+    links to one shop's sections (spaces, commas or new lines between them) -> all of them: ('…', 'a,b,c')."""
+    shop, sections = None, []
+    for one in re.split(r"[\s,]+", (link or "").strip()):
+        if not one:
+            continue
+        if not re.match(r"^https?://", one, re.I):
+            one = "https://" + one
+        m = re.match(r"^(https?://[^/?#\s]+)(?:/collections/([^/?#\s]+))?", one, re.I)
+        if not m:
+            return None, None
+        if shop and m.group(1).lower() != shop:
+            return None, "different shops"
+        shop = m.group(1).lower()
+        section = (m.group(2) or "").lower()
+        if not section:
+            return shop, ""  # (the whole shop)
+        if section not in sections:
+            sections.append(section)
+    return shop, ",".join(sections)
 
 
 def load_stores():
@@ -1737,6 +1749,8 @@ def make_watcher(s):
 def add_store(link, name):
     """Add another Shopify shop as a tab. Returns (watcher, error)."""
     shop, collection = link_to_site(link or "")
+    if collection == "different shops":
+        return None, "Those links are for different shops. Add each shop on its own (several sections of one shop can go in one tab)."
     if not shop:
         return None, "Paste the shop's link, e.g. https://animalkingdoms.co.nz/collections/pokemon-tcg"
     same = next((w for w in list(WATCHERS.values()) if (w.site.shop, w.site.collection) == (shop, collection)), None)
@@ -1754,14 +1768,15 @@ def add_store(link, name):
     while len(labels) > 2 and labels[0] in ("www", "shop", "store", "m"):
         labels = labels[1:]
     base = labels[0]
-    sid = re.sub(r"[^a-z0-9]+", "-", f"{base}-{collection}" if collection else base).strip("-") or "shop"
+    sid = re.sub(r"[^a-z0-9]+", "-", f"{base}-{collection}" if collection and "," not in collection else base).strip("-") or "shop"
     while sid in WATCHERS:
         sid += "-2"
     name = re.sub(r"[^\w &'.-]", "", (name or "").strip())[:40] or base.replace("-", " ").title()
     w = make_watcher({"id": sid, "name": name, "shop": shop, "collection": collection})
     WATCHERS[sid] = w
     save_stores()
-    w.log("info", f"Added {name} ({site.host}{'/collections/' + collection if collection else ''}).")
+    w.log("info", f"Added {name} ({site.host}" + (f": {', '.join(site.sections)}" if len(site.sections) > 1
+                                                  else f"/collections/{collection}" if collection else "") + ").")
     w.load_soon()
     return w, None
 

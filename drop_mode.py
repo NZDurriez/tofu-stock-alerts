@@ -32,8 +32,9 @@ COOKIES = os.path.join(tempfile.gettempdir(), "tofu_drop_cookies.txt")
 
 
 class Site:
-    """One shop to watch: its address, optionally just one collection of it
-    (e.g. a store's Pokémon section), and its own cookie jar (for its password)."""
+    """One shop to watch: its address, optionally just some collections of it
+    (e.g. a store's Elite Trainer Boxes and its booster bundles: "a,b"), and its
+    own cookie jar (for its password)."""
 
     def __init__(self, shop, collection="", cookies=None):
         self.shop = shop.rstrip("/")
@@ -43,9 +44,37 @@ class Site:
         self.cookies = cookies or os.path.join(tempfile.gettempdir(), "drop_cookies_" + re.sub(r"[^\w.-]", "_", host) + ".txt")
 
     @property
+    def sections(self):
+        """The collections watched ([] for the whole shop)."""
+        return [c for c in self.collection.split(",") if c]
+
+    @property
+    def product_urls(self):
+        """The products.json to read: the whole shop's, or each section's."""
+        return [f"{self.shop}/collections/{c}/products.json" for c in self.sections] or [f"{self.shop}/products.json"]
+
+    @property
     def products(self):
-        """The products.json to read: the whole shop, or just the collection."""
-        return (f"{self.shop}/collections/{self.collection}" if self.collection else self.shop) + "/products.json"
+        """The (first) products.json: enough to see whether the shop's locked."""
+        return self.product_urls[0]
+
+
+def merged(replies):
+    """Several sections' replies [(code, body)] as one check: (code, body). Any refusal stands for them all
+    (a lock, or "slow down"); a product in two sections counts once."""
+    for code, _ in replies:
+        if code != 200:
+            return code, ""
+    seen, products = set(), []
+    for _, body in replies:
+        try:
+            for p in json.loads(body).get("products", []):
+                if p.get("id") not in seen:
+                    seen.add(p.get("id"))
+                    products.append(p)
+        except ValueError:
+            return 0, ""
+    return 200, json.dumps({"products": products})
 
 
 DEFAULT = Site(SHOP, os.environ.get("DROP_COLLECTION", ""), COOKIES)  # Mr Tofu's shop, unless told otherwise
@@ -111,6 +140,13 @@ def login_status(password, site=None):
 
 def fetch(etag=None, site=None):
     site = site or DEFAULT
+    if len(site.product_urls) > 1:  # (each section, then together: no "nothing's changed" shortcut)
+        replies, headers = [], {}
+        for url in site.product_urls:
+            code, headers, body = curl([f"{url}?limit=250&_={time.time_ns()}", "-H", "Accept: application/json", "--compressed"], site.cookies)
+            replies.append((code, body))
+        code, body = merged(replies)
+        return code, {k: v for k, v in headers.items() if k != "etag"}, body
     args = [f"{site.products}?limit=250&_={time.time_ns()}", "-H", "Accept: application/json", "--compressed"]
     if etag:
         args += ["-H", f"If-None-Match: {etag}"]
@@ -151,7 +187,13 @@ class Checker:
         yield from self._one_by_one(etag, interval, count)
 
     def _kept_open(self, etag, interval, count):
-        rate = f"{round(1 / interval)}/s" if interval < 1 else f"{round(60 / interval)}/m"
+        urls = self.site.product_urls
+        per = len(urls)  # (several sections: each check reads them all, one after another)
+        if per > 1:
+            etag = None
+            rate = f"{round(60 * per / interval)}/m"
+        else:
+            rate = f"{round(1 / interval)}/s" if interval < 1 else f"{round(60 / interval)}/m"
         # -N writes each reply straight through; the line saying how the check went
         # goes via stderr, which curl doesn't hold back (stdout would sit on it
         # until the next check), into the same pipe, so it always follows its reply.
@@ -161,19 +203,26 @@ class Checker:
         if etag:
             args += ["-H", f"If-None-Match: {etag}"]
         stamp = time.time_ns()
-        args += [f"{self.site.products}?limit=250&_={stamp}{i}" for i in range(count)]
+        args += [f"{url}?limit=250&_={stamp}{i}{j}" for i in range(count) for j, url in enumerate(urls)]
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace")
         with self.lock:
             self.proc = proc
-        self.failed, got, body, ended = False, 0, [], False
+        self.failed, got, body, ended, part = False, 0, [], False, []
         try:
             for line in proc.stdout:
                 if line.startswith(MARK):
                     code, tag, retry = (line[len(MARK):].strip().split("\t") + ["", ""])[:3]
-                    got += 1
-                    yield (int(code) if code.isdigit() else 0), tag.strip(), "".join(body).strip(), retry.strip()
+                    code, text = (int(code) if code.isdigit() else 0), "".join(body).strip()
                     body = []
+                    if per > 1:  # (one check is every section: together, they're the shop)
+                        part.append((code, text, retry.strip()))
+                        if len(part) < per:
+                            continue
+                        code, text = merged([(c, t) for c, t, _ in part])
+                        tag, retry, part = "", max((r for _, _, r in part), key=len), []
+                    got += 1
+                    yield code, tag.strip(), text, retry.strip()
                 else:
                     body.append(line)
             ended = True
