@@ -549,18 +549,17 @@ class Watcher:
             items = self.not_in_store(items, products or self.products)
         if not items:
             return
-        for vid, _, _ in items:
-            self.opened.add(vid)
-        url = f"{self.site.shop}/cart/" + ",".join(f"{vid}:{q}" for vid, q, _ in items)
-        names = "; ".join(f"x{q} {t[:60]}" for _, q, t in items)
-        # The page normally opens it (in the browser with Shop Pay). If the page
-        # hasn't checked in for a few seconds (closed, or a background tab the
-        # browser has slowed down), open it here in the default browser straight
-        # away, and tell the page so it doesn't open a second copy later.
+        # Each in its own checkout (its own tab), so you can pay for the ones you want, one by one.
+        # The page normally opens them (in the browser with Shop Pay). If the page hasn't checked in
+        # for a few seconds (closed, or a background tab the browser has slowed down), they're opened
+        # here in the default browser straight away, and the page is told so it doesn't open them again.
         by_program = time.time() - self.last_poll > 3
-        self.log("checkout", f"⚡ Opening checkout: {names}{timing}", url, openedByProgram=by_program)
-        if by_program:
-            webbrowser.open(url)
+        for vid, q, title in items:
+            self.opened.add(vid)
+            url = f"{self.site.shop}/cart/{vid}:{q}"
+            self.log("checkout", f"⚡ Opening checkout: x{q} {title[:60]}{timing}", url, openedByProgram=by_program)
+            if by_program:
+                webbrowser.open(url)
         play_alert()
 
     def target(self, pid, it, wanted=None, words=None):
