@@ -235,6 +235,7 @@ class Watcher:
         self.logged_in = False
         self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
+        self.pv = 0             # goes up whenever the products change (the page's product list refreshes)
         self.etag = None
         self.picks = {}         # product id -> (qty, max price or None)
         self.words = []         # [(words, qty, text, max price or None)]
@@ -292,6 +293,7 @@ class Watcher:
             self.etag = headers.get("etag")
             self.products, self.left_out = dm.summarise_all(body)
             self.products = self.without_events(self.products)
+            self.pv += 1
             self.checked_at = time.time()
             return True, len(self.products)
         return False, code
@@ -459,6 +461,7 @@ class Watcher:
         if found:
             gone = [self.products[pid]["title"] for pid in found if pid in self.products]
             self.products = {pid: it for pid, it in self.products.items() if pid not in found}
+            self.pv += 1
             if gone:
                 self.left_out["in-store only"] = self.left_out.get("in-store only", 0) + len(gone)
                 self.log("info", f"Leaving out {len(gone)} in-store only listing{'' if len(gone) == 1 else 's'} (the shop's "
@@ -978,12 +981,15 @@ class Watcher:
             if not self.products:  # (watching began before the shop had loaded: this is the starting point, not a
                 # list of changes, so it's what starting to watch does: in stock already opens checkout, pings, once)
                 self.products = current
+                self.pv += 1
                 self.checkout(self.ready_items(), " · ⏱️ straight away: it was already in stock when the shop loaded")
                 self.ping_friends({}, current, first=True)
                 return 0.0
             ready = self.went_live(self.products, current)
             self.checkout(ready, self.reaction(ready, current, before) if ready else "", current)  # (yours first, then the pings)
             self.ping_friends(self.products, current, sold_out=recent)
+            if current != self.products:  # (a shop read in sections answers in full each time: only real changes count)
+                self.pv += 1
             self.products = current
             return 0.0  # carry on, comparing against this new version
         if code == 401:
@@ -2108,7 +2114,7 @@ class Handler(BaseHTTPRequestHandler):
                 evs = [e for e in W.events if e["id"] > since]
             self.send_json({"events": evs, "running": W.running, "loggedIn": W.logged_in,
                             "shopState": W.shop_state, "passwordSaved": bool(W.password),
-                            "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval, "boot": BOOT,
+                            "products": len(W.products), "lastCheck": W.last_check, "interval": W.interval, "boot": BOOT, "pv": W.pv,
                             "wlVersion": W.wl_version, "live": LIVE.on, "lists": LISTS.seq})
         elif path == "/api/watchlist":
             self.send_json({"items": W.watchlist, "version": W.wl_version})

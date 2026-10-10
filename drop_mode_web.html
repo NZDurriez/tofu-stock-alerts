@@ -1700,6 +1700,21 @@ $("kwInput").onkeydown = (e) => { if (e.key === "Enter") addKeywords(); };
 // The ticks stay while you search or switch category.
 const ticked = new Map(); // product id -> {id, title, image, qty}
 let lastResults = { items: [], total: 0 }, lastQuery = "";
+// The product list keeps itself up to date: when the shop changes (something sells out, comes back, or is
+// added), it's fetched again, keeping where you'd scrolled to and what's ticked. Not while you're clicking in it.
+let shownPv = {}, pvWaiting = false;
+async function liveResults(sid, pv) {
+  if (sid !== STORE || $("exactBody").hidden || pv === shownPv[sid]) return;
+  const list = $("results");
+  if (list.contains(document.activeElement) || list.matches(":active") || pvWaiting) {
+    if (!pvWaiting) { pvWaiting = true; setTimeout(() => { pvWaiting = false; liveResults(sid, pv); }, 1500); }
+    return;
+  }
+  shownPv[sid] = pv;
+  const scroll = list.scrollTop;
+  await search();
+  list.scrollTop = scroll;
+}
 async function search() {
   const q = $("search").value.trim();
   if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
@@ -2590,7 +2605,9 @@ async function pollOnce(sid) {
     $("stopBtn").disabled = !r.running;
     const speed = [...$("interval").options].find((o) => +o.value === r.interval);
     if (r.running && speed && document.activeElement !== $("interval")) $("interval").value = speed.value; // (each shop has its own speed)
-    if (r.products && !hadProducts) { hadProducts = true; search(); refreshInfo(); kwPreview(); loadCats(); } // the shop is loaded
+    if (r.products && !hadProducts) { hadProducts = true; shownPv[sid] = r.pv; search(); refreshInfo(); kwPreview(); loadCats(); } // the shop is loaded
+    else if (r.pv !== undefined && shownPv[sid] !== undefined) liveResults(sid, r.pv);
+    else if (r.pv !== undefined) shownPv[sid] = r.pv;
     if (r.wlVersion && wlVersion && r.wlVersion !== wlVersion) { wlVersion = r.wlVersion; loadWatchlist(); } // changed in another window
     if (r.lists !== undefined && r.lists !== listsSeq) { listsSeq = r.lists; loadFriends().catch(() => {}); loadDiscord().catch(() => {}); } // someone changed their list in Discord
     renderLoginState();
