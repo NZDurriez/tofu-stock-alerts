@@ -625,6 +625,15 @@ const dropModeState = async (env) => (await (await wishlistStore(env).fetch("htt
 // Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for
 // DROP_MODE_QUIET_SECONDS (normally 30; it's looked at about every 15 seconds, so it's said within a minute),
 // say so in the alerts channel, once, with a ping, and again when it's back.
+// 1339 -> "22 hours 19 minutes", 3000 -> "2 days 2 hours", 5 -> "5 minutes"
+function howLong(mins) {
+  const n = (x, word) => `${x} ${word}${x === 1 ? "" : "s"}`;
+  if (mins < 60) return n(mins, "minute");
+  const days = Math.floor(mins / 1440), hours = Math.floor((mins % 1440) / 60), rest = mins % 60;
+  if (days) return n(days, "day") + (hours ? ` ${n(hours, "hour")}` : "");
+  return n(hours, "hour") + (rest ? ` ${n(rest, "minute")}` : "");
+}
+
 async function watchDropMode(env) {
   if (!env.WISHLISTS || !(env.DROP_MODE_KEY || "").trim()) return;
   const seen = ((await (await wishlistStore(env).fetch("https://wishlists/seen")).json()) || {}).seen || 0;
@@ -646,7 +655,7 @@ async function watchDropMode(env) {
     const mins = Math.max(1, Math.round((now - meta.dropModeDown) / 60000));
     delete meta.dropModeDown;
     await env.STATE.put("meta", JSON.stringify(meta));
-    await notify(env, `✅ Drop mode is back (it was off for about ${mins} minute${mins === 1 ? "" : "s"}).`);
+    await notify(env, `✅ Drop mode is back (it was off for about ${howLong(mins)}).`);
   }
 }
 
