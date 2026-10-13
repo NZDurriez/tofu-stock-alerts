@@ -236,6 +236,8 @@ class Watcher:
         self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
         self.pv = 0             # goes up whenever the products change (the page's product list refreshes)
+        self.back_file = os.path.join(dm.SOUND_DIR, f"restocks-{sid}.json")
+        self.back_at = load_restocks(self.back_file)  # product id -> when drop mode saw it come back in stock
         self.etag = None
         self.picks = {}         # product id -> (qty, max price or None)
         self.words = []         # [(words, qty, text, max price or None)]
@@ -410,6 +412,17 @@ class Watcher:
         if start:
             threading.Thread(target=self.page_check_run, daemon=True).start()
 
+    def note_restocks(self, old, current):
+        """Note when products come in stock (new, or back), for the product list's "Added in the last…" filter."""
+        now, changed = time.time(), False
+        for pid, it in current.items():
+            if dm.buyable(it) and (pid not in old or not dm.buyable(old[pid])):
+                self.back_at[pid], changed = now, True
+        if changed:
+            cutoff = now - 60 * 86400  # (two months is plenty)
+            self.back_at = {pid: at for pid, at in self.back_at.items() if at > cutoff}
+            save_page_checks(self.back_file, self.back_at)
+
     def not_in_store(self, items, products):
         """Checkout items [(variant, qty, title)] less any whose page says in-store only, looking now at the pages
         not yet looked at (about a second each, only the first time a product's seen)."""
@@ -515,13 +528,15 @@ class Watcher:
                                for cid, name, _ in self.cat_cfg],
                 "liveGames": [g for g in games if g["count"]]}
 
-    def listing(self, flt, cat="", game="", limit=40, everything=False, sort="new"):
+    def listing(self, flt, cat="", game="", limit=40, everything=False, sort="new", within=0.0):
         """The exact-product search: what you can buy right now (or with
         everything, sold-out and coming-soon ones too), optionally in one of
         Tofu's categories, and one game (for the live stream). Newest listings
         first, or (sort "az") in stock first, then A to Z, or by price ("low":
-        cheapest first, "high": dearest first; anything without a price last)."""
+        cheapest first, "high": dearest first; anything without a price last). within: only what's been added
+        (listed, or back in stock) in the last that many days."""
         keys = keywords(flt)
+        since = time.time() - within * 86400 if within else 0
         in_cat = self.categories.get(cat) if cat else None
         out = []
         for pid, it in self.products.items():
@@ -533,7 +548,14 @@ class Watcher:
                 continue
             if game and game_of(it["title"]) != game:
                 continue
-            out.append(card(pid, it, self.site.shop))
+            c = card(pid, it, self.site.shop)
+            back = self.back_at.get(pid, 0)
+            if back > listed_at(c["listed"]):  # (came back in stock since it was listed)
+                c["back"] = datetime.fromtimestamp(back, timezone.utc).isoformat()
+            c["added"] = max(back, listed_at(c["listed"]))
+            if since and c["added"] < since:
+                continue
+            out.append(c)
         if sort == "az":
             out.sort(key=lambda x: ({"buyable": 0, "soon": 1}.get(x["state"], 2), x["title"]))  # in stock first
         elif sort in ("low", "high"):
@@ -546,7 +568,7 @@ class Watcher:
             priced.sort(key=lambda x: (price_of(x) * (-1 if sort == "high" else 1), x["title"]))
             out = priced + sorted((x for x in out if price_of(x) is None), key=lambda x: x["title"])
         else:
-            out.sort(key=lambda x: (-listed_at(x["listed"]), x["title"]))  # newest listings first
+            out.sort(key=lambda x: (-x["added"], x["title"]))  # newest first (listed, or back in stock)
         return {"items": out[:limit], "total": len(out)}
 
     def watch_info(self, ids, texts):
@@ -986,6 +1008,7 @@ class Watcher:
                 self.ping_friends({}, current, first=True)
                 return 0.0
             ready = self.went_live(self.products, current)
+            self.note_restocks(self.products, current)
             self.checkout(ready, self.reaction(ready, current, before) if ready else "", current)  # (yours first, then the pings)
             self.ping_friends(self.products, current, sold_out=recent)
             if current != self.products:  # (a shop read in sections answers in full each time: only real changes count)
@@ -1053,6 +1076,15 @@ def page_says_in_store(site, handle):
         return bool(PAGE_IN_STORE.search(text(re.sub(r"(?s)<script.*?</script>|<style.*?</style>", " ", page))))
     except (OSError, RuntimeError, ValueError):
         return None
+
+
+def load_restocks(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): float(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
 
 
 def load_page_checks(path):
@@ -2068,7 +2100,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/products":
             from urllib.parse import unquote_plus
             self.send_json(W.listing(unquote_plus(params.get("filter", "")), params.get("cat", ""), params.get("game", ""),
-                                     everything=params.get("all") == "1", sort=params.get("sort", "new")))
+                                     everything=params.get("all") == "1", sort=params.get("sort", "new"),
+                                     within=float(params.get("within", "0") or 0)))
         elif path == "/api/categories":
             self.send_json(W.category_list(everything=params.get("all") == "1"))
         elif path == "/api/password":
