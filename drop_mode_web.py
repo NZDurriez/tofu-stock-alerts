@@ -18,6 +18,7 @@ import re
 import secrets
 import socket
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -236,6 +237,7 @@ class Watcher:
         self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
         self.pv = 0             # goes up whenever the products change (the page's product list refreshes)
+        self.feed_next, self.feed_busy, self.feed_said = None, False, False  # Mr Tofu's list, for the bot
         self.etag = None
         self.picks = {}         # product id -> (qty, max price or None)
         self.words = []         # [(words, qty, text, max price or None)]
@@ -409,6 +411,46 @@ class Watcher:
             start, self.page_busy = not self.page_busy, True
         if start:
             threading.Thread(target=self.page_check_run, daemon=True).start()
+
+    def feed_bot(self, body):
+        """Mr Tofu's list, which drop mode just saw change: sent to the bot (Mr Tofu's shop often turns the bot away),
+        which posts what's new in its alerts channel and notes it for the drop stats. One at a time; the latest wins."""
+        if self.id != "tofu" or self.site.collection or not DISCORD.bot_key:
+            return
+        with self.lock:
+            self.feed_next = body
+            if self.feed_busy:
+                return
+            self.feed_busy = True
+        threading.Thread(target=self.feed_run, daemon=True).start()
+
+    def feed_run(self):
+        while True:
+            with self.lock:
+                body, self.feed_next = self.feed_next, None
+                if body is None:
+                    self.feed_busy = False
+                    return
+            try:
+                if len(json.loads(body).get("products", [])) >= 250:  # (not the whole shop: the bot would think things went)
+                    continue
+                with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
+                    f.write(body)
+                try:
+                    res = subprocess.run(["curl", "-sS", "--max-time", "30", "-H", "@-", "-H", "Content-Type: application/json",
+                                          "-H", f"X-Via-Password: {'1' if self.shop_state == 'ok' else '0'}",
+                                          "--data-binary", f"@{f.name}", "-w", "\n%{http_code}", f"{BOT_URL}/feed"],
+                                         input=f"Authorization: Bearer {DISCORD.bot_key}\n".encode(), capture_output=True, timeout=40)
+                finally:
+                    os.unlink(f.name)
+                code = res.stdout.decode("utf-8", "replace").rsplit("\n", 1)[-1].strip()
+                ok = code == "200"
+            except (OSError, ValueError, subprocess.SubprocessError):
+                ok = False
+            if ok == self.feed_said:  # (said once when it stops working, and once when it's working again)
+                self.feed_said = not ok
+                self.log("ok" if ok else "warn", "Passing Mr Tofu's changes to the bot again." if ok else
+                         "Couldn't pass Mr Tofu's changes to the bot (for its alerts channel and drop stats). Still trying.")
 
     def not_in_store(self, items, products):
         """Checkout items [(variant, qty, title)] less any whose page says in-store only, looking now at the pages
@@ -990,6 +1032,7 @@ class Watcher:
             self.ping_friends(self.products, current, sold_out=recent)
             if current != self.products:  # (a shop read in sections answers in full each time: only real changes count)
                 self.pv += 1
+                self.feed_bot(body)
             self.products = current
             return 0.0  # carry on, comparing against this new version
         if code == 401:

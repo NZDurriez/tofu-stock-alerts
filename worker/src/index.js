@@ -171,10 +171,13 @@ export default {
       }
       const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
+      let fedAt = 0; // (when drop mode last sent Mr Tofu's list)
+      try { fedAt = (await (await wishlistStore(run).fetch("https://wishlists/fed")).json()).at || 0; } catch {}
       for (let k = 0; k < n; k++) {
         const wait = start + (k * 60000) / n - Date.now();
         if (wait > 0) await sleep(wait);
         if (Date.now() - start > 50000) break; // (done before the next minute's run starts: they don't overlap)
+        if (Date.now() - fedAt < 90000) continue; // (drop mode's watching Mr Tofu and passing it on: nothing to do)
         try {
           await runCheck(run);
         } catch (err) {
@@ -194,6 +197,7 @@ export default {
     if (url.pathname === "/stats" && request.method === "GET") return Response.json(await dropStats(env), { headers: { "Cache-Control": "no-store" } });
     if (url.pathname === "/stats/track" && request.method === "POST") return trackProduct(request, env);
     if (url.pathname === "/dropmode/poll" || url.pathname === "/dropmode/done") return dropModeHelper(request, env, url);
+    if (url.pathname === "/feed" && request.method === "POST") return dropModeFeed(request, env);
     // Tiny status page; nothing secret in it
     const meta = await getMeta(env);
     return new Response(statusLines(meta).join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -235,7 +239,7 @@ async function runCheck(env, opts = {}) {
   });
   let products;
   try {
-    products = await fetchProducts(null, fetchOpts("pub"));
+    products = opts.products || await fetchProducts(null, fetchOpts("pub")); // (drop mode's list, if it sent one)
   } catch (err) {
     if (!(err && err.locked)) {
       await recordFailure(env, meta, err);
@@ -274,6 +278,12 @@ async function runCheck(env, opts = {}) {
   }
 
   let metaChanged = false;
+  if (!opts.products) delete MEMO.busySince;
+  if (meta.busyWarned && !opts.products) {
+    await notify(env, "✅ I can see Mr Tofu's shop again: my own checks are getting through.");
+    delete meta.busyWarned;
+    metaChanged = true;
+  }
   if (meta.locked && !products.viaPassword) {
     await notify(env, `${ping} 🔓 **MR TOFU'S SHOP IS OPEN AGAIN!** ${SHOP}\nAnything new will follow below with ATC / ⚡ buttons.`.trim());
     delete meta.locked;
@@ -339,6 +349,27 @@ async function runCheck(env, opts = {}) {
     `Checked ${Object.keys(current).length} products (${inStock} in stock)${via}: ` +
     (found.length ? `${found.length} alert${found.length > 1 ? "s" : ""} sent to the channel.` : "nothing new.")
   );
+}
+
+// Drop mode (with DROP_MODE_KEY) sends Mr Tofu's products.json whenever it sees it change: Mr Tofu's shop often
+// turns the bot away ("too many requests" from Cloudflare's shared addresses), and drop mode on the owner's PC gets
+// in and looks every half second. It goes through the same check as the bot's own (posts in the channel, the drop
+// stats, the saved state), so a change already seen isn't posted again.
+async function dropModeFeed(request, env) {
+  const key = (env.DROP_MODE_KEY || "").trim();
+  if (!key) return new Response("Drop mode's key isn't set up on the bot yet.", { status: 503 });
+  if (!sameText(request.headers.get("Authorization") || "", `Bearer ${key}`)) return new Response("forbidden", { status: 403 });
+  let list;
+  try {
+    list = JSON.parse(await request.text()).products;
+  } catch {
+    return Response.json({ error: "That isn't a products.json." }, { status: 400 });
+  }
+  if (!Array.isArray(list) || !list.length || list.length >= 250) return Response.json({ error: "Not the whole shop." }, { status: 400 });
+  await wishlistStore(env).fetch("https://wishlists/fed", { method: "POST" });
+  const run = { ...env, STATE: withMemory(env.STATE) };
+  const said = await runCheck(run, { products: Object.assign(list, { viaPassword: request.headers.get("X-Via-Password") === "1" }) });
+  return Response.json({ ok: true, said });
 }
 
 // The helper on the owner's PC (drop_mode_helper.py, with DROP_MODE_KEY): every few seconds it says how drop
@@ -658,8 +689,17 @@ async function watchDropMode(env) {
 
 async function recordFailure(env, meta, err) {
   console.log("Check failed:", String(err));
-  if (err && err.busy) return; // rate-limited this minute; just try again next minute
   const now = Date.now();
+  if (err && err.busy) { // "too many requests": often just this minute (kept in memory, so it costs no KV writes)
+    MEMO.busySince = MEMO.busySince || now;
+    if (!meta.busyWarned && now - MEMO.busySince > OUTAGE_WARN_MS) {
+      await notify(env, "⚠️ Mr Tofu's shop has been turning me away (\"too many requests\") for 15 minutes, so I can't see it myself. "
+        + "While drop mode's running on your PC it passes along what it sees, so this channel keeps getting new stock. I'll say when I can see it again.");
+      meta.busyWarned = true;
+      await env.STATE.put("meta", JSON.stringify(meta));
+    }
+    return;
+  }
   if (!meta.failingSince) {
     meta.failingSince = new Date(now).toISOString();
     await env.STATE.put("meta", JSON.stringify(meta));
@@ -1038,6 +1078,10 @@ export class WishlistStore {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/seen") return Response.json({ seen: this.seen || (await this.state.storage.get("seen")) || 0 });
+    if (url.pathname === "/fed") { // when drop mode last sent Mr Tofu's list (kept in memory)
+      if (request.method === "POST") this.fedAt = Date.now();
+      return Response.json({ at: this.fedAt || 0 });
+    }
     if (url.pathname.startsWith("/dm/")) return this.dropMode(url, request);
     if (url.pathname === "/events") return this.events(request);
     if (request.method === "PUT") {
