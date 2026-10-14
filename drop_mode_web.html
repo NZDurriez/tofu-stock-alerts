@@ -1093,16 +1093,35 @@ async function streamOn() {
   }
   playerReady = false;
   player = new Twitch.Player("player", { channel: CHANNEL, parent: [location.hostname], autoplay: true, muted: false, width: "100%", height: "100%" });
-  player.addEventListener(Twitch.Player.READY, () => { playerReady = true; });
+  player.addEventListener(Twitch.Player.READY, () => { playerReady = true; keepSound(); });
   player.addEventListener(Twitch.Player.PAUSE, () => { pausedByYou = !document.hidden; });
-  player.addEventListener(Twitch.Player.PLAY, () => { pausedByYou = false; });
+  player.addEventListener(Twitch.Player.PLAY, () => { pausedByYou = false; keepSound(); });
+  player.addEventListener(Twitch.Player.PLAYING, keepSound);
   const frame = $("player").querySelector("iframe");
   if (frame) frame.title = "Mr Tofu's live stream";
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden || !player) return;
+  if (!player) return;
   setTimeout(() => { try { if (!pausedByYou && player.isPaused()) player.play(); } catch {} }, 300);
 });
+// Keep it playing whatever: a muted stream is paused by the browser when you switch tabs, so (where the browser
+// lets drop mode play sound) the player's never left muted, and every couple of seconds, on this tab or not, a
+// stream that stopped without you pausing it is started again. Pause it yourself and it stays paused.
+let soundAllowed = false; // (this browser lets drop mode play sound without a click)
+function keepSound() {
+  if (!player || !playerReady || !(soundAllowed || soundDone)) return;
+  try {
+    if (player.getMuted()) player.setMuted(false);
+    if (player.getVolume() < 0.01) player.setVolume(0.25);
+  } catch {}
+}
+setInterval(() => {
+  if (!player || !playerReady || pausedByYou) return;
+  try {
+    keepSound();
+    if (player.isPaused()) player.play();
+  } catch {}
+}, 2000);
 $("popChat").onclick = (e) => { if (window.open(e.currentTarget.href, "tofuchat", "width=380,height=640")) e.preventDefault(); };
 // The stream's sound. Browsers start a stream muted until you've clicked on the page, and pause a
 // muted stream whenever you switch to another tab or window (Chrome 145 and up, so Brave too); with
@@ -1130,7 +1149,7 @@ $("soundOn").onclick = restartWithSound;
 // with drop mode allowed), the stream started with sound, so there's nothing to switch on (and no reload).
 // A blink of silence tells: it only plays if sound's allowed.
 new Audio("data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==")
-  .play().then(() => { if (!soundDone) { soundDone = true; showSound(); } }).catch(() => {});
+  .play().then(() => { soundAllowed = true; keepSound(); if (!soundDone) { soundDone = true; showSound(); } }).catch(() => {});
 document.addEventListener("pointerdown", firstTouch, true);
 document.addEventListener("keydown", firstTouch, true);
 setInterval(showSound, 2000);
