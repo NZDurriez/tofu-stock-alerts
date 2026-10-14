@@ -141,6 +141,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // our own writes in memory and read those first. Stops repeat alerts between
 // the several checks a run makes. What's read is kept too (a run lasts a minute),
 // so checking every few seconds stays well inside the free plan's daily KV reads.
+const MEMO = globalThis.__stockMemo || (globalThis.__stockMemo = {}); // kept while this copy of the bot runs
+
 function withMemory(kv) {
   const mem = new Map();
   return {
@@ -169,17 +171,10 @@ export default {
       }
       const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
-      const every = Math.max(1, Math.round(n / 4)); // (and is drop mode still there? about every 15 seconds)
       for (let k = 0; k < n; k++) {
         const wait = start + (k * 60000) / n - Date.now();
         if (wait > 0) await sleep(wait);
-        if (k && k % every === 0) {
-          try {
-            await watchDropMode(run);
-          } catch (err) {
-            console.log("Couldn't look for drop mode:", String(err));
-          }
-        }
+        if (Date.now() - start > 50000) break; // (done before the next minute's run starts: they don't overlap)
         try {
           await runCheck(run);
         } catch (err) {
@@ -228,8 +223,11 @@ async function runCheck(env, opts = {}) {
   const meta = await getMeta(env);
   const ping = (env.DISCORD_PING || "").trim();
   const cookie = await env.STATE.get("cookie");
-  const storedHash = await env.STATE.get("hash");
-  const etags = JSON.parse((await env.STATE.get("etags")) || "{}"); // { pub, pw }
+  // (The shop list's fingerprint and its ETag only save work between checks, so they're kept in memory, not in
+  // KV: KV's free plan allows 1,000 writes a day, and the shop's list changes often. A fresh copy of the bot
+  // just does one full look first.)
+  const storedHash = MEMO.hash || null;
+  const etags = MEMO.etags || (MEMO.etags = {}); // { pub, pw }
   const fetchOpts = (mode) => ({
     pages: meta.pageCount || 1,
     skipHash: opts.force ? null : storedHash,
@@ -296,7 +294,6 @@ async function runCheck(env, opts = {}) {
   const saveEtag = async () => {
     if (products.etag && products.etag !== etags[mode]) {
       etags[mode] = products.etag;
-      await env.STATE.put("etags", JSON.stringify(etags));
     }
   };
   if (products.unchanged) {
@@ -335,7 +332,7 @@ async function runCheck(env, opts = {}) {
     meta.pageCount = products.pageCount;
     await env.STATE.put("meta", JSON.stringify(meta));
   }
-  if (products.hash !== storedHash) await env.STATE.put("hash", products.hash);
+  MEMO.hash = products.hash;
   await saveEtag();
   const inStock = Object.values(current).filter((i) => i.available).length;
   return (
@@ -623,7 +620,7 @@ async function refreshStatsPanel(env) {
 const dropModeState = async (env) => (await (await wishlistStore(env).fetch("https://wishlists/dm/state")).json()) || {};
 
 // Drop mode on the owner's PC reads the wishlists every few seconds while it's running. If that stops for
-// DROP_MODE_QUIET_SECONDS (normally 30; it's looked at about every 15 seconds, so it's said within a minute),
+// DROP_MODE_QUIET_SECONDS (normally 30; it's looked at once a minute, so it's said within about a minute and a half),
 // say so in the alerts channel, once, with a ping, and again when it's back.
 // 1339 -> "22 hours 19 minutes", 3000 -> "2 days 2 hours", 5 -> "5 minutes"
 function howLong(mins) {
