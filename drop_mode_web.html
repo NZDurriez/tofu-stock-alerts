@@ -764,7 +764,6 @@ button.col-link{background:none;font:500 13px Inter,sans-serif}
         <div id="exactBody" hidden>
           <div class="exactopts" style="margin-top:2px">
             <label class="checkline"><input type="checkbox" id="showSold"><span>Show out of stock</span></label>
-            <span class="sortset"><label for="addedSel">Added</label> <select id="addedSel" title="Only what's been listed, or come back in stock, in this time"><option value="0">Any time</option><option value="1">Last 24 hours</option><option value="3">Last 3 days</option><option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option></select></span>
             <span class="sortset"><label for="sortSel">Sort</label> <select id="sortSel"><option value="new">Newest first</option><option value="az">A–Z</option><option value="low">Price: low to high</option><option value="high">Price: high to low</option></select> <span class="tipicon" tabindex="0" aria-label="How this works">i<span class="tiptext" role="tooltip" id="exactLead"></span></span></span>
           </div>
           <div class="cats" id="cats" role="group" aria-label="Categories"></div>
@@ -992,16 +991,6 @@ $("showSold").onchange = () => {
 // Sort: newest listings first (with when each went up), in stock first then A to Z, or by price (remembered)
 let sortBy = "new";
 try { const s = localStorage.getItem("dropSort"); if (["az", "low", "high"].includes(s)) sortBy = s; } catch {}
-// Added: only what's been listed, or come back in stock, lately (remembered)
-let addedWithin = 0;
-try { addedWithin = +localStorage.getItem("dropAdded") || 0; } catch {}
-$("addedSel").value = String(addedWithin);
-if ($("addedSel").value !== String(addedWithin)) { addedWithin = 0; $("addedSel").value = "0"; }
-$("addedSel").onchange = () => {
-  addedWithin = +$("addedSel").value;
-  try { localStorage.setItem("dropAdded", String(addedWithin)); } catch {}
-  search();
-};
 $("sortSel").value = sortBy;
 $("sortSel").onchange = () => {
   sortBy = $("sortSel").value;
@@ -1748,7 +1737,7 @@ async function liveResults(sid, pv) {
 async function search() {
   const q = $("search").value.trim();
   if (!lastProducts) { $("results").innerHTML = '<div class="empty">Load the shop first.</div>'; return; }
-  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game) + (showSold ? "&all=1" : "") + "&sort=" + sortBy + (addedWithin ? "&within=" + addedWithin : ""));
+  const sid = STORE, r = await api("/api/products?filter=" + encodeURIComponent(q) + "&cat=" + encodeURIComponent(cat) + "&game=" + encodeURIComponent(game) + (showSold ? "&all=1" : "") + "&sort=" + sortBy);
   if (sid !== STORE || q !== $("search").value.trim()) return; // a newer search is on its way (or switched tabs)
   lastResults = r; lastQuery = q;
   renderResults();
@@ -1761,8 +1750,7 @@ function renderResults() {
     html += `<div class="bridge"><span>Sold out or not listed yet? Catch it with keywords:</span>
       <button class="secondary" id="useKw">Watch "${esc(q)}" as keywords</button></div>`;
   } else {
-    const order = ({ new: "newest first", low: "cheapest first", high: "priciest first" }[sortBy] || (showSold ? "in stock first, then A–Z" : "A–Z"))
-      + (addedWithin ? `, added in the last ${addedWithin === 1 ? "24 hours" : addedWithin + " days"}` : "");
+    const order = { new: "newest first", low: "cheapest first", high: "priciest first" }[sortBy] || (showSold ? "in stock first, then A–Z" : "A–Z");
     html += where
       ? `<div class="resnote" style="border-top:0">${showSold ? `Everything in ${esc(where)}` : `In stock in ${esc(where)}`}, ${order}. Tick several to add them together.</div>`
       : `<div class="resnote" style="border-top:0">${showSold ? "Everything in the shop" : "Everything in stock right now"}, ${order}. Type to search, or tick several to add them together.</div>`;
@@ -1773,8 +1761,7 @@ function renderResults() {
       <input type="checkbox" class="pick" ${already ? "disabled" : ""} aria-label="Tick ${esc(it.title)}">
       ${thumb(it)}
       <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a>
-        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}${(sortBy === "new" || addedWithin) && it.back && listedDate(it.back) ? `<span class="listed">Back in stock ${esc(listedDate(it.back))}</span>`
-          : (sortBy === "new" || addedWithin) && it.listed && listedDate(it.listed) ? `<span class="listed">Listed ${esc(listedDate(it.listed))}</span>` : ""}</div>
+        <div class="meta">${badgeHtml[it.state]}${it.price ? "$" + esc(it.price) : ""}${limitBadge(it)}${sortBy === "new" && it.listed && listedDate(it.listed) ? `<span class="listed">Listed ${esc(listedDate(it.listed))}</span>` : ""}</div>
         <div class="acts"><span class="lbl">Buy</span>${qtyButtons(sel ? sel.qty : 1, it.limit)}<button class="watchbtn${already ? " done" : ""}" ${already ? "disabled" : ""}>${already ? "✓ Watching" : "+ Watch"}</button></div></div>
     </div>`;
   }).join("");
