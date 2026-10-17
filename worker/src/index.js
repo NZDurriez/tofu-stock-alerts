@@ -171,13 +171,20 @@ export default {
       }
       const n = Math.max(1, Math.min(12, parseInt(env.CHECKS_PER_MINUTE || "4", 10) || 4));
       const start = Date.now();
-      let fedAt = 0; // (when drop mode last sent Mr Tofu's list)
-      try { fedAt = (await (await wishlistStore(run).fetch("https://wishlists/fed")).json()).at || 0; } catch {}
+      // Mr Tofu's covered while drop mode's watching it (the helper on the PC says so every few seconds) or has
+      // just sent its list: then drop mode passes changes on, and the bot doesn't need to look itself
+      let covered = () => false;
+      try {
+        const fedAt = (await (await wishlistStore(run).fetch("https://wishlists/fed")).json()).at || 0;
+        const h = (await dropModeState(run)).helper;
+        const watching = !!(h && h.watching && Date.now() - h.at < 45000);
+        covered = () => watching || Date.now() - fedAt < 90000;
+      } catch {}
       for (let k = 0; k < n; k++) {
         const wait = start + (k * 60000) / n - Date.now();
         if (wait > 0) await sleep(wait);
         if (Date.now() - start > 50000) break; // (done before the next minute's run starts: they don't overlap)
-        if (Date.now() - fedAt < 90000) continue; // (drop mode's watching Mr Tofu and passing it on: nothing to do)
+        if (covered()) continue; // (drop mode's watching Mr Tofu and passing it on: nothing to do)
         try {
           await runCheck(run);
         } catch (err) {

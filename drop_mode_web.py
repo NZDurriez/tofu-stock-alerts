@@ -237,7 +237,7 @@ class Watcher:
         self.shop_state = None   # open / locked / ok / bad (from the last login)
         self.products = {}      # id -> summary (last full fetch)
         self.pv = 0             # goes up whenever the products change (the page's product list refreshes)
-        self.feed_next, self.feed_busy, self.feed_said = None, False, False  # Mr Tofu's list, for the bot
+        self.feed_next, self.feed_busy, self.feed_said = False, False, False  # Mr Tofu's list, for the bot (None: fetch it)
         self.etag = None
         self.picks = {}         # product id -> (qty, max price or None)
         self.words = []         # [(words, qty, text, max price or None)]
@@ -427,11 +427,15 @@ class Watcher:
     def feed_run(self):
         while True:
             with self.lock:
-                body, self.feed_next = self.feed_next, None
-                if body is None:
+                body, self.feed_next = self.feed_next, False  # (False: nothing waiting)
+                if body is False:
                     self.feed_busy = False
                     return
             try:
+                if body is None:  # (starting to watch: send the shop as it is now)
+                    code, _, body = dm.fetch(site=self.site)
+                    if code != 200:
+                        continue
                 if len(json.loads(body).get("products", [])) >= 250:  # (not the whole shop: the bot would think things went)
                     continue
                 with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as f:
@@ -909,6 +913,7 @@ class Watcher:
                 self.renew()
         else:
             self.opened, self.skipped, self.capped, self.friend_over = set(), set(), set(), set()
+            self.feed_bot(None)  # (the bot's caught up with the shop as it is now: drop mode's covering it from here)
             self.running = True
             self.gen += 1
             self.thread = threading.Thread(target=self.loop, args=(self.gen,), daemon=True)
