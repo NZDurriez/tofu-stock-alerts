@@ -159,6 +159,10 @@ export default {
   // Cron fires once a minute; spread CHECKS_PER_MINUTE checks across it.
   // Unchanged checks are cheap (fingerprint only), so this fits the free plan.
   async scheduled(event, env, ctx) {
+    // Paused until PAUSED_UNTIL (a date): no shop checks, panel updates or pings until then, and it picks up by
+    // itself afterwards. (Discord commands still work: they don't run from here.)
+    const pausedUntil = Date.parse(env.PAUSED_UNTIL || "");
+    if (pausedUntil && Date.now() < pausedUntil) return;
     const run = { ...env, STATE: withMemory(env.STATE) };
     ctx.waitUntil((async () => {
       await registerCommands(run);

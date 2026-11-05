@@ -10,6 +10,8 @@ crons = ["* * * * *"]
 [vars]
 # Checks per cron run (cron fires every minute): 12 = every 5 seconds. Max 12.
 CHECKS_PER_MINUTE = "1"
+# The once-a-minute job is paused until this time (it resumes by itself); "" to run it normally
+PAUSED_UNTIL = "2026-11-12T00:00:00+13:00"
 DISCORD_PING = "<@147963835339243521>"
 DISCORD_OWNER_ID = "147963835339243521"
 # Discord app for slash commands (both values are public; the bot token is a secret)
