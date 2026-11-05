@@ -133,6 +133,8 @@ def login_status(password, site=None):
     code, _, _ = curl([f"{site.products}?limit=1&_={time.time_ns()}"], site.cookies)
     if code == 200:
         return "open"
+    if code != 401:  # (only 401 is the password lock: a 403 bot check or a 429 "slow down" is the shop turning us away)
+        return "blocked"
     if not password:
         return "locked"
     return "ok" if login(password, site) else "bad"

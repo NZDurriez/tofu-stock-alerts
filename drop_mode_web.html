@@ -1226,6 +1226,7 @@ function renderLoginState() {
     open: ["info", passwordSaved ? "Shop is open, so no password is needed. Yours is saved and will be used if it locks." : "Shop is open, so no password is needed."],
     locked: ["warn", "🔒 The shop is locked. Enter the password to see behind the lock."],
     bad: ["warn", "That password didn't work. Check it and try again."],
+    blocked: ["warn", "The shop is turning drop mode away right now (its bot check, or “slow down”), so drop mode can't see it. It isn't password-locked."],
   }[shopState] || ["", "Not loaded yet."];
   el.className = "loginState" + (msg[0] ? " " + msg[0] : "");
   el.innerHTML = `<span>${esc(msg[1])}</span><span class="row">`
@@ -2356,7 +2357,7 @@ async function pollOnce(sid) {
     renderStores();
     if (!draw) return;
     running = r.running; lastProducts = r.products; shopState = r.shopState; loggedIn = r.loggedIn; passwordSaved = r.passwordSaved;
-    const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"] }[shopState];
+    const shopText = { ok: ["Behind the password", "good"], open: ["Shop open", "good"], locked: ["Shop locked", "warn"], bad: ["Wrong password", "warn"], blocked: ["Shop turning drop mode away", "warn"] }[shopState];
     setChip("sShop", shopText ? shopText[0] : (r.products ? "Shop loaded" : "Shop not loaded"),
       shopText ? shopText[1] + (shopText[1] === "good" ? " live" : "") : "");
     setChip("sRun", r.running ? `Watching every ${r.interval}s` : "Not watching", r.running ? "good live" : "");

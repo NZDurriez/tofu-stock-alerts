@@ -324,7 +324,7 @@ class Watcher:
         self.shop_state = dm.login_status(password, self.site)  # open / locked / ok / bad
         self.logged_in = self.shop_state == "ok"
         # Keep a password we couldn't check yet (shop open) so it's tried if the shop locks
-        self.password = password if self.shop_state in ("ok", "open") else ""
+        self.password = password if self.shop_state in ("ok", "open", "blocked") else ""
         before = self.products
         ok, info = self.refresh()
         if ok and unchanged == (self.shop_state, self.password, info):  # loaded again: one line, not the lot
@@ -336,6 +336,8 @@ class Watcher:
                 "open": ("info", "The shop isn't locked right now, so no password is needed."
                          + (" I'll try yours automatically if it locks." if password else "")),
                 "locked": ("warn", "The shop is locked. Enter the password to see behind the lock."),
+                "blocked": ("warn", "The shop is turning drop mode away right now (its bot check, or \"slow down\"), so drop mode "
+                                    "can't see it. It isn't password-locked. Drop mode keeps trying."),
             }[self.shop_state])
             if ok:
                 self.log("info", f"Shop has {info} products{self.left_out_text()}.")
