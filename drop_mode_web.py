@@ -527,23 +527,40 @@ class Watcher:
     def load_categories(self):
         """Which products are in each of the shop's menu headers (a few requests,
         done in the background after the shop loads). Only Mr Tofu's has them."""
-        self.cats_at = 0.0
-        found = {cid: set().union(*(self.collection_ids(h) for h in handles)) for cid, _, handles in self.cat_cfg}
+        found, failed = {}, False
+        for cid, _, handles in self.cat_cfg:
+            parts = []
+            for h in handles:
+                parts.append(self.collection_ids(h))
+                time.sleep(1)  # (a second apart: a burst of these is what gets "slow down")
+            if any(x is None for x in parts):  # (the shop turned one away: keep what we had, or "don't know")
+                failed = True
+                found[cid] = self.categories.get(cid)
+            else:
+                found[cid] = set().union(*parts)
         if self.events_collection:  # (and what's in the events section, to leave out)
-            self.event_ids = self.collection_ids(self.events_collection)
-            self.products = self.without_events(self.products)
-        self.categories, self.cats_at = found, time.time()
+            ids = self.collection_ids(self.events_collection)
+            if ids is not None:
+                self.event_ids = ids
+                self.products = self.without_events(self.products)
+        # (if any were turned away, try again in a minute rather than ten)
+        self.categories, self.cats_at = found, time.time() - (540 if failed else 0)
 
     def collection_ids(self, handle):
-        """The ids of the products in one of the shop's collections."""
+        """The ids of the products in one of the shop's collections, or None if the shop wouldn't say (a "slow
+        down", its bot check, no answer): not the same as an empty collection."""
         ids = set()
         for page in range(1, 5):
             try:
                 code, _, body = dm.curl([f"{self.site.shop}/collections/{handle}/products.json?limit=250&page={page}",
                                          "-H", "Accept: application/json", "--compressed"], self.site.cookies)
-                batch = json.loads(body).get("products", []) if code == 200 else []
+                if code == 404:  # (no such collection: empty)
+                    return ids
+                if code != 200:
+                    return None
+                batch = json.loads(body).get("products", [])
             except Exception:
-                batch = []
+                return None
             ids.update(str(p["id"]) for p in batch)
             if len(batch) < 250:
                 break
@@ -556,10 +573,11 @@ class Watcher:
             self.load_categories_soon()
         in_stock = {pid for pid, it in self.products.items() if dm.buyable(it)}
         pool = set(self.products) if everything else in_stock  # what the counts count
-        live = [game_of(self.products[pid]["title"]) for pid in self.categories.get("live", set()) & pool]
+        live = [game_of(self.products[pid]["title"]) for pid in (self.categories.get("live") or set()) & pool]
         games = [{"id": gid, "name": name, "count": live.count(gid)} for gid, name, _ in GAMES + [("other", "Other", [])]]
         return {"loading": not self.cats_at and bool(self.products),
-                "categories": [{"id": cid, "name": name, "count": len(self.categories.get(cid, set()) & pool)}
+                "categories": [{"id": cid, "name": name,  # (None: not known yet, so no number shown)
+                                "count": None if self.categories.get(cid) is None else len(self.categories[cid] & pool)}
                                for cid, name, _ in self.cat_cfg],
                 "liveGames": [g for g in games if g["count"]]}
 
@@ -570,7 +588,7 @@ class Watcher:
         first, or (sort "az") in stock first, then A to Z, or by price ("low":
         cheapest first, "high": dearest first; anything without a price last)."""
         keys = keywords(flt)
-        in_cat = self.categories.get(cat) if cat else None
+        in_cat = (self.categories.get(cat) or set()) if cat else None
         out = []
         for pid, it in self.products.items():
             if not everything and not dm.buyable(it):
