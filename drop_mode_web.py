@@ -451,7 +451,7 @@ class Watcher:
                     os.unlink(f.name)
                 code = res.stdout.decode("utf-8", "replace").rsplit("\n", 1)[-1].strip()
                 ok = code == "200"
-            except (OSError, ValueError, subprocess.SubprocessError):
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):  # (RuntimeError: the shop didn't answer)
                 ok = False
             if ok == self.feed_said:  # (said once when it stops working, and once when it's working again)
                 self.feed_said = not ok
