@@ -1722,15 +1722,17 @@ async function testAlert(request, env) {
   try {
     items = (await fetchProducts((await env.STATE.get("cookie")) || null)).map(summarise);
   } catch {} // (locked, or busy: the test still goes, without a product)
-  const item = items.find((it) => it.available && it.image) || items.find((it) => it.available) || items[0];
+  // Up to three products in stock (with pictures, if there are), so the test shows a card each, as a real alert would
+  const picks = [...items.filter((it) => it.available && it.image), ...items.filter((it) => it.available && !it.image)].slice(0, 3);
+  if (!picks.length && items[0]) picks.push(items[0]);
   const payload = {
     username: "Mr Tofu Stock Watch",
     content: "🔔 Test: new listings and restocks show up here like this. (Only a test: nothing's changed in the shop.)",
     allowed_mentions: { parse: [] },
   };
-  if (item) {
-    const [{ embeds }] = alertMessages([["restock", item, null]], keywords(env), null);
-    embeds[0].author.name = "🔔 Test · " + embeds[0].author.name;
+  if (picks.length) {
+    const [{ embeds }] = alertMessages(picks.map((it) => ["restock", it, null]), keywords(env), null);
+    for (const e of embeds) if (e.author) e.author.name = "🔔 Test · " + e.author.name;
     payload.embeds = embeds;
   }
   try {
@@ -1738,7 +1740,7 @@ async function testAlert(request, env) {
   } catch (err) {
     return Response.json({ error: `Couldn't post in the alerts channel (${err.message}). Check the bot's DISCORD_WEBHOOK_URL.` }, { status: 502 });
   }
-  return Response.json({ ok: true, item: item ? item.title : null });
+  return Response.json({ ok: true, item: picks.map((it) => it.title).join("; ") || null });
 }
 
 async function postWebhook(env, payload) {
