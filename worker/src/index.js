@@ -1782,12 +1782,28 @@ function gridField(kind, item, note, kw) {
 
 // Returns [{ embeds, count }] messages: a full card for a single alert, or
 // grid cards (tiles + a 2×2 picture gallery) when several land together.
+// Discord counts these characters toward its 6,000 per message (all of its embeds together)
+const embedSize = (e) => (e.title || "").length + (e.description || "").length + ((e.footer && e.footer.text) || "").length
+  + ((e.author && e.author.name) || "").length + (e.fields || []).reduce((n, f) => n + f.name.length + f.value.length, 0);
+
 function alertMessages(found, kw, lockNote) {
-  if (found.length === 1) {
-    const [kind, item, note] = found[0];
-    return [{ embeds: [embed(kind, item, [note, lockNote].filter(Boolean).join("\n") || null, kw)], count: 1 }];
+  if (found.length <= 25) { // (a card each, with its own picture: up to 10 in a message, within Discord's 6,000 characters)
+    const messages = [];
+    let embeds = [], size = 0;
+    found.forEach(([kind, item, note], i) => {
+      const e = embed(kind, item, [note, i === 0 ? lockNote : null].filter(Boolean).join("\n") || null, kw);
+      const n = embedSize(e);
+      if (embeds.length && (embeds.length >= 10 || size + n > 5500)) {
+        messages.push({ embeds, count: embeds.length });
+        embeds = []; size = 0;
+      }
+      embeds.push(e);
+      size += n;
+    });
+    if (embeds.length) messages.push({ embeds, count: embeds.length });
+    return messages;
   }
-  const messages = [];
+  const messages = []; // (a big burst: the compact grid, so the channel isn't flooded)
   let fields = [], images = [], size = 0, loud = false;
   const flush = () => {
     if (!fields.length) return;
