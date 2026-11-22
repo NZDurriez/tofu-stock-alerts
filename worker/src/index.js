@@ -1707,7 +1707,7 @@ function embed(kind, item, note, kw) {
   if (fast) fields.push({ name: "⚡ Lightning checkout (straight to payment)", value: fast, inline: false });
   const e = { author: { name: label }, title: item.title.slice(0, 256), url: `${SHOP}/products/${item.handle}`, color, fields };
   if (note) e.description = note;
-  if (item.image) e.thumbnail = { url: item.image };
+  if (item.image) e.image = { url: item.image }; // (full size: and a card with a big picture is always full width, so they line up)
   return e;
 }
 
