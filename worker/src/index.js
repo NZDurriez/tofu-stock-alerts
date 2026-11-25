@@ -289,11 +289,13 @@ async function runCheck(env, opts = {}) {
   }
 
   let metaChanged = false;
-  if (!opts.products) delete MEMO.busySince;
-  if (meta.busyWarned && !opts.products) {
-    await notify(env, "✅ I can see Mr Tofu's shop again: my own checks are getting through.");
-    delete meta.busyWarned;
-    metaChanged = true;
+  if (!opts.products) {
+    const s = await shopSeen(env, true);
+    if (meta.busyWarned && s.okSince && Date.now() - s.okSince >= SEE_AGAIN_MS) { // (steadily, not one lucky check)
+      await notify(env, "✅ I can see Mr Tofu's shop again: my own checks have been getting through for 10 minutes.");
+      delete meta.busyWarned;
+      metaChanged = true;
+    }
   }
   if (meta.locked && !products.viaPassword) {
     await notify(env, `${ping} 🔓 **MR TOFU'S SHOP IS OPEN AGAIN!** ${SHOP}\nAnything new will follow below with ATC / ⚡ buttons.`.trim());
@@ -698,15 +700,27 @@ async function watchDropMode(env) {
   }
 }
 
+// Whether the bot's own checks get through, kept in the wishlist store's memory: one picture for every copy of the
+// bot (each copy's own memory gave a different answer, so the warning came and went), and no storage writes.
+const CANT_SEE_MS = 30 * 60000, SEE_AGAIN_MS = 10 * 60000;
+async function shopSeen(env, ok) {
+  try {
+    return await (await wishlistStore(env).fetch("https://wishlists/shopseen", { method: "POST", body: JSON.stringify({ ok }) })).json();
+  } catch {
+    return { lastOk: Date.now(), okSince: 0 }; // (can't tell: say nothing)
+  }
+}
+
 async function recordFailure(env, meta, err) {
   console.log("Check failed:", String(err));
   const now = Date.now();
-  if (err && err.busy) { // "too many requests": often just this minute (kept in memory, so it costs no KV writes)
-    MEMO.busySince = MEMO.busySince || now;
-    if (!meta.busyWarned && now - MEMO.busySince > OUTAGE_WARN_MS) {
-      await notify(env, "⚠️ Mr Tofu's shop has been turning me away (\"too many requests\") for 15 minutes, so I can't see it myself. "
+  if (err && err.busy) { // "too many requests": often just this minute
+    const s = await shopSeen(env, false);
+    if (!meta.busyWarned && now - s.lastOk > CANT_SEE_MS && now - (meta.busyWarnedAt || 0) > 6 * 3600000) {
+      await notify(env, "⚠️ Mr Tofu's shop has been turning me away (\"too many requests\") for 30 minutes, so I can't see it myself. "
         + "While drop mode's running on your PC it passes along what it sees, so this channel keeps getting new stock. I'll say when I can see it again.");
       meta.busyWarned = true;
+      meta.busyWarnedAt = now;
       await env.STATE.put("meta", JSON.stringify(meta));
     }
     return;
@@ -1089,6 +1103,17 @@ export class WishlistStore {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/seen") return Response.json({ seen: this.seen || (await this.state.storage.get("seen")) || 0 });
+    if (url.pathname === "/shopseen") { // the bot's own checks of Mr Tofu: when one last got through, and since when they all have
+      const { ok } = await request.json(), now = Date.now();
+      this.shopFrom = this.shopFrom || now; // (counted from here if none have yet, so a fresh start doesn't warn at once)
+      if (ok) {
+        this.lastOk = now;
+        this.okSince = this.okSince || now;
+      } else {
+        this.okSince = 0;
+      }
+      return Response.json({ lastOk: this.lastOk || this.shopFrom, okSince: this.okSince || 0 });
+    }
     if (url.pathname === "/fed") { // when drop mode last sent Mr Tofu's list (kept in memory)
       if (request.method === "POST") this.fedAt = Date.now();
       return Response.json({ at: this.fedAt || 0 });
